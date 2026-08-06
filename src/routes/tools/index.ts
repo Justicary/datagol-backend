@@ -1,0 +1,34 @@
+import { FastifyInstance, FastifyRequest } from 'fastify';
+import { availabilityToolRoute } from './availability.js';
+import { bookingToolRoute } from './booking.js';
+import { rescheduleToolRoute } from './reschedule.js';
+
+/**
+ * Registro de `routes/tools/**` (Fase 5). Encapsulado en su propio contexto
+ * de Fastify para que el hook de latencia de abajo aplique solo a estas
+ * rutas: son las únicas del sistema con presupuesto contractual de latencia
+ * (AGENTS.md §3 — p95 < 300 ms, p99 < 600 ms). Una regresión aquí es un bug
+ * de severidad alta, no una optimización pendiente.
+ */
+export async function toolRoutes(fastify: FastifyInstance) {
+    fastify.addHook('onRequest', async (request: FastifyRequest) => {
+        (request as FastifyRequest & { toolStartedAt?: bigint }).toolStartedAt = process.hrtime.bigint();
+    });
+
+    fastify.addHook('onResponse', async (request, reply) => {
+        const started = (request as FastifyRequest & { toolStartedAt?: bigint }).toolStartedAt;
+        const durationMs = started ? Number(process.hrtime.bigint() - started) / 1_000_000 : undefined;
+        request.log.info({
+            route: request.routeOptions?.url ?? request.url,
+            statusCode: reply.statusCode,
+            durationMs,
+            msg: 'tool call completado',
+        });
+    });
+
+    await fastify.register(availabilityToolRoute);
+    await fastify.register(bookingToolRoute);
+    await fastify.register(rescheduleToolRoute);
+}
+
+export default toolRoutes;

@@ -1,0 +1,29 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno
+.env*
+!.env.example
+
+# Secretos locales
+.secrets-local/
+
+# Build
+dist/
+
+# Cobertura y reportes
+coverage/
+reports/
+
+# Stryker Mutator
+.stryker-tmp/
+
+# IDE y Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

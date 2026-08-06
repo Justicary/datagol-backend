@@ -1,0 +1,23 @@
+{
+  "testRunner": "vitest",
+  "tsconfigFile": "tsconfig.stryker.json",
+  "appendPlugins": [
+    "@stryker-mutator/vitest-runner"
+  ],
+  "mutate": [
+    "src/services/rate-service.ts",
+    "src/services/usage-registration.ts"
+  ],
+  "thresholds": {
+    "high": 90,
+    "low": 75,
+    "break": null
+  },
+  "reporters": ["html", "clear-text", "progress"],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "concurrency": 4,
+  "timeoutMS": 60000,
+  "tempDirName": ".stryker-tmp"
+}
