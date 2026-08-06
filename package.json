@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "type-check": "tsc --noEmit",
+    "build": "tsc",
     "lint": "eslint .",
     "stryker": "stryker"
   },

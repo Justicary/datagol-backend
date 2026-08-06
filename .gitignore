@@ -4,6 +4,7 @@ node_modules/
 # Variables de entorno
 .env*
 !.env.example
+env-vars.yaml
 
 # Secretos locales
 .secrets-local/
