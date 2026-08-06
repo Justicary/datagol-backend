@@ -264,6 +264,18 @@ export async function setFeatureOverride(
 
     clearEntitlementsCache(organizationId);
 
+    // El agente queda desincronizado de los entitlements vigentes hasta que
+    // reprovisionAgent() (abajo) limpie esta marca. Si el UPDATE falla, se
+    // registra pero no aborta la operación — el override ya quedó aplicado
+    // y auditado, que es lo que no puede perderse.
+    const { error: reprovisionFlagErr } = await supabaseAdmin
+        .from('organizations')
+        .update({ agent_reprovision_pending: true })
+        .eq('id', organizationId);
+    if (reprovisionFlagErr) {
+        logger.warn({ err: reprovisionFlagErr, organizationId }, '[Entitlements] No se pudo marcar agent_reprovision_pending');
+    }
+
     // Sincronizar reprovisión de agente
     try {
         const { reprovisionAgent } = await import('./agent-provisioning.js');
@@ -305,6 +317,9 @@ export async function setOrganizationPlan(
         .update({
             plan_key: planKey,
             max_concurrent_calls: plan.max_concurrent_calls,
+            // El agente queda desincronizado de los entitlements vigentes
+            // hasta que reprovisionAgent() (abajo) limpie esta marca.
+            agent_reprovision_pending: true,
             updated_at: new Date().toISOString(),
         })
         .eq('id', organizationId);

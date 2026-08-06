@@ -57,10 +57,14 @@ export async function reprovisionAgent(organizationId: string): Promise<{ succes
         '[AgentProvisioning] Reprovisionando agente para org'
     );
 
+    // agent_reprovision_pending se limpia en el MISMO UPDATE que puede
+    // fallar: si este UPDATE falla, la marca debe seguir en true (el
+    // `if (error)` de abajo ya devuelve success:false sin tocarla).
     const { error } = await supabaseAdmin
         .from('organizations')
         .update({
             updated_at: new Date().toISOString(),
+            agent_reprovision_pending: false,
         })
         .eq('id', organizationId);
 

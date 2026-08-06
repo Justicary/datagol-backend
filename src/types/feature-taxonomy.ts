@@ -45,6 +45,7 @@ export const ALL_PLAN_KEYS: readonly PlanKey[] = Object.values(PLAN_KEYS);
 export const FEATURE_KEYS = {
     HOT_LEAD_ALERTS: 'hot_lead_alerts',
     EMAIL_SUMMARIES: 'email_summaries',
+    WHATSAPP: 'whatsapp',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

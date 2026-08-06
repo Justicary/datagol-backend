@@ -153,6 +153,42 @@ export async function setSecret(
     }
 }
 
+export interface SecretStatus {
+    present: boolean;
+    rotatedAt: string | null;
+}
+
+/**
+ * Reporta qué claves de `organization_secrets` existen para una organización
+ * y cuándo rotaron, SIN tocar Vault — solo la tabla de referencias. Pensado
+ * para endpoints de readiness/estado (routes/organization-onboarding.ts) que
+ * no necesitan el valor del secreto, solo saber si ya fue dado de alta.
+ *
+ * Las claves ausentes en `organization_secrets` no aparecen en el objeto
+ * devuelto — el llamador decide qué claves espera y las trata como
+ * `present: false` si faltan.
+ */
+export async function listSecretStatus(organizationId: string): Promise<Record<string, SecretStatus>> {
+    if (!organizationId) {
+        return {};
+    }
+
+    const { data, error } = await supabaseAdmin
+        .from('organization_secrets')
+        .select('secret_key, rotated_at')
+        .eq('organization_id', organizationId);
+
+    if (error || !data) {
+        return {};
+    }
+
+    const result: Record<string, SecretStatus> = {};
+    for (const row of data) {
+        result[row.secret_key] = { present: true, rotatedAt: row.rotated_at ?? null };
+    }
+    return result;
+}
+
 /**
  * Limpia la caché de secretos en memoria.
  */

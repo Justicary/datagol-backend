@@ -7,6 +7,7 @@ import entitlementsPlugin from './plugins/entitlements.js';
 import adminFeaturesRoutes from './routes/admin/features.js';
 import adminMeteringRoutes from './routes/admin/metering.js';
 import organizationRoutes from './routes/organization.js';
+import organizationOnboardingRoutes from './routes/organization-onboarding.js';
 import vapiRoutes from './routes/vapi.js';
 import calendarRoutes from './routes/calendar.js';
 import voiceRoutes from './routes/voice.js';
@@ -129,6 +130,9 @@ export async function buildApp() {
 
     // Registro modular de otros plugins y rutas de la API
     await app.register(organizationRoutes);
+    // Onboarding de organización (self-service DFY) — reemplaza el legacy
+    // POST /api/organizations/onboard eliminado de organizationRoutes.
+    await app.register(organizationOnboardingRoutes);
     await app.register(vapiRoutes);
     await app.register(calendarRoutes);
     await app.register(voiceRoutes);
