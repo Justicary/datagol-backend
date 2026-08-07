@@ -31,7 +31,7 @@ API de orquestación para una plataforma de Agentes de IA de Voz y Automatizaci�
 - **Procesamiento de Archivos e Importaciones**:
   - `exceljs` (^4.4.0) y `@types/exceljs` (^1.3.2) para ingesta de archivos `.xlsx` y `.csv` en memoria.
 - **Colas y Caché Asíncrona**:
-  - `bullmq` (^5.81.2) + `ioredis` (^5.11.1) para gestión de tareas en segundo plano.
+  - `pg-boss` (^12.27.0) sobre el mismo Postgres para todo trabajo diferido (ver §8). Nada de BullMQ/Redis: un solo motor de colas, sin infraestructura adicional que mantener.
 - **Configuración y Entorno**:
   - `dotenv` (^17.4.2) para carga de variables de entorno.
 - **pnpm ^10.5.2** — package manager obligatorio (no usar `npm` ni `yarn`).

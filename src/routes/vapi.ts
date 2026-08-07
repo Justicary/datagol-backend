@@ -2,7 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { searchKnowledgeBase } from '../services/rag.js';
 import { handleCalendarToolCall } from '../services/calendar.js';
-import { enqueueCallProcessingJob } from '../queues/callProcessor.js';
+import { PROCESS_VAPI_CALL_COMPLETED_QUEUE } from '../jobs/process-vapi-call-completed.js';
 
 interface VapiWebhookBody {
     message?: {
@@ -301,21 +301,16 @@ export const vapiRoutes: FastifyPluginAsync = async (fastify) => {
                     fastify.log.info({ logId: insertedLog?.id }, 'Reporte de llamada registrado exitosamente en call_logs');
                 }
 
-                // Encolar trabajo de procesamiento pos-llamada asíncrono
-                enqueueCallProcessingJob({
-                    callLogId: insertedLog?.id,
-                    vapiCallId: vapiCallId || undefined,
-                    organizationId: organizationId,
-                    callerPhone: callerPhone,
-                    agentPhone: agentPhone,
-                    durationSeconds: durationSeconds,
-                    transcript: transcript,
-                    summary: summary,
-                    cost: cost,
-                    metadata: message,
-                }).catch((jobErr: any) => {
-                    fastify.log.error(jobErr, 'Error al encolar procesamiento asíncrono pos-llamada');
-                });
+                // Encolar trabajo de procesamiento pos-llamada asíncrono (pg-boss)
+                if (insertedLog?.id) {
+                    try {
+                        await fastify.pgBoss.send(PROCESS_VAPI_CALL_COMPLETED_QUEUE, { callLogId: insertedLog.id });
+                    } catch (jobErr: any) {
+                        fastify.log.error(jobErr, 'Error al encolar procesamiento asíncrono pos-llamada');
+                    }
+                } else {
+                    fastify.log.error('No se pudo encolar el procesamiento pos-llamada: call_logs no se insertó');
+                }
 
                 return reply.status(200).send({ received: true });
             }
