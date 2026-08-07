@@ -40,6 +40,41 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     // permite duplicados). Ver docs/tasks/onboarding-endpoints.md.
 
     /**
+     * GET /api/organizations/:id/public-profile
+     * Endpoint DELIBERADAMENTE SIN AUTENTICACIÓN — a diferencia de todo lo
+     * demás en este archivo. Alimenta la página pública /privacy/[orgId] del
+     * frontend (aviso de privacidad LFPDPPP para los clientes finales de la
+     * PyME, no para usuarios del dashboard). La RLS de `organizations` exige
+     * membresía, así que sin este endpoint un visitante no autenticado no
+     * puede leer name/email/address de ninguna forma.
+     *
+     * No le agregues un preHandler de auth "por si acaso": es pública por
+     * diseño (docs/tasks/public-organization-profile.md). Lo que la protege
+     * no es autenticación sino la whitelist explícita de columnas de abajo —
+     * NUNCA cambiar a select('*'), que filtraría elevenlabs_api_key,
+     * telnyx_api_key, whatsapp_access_token, cal_api_key, webhook_token,
+     * status y suspended_reason.
+     */
+    fastify.get<{ Params: OrganizationParams }>(
+        '/api/organizations/:id/public-profile',
+        async (request, reply) => {
+            const { id } = request.params;
+
+            const { data, error } = await supabaseAdmin
+                .from('organizations')
+                .select('name, email, address, city, state')
+                .eq('id', id)
+                .maybeSingle();
+
+            if (error || !data) {
+                return reply.status(404).send({ error: 'NotFound', message: 'Organización no encontrada.' });
+            }
+
+            return reply.send({ data });
+        }
+    );
+
+    /**
      * PUT /api/organizations/:id
      * Actualiza los datos de una organización existente en Supabase.
      */
