@@ -2,20 +2,12 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { getSecret } from './secret-service.js';
 import { SECRET_KEYS, type SecretKey } from '../types/secret-keys.js';
 import { logger } from '../lib/logger.js';
+import { FEATURE_AUDIT_ACTIONS } from '../types/feature-audit-actions.js';
 
 export interface EntitlementsCacheItem {
     enabledFeatures: Set<string>;
     expiresAt: number;
 }
-
-export const FEATURE_AUDIT_ACTIONS = {
-    ENABLED: 'enabled',
-    DISABLED: 'disabled',
-    OVERRIDDEN: 'overridden',
-    KILL_SWITCH_ENGAGED: 'kill_switch_engaged',
-    KILL_SWITCH_DISENGAGED: 'kill_switch_disengaged',
-    PLAN_CHANGED: 'plan_changed',
-} as const;
 
 const ENTITLEMENTS_CACHE_TTL_MS = 30 * 1000; // 30s TTL
 const entitlementsCache = new Map<string, EntitlementsCacheItem>();

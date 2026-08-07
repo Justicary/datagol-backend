@@ -6,6 +6,7 @@ import pgBossPlugin from './plugins/pg-boss.js';
 import entitlementsPlugin from './plugins/entitlements.js';
 import adminFeaturesRoutes from './routes/admin/features.js';
 import adminMeteringRoutes from './routes/admin/metering.js';
+import adminOrganizationsRoutes from './routes/admin/organizations.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
 import vapiRoutes from './routes/vapi.js';
@@ -157,6 +158,8 @@ export async function buildApp() {
     await app.register(adminFeaturesRoutes);
     // Fase 3.3 — Conciliación de metering
     await app.register(adminMeteringRoutes);
+    // Suspensión de organización completa y kill switch global
+    await app.register(adminOrganizationsRoutes);
 
     // Registro modular de otros plugins y rutas de la API
     await app.register(organizationRoutes);

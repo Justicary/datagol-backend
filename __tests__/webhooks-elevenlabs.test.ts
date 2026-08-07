@@ -219,6 +219,41 @@ describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
         }
     });
 
+    it('organización suspendida + firma válida → 403, sin insert en webhook_events ni job encolado', async () => {
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+
+        const { app, sendSpy } = await buildTestAppWithFakeQueue();
+        try {
+            const conversationId = 'sig-e2e-test:suspended';
+            const rawBody = JSON.stringify({
+                type: 'post_call_transcription',
+                data: { conversation_id: conversationId },
+            });
+            const signature = signPayload(rawBody, SIGNING_SECRET);
+
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${TEST_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': signature },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(403);
+            expect(response.json().error).toBe('Forbidden');
+            expect(sendSpy).not.toHaveBeenCalled();
+
+            const { data: rows } = await supabaseAdmin
+                .from('webhook_events')
+                .select('id')
+                .eq('organization_id', REAL_ORG_ID)
+                .eq('event_id', `post_call_transcription:${conversationId}`);
+            expect(rows?.length).toBe(0);
+        } finally {
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await app.close();
+        }
+    });
+
     it('idempotencia end-to-end: el mismo payload firmado entregado dos veces por HTTP solo encola el trabajo una vez', async () => {
         const { app, sendSpy } = await buildTestAppWithFakeQueue();
         try {

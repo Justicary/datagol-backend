@@ -25,8 +25,12 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
         const secretHeader = request.headers['x-tool-secret'] as string | undefined;
         const auth = await resolveToolOrganization(fastify, paramsResult.data.webhookToken, secretHeader);
         if (!auth.ok) {
+            const statusCode = auth.reason === 'suspended' ? 403 : 401;
             request.log.warn({ reason: auth.reason, route: 'reschedule', msg: 'Tool call rechazado' });
-            return reply.status(401).send({ error: 'Unauthorized', message: auth.message });
+            return reply.status(statusCode).send({
+                error: statusCode === 403 ? 'Forbidden' : 'Unauthorized',
+                message: auth.message,
+            });
         }
 
         const bodyResult = rescheduleBodySchema.safeParse(request.body);

@@ -49,13 +49,19 @@ describe('src/lib/tool-auth.ts — resolveToolOrganization', () => {
     it('rechaza con reason=invalid_token cuando el webhookToken no resuelve a ninguna organización', async () => {
         const result = await resolveToolOrganization(buildFakeFastify(), 'token-inexistente-xyz', TEST_SECRET);
         expect(result.ok).toBe(false);
-        if (!result.ok) expect(result.reason).toBe('invalid_token');
+        if (!result.ok) {
+            expect(result.reason).toBe('invalid_token');
+            expect(result.message).toBe('Token de herramienta inválido');
+        }
     });
 
     it('rechaza con reason=missing_secret cuando el header x-tool-secret está ausente', async () => {
         const result = await resolveToolOrganization(buildFakeFastify(), TEST_TOKEN, undefined);
         expect(result.ok).toBe(false);
-        if (!result.ok) expect(result.reason).toBe('missing_secret');
+        if (!result.ok) {
+            expect(result.reason).toBe('missing_secret');
+            expect(result.message).toBe('Secreto de herramienta inválido o ausente');
+        }
     });
 
     it('rechaza con reason=missing_secret cuando el header x-tool-secret no coincide', async () => {
@@ -70,6 +76,28 @@ describe('src/lib/tool-auth.ts — resolveToolOrganization', () => {
         if (result.ok) {
             expect(result.organizationId).toBe(testOrgId);
             expect(result.calEventTypeId).toBe(12345);
+        }
+    });
+
+    it('organización suspendida + secreto válido → reason=suspended', async () => {
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba tool-auth' }).eq('id', testOrgId);
+        try {
+            const result = await resolveToolOrganization(buildFakeFastify(), TEST_TOKEN, TEST_SECRET);
+            expect(result.ok).toBe(false);
+            if (!result.ok) expect(result.reason).toBe('suspended');
+        } finally {
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', testOrgId);
+        }
+    });
+
+    it('organización suspendida + secreto inválido → reason=missing_secret (el secreto se evalúa primero, no se filtra el estado de suspensión a un llamador no autenticado)', async () => {
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba tool-auth' }).eq('id', testOrgId);
+        try {
+            const result = await resolveToolOrganization(buildFakeFastify(), TEST_TOKEN, 'secreto-incorrecto');
+            expect(result.ok).toBe(false);
+            if (!result.ok) expect(result.reason).toBe('missing_secret');
+        } finally {
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', testOrgId);
         }
     });
 

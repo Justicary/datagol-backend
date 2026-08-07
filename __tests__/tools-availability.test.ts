@@ -94,6 +94,25 @@ describe('POST /tools/:webhookToken/availability', () => {
         }
     });
 
+    it('rechaza con 403 Forbidden cuando la organización está suspendida', async () => {
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/availability`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { startTime: '2026-09-01T00:00:00Z', endTime: '2026-09-02T00:00:00Z' },
+            });
+            expect(response.statusCode).toBe(403);
+            expect(response.json().error).toBe('Forbidden');
+            expect(vi.mocked(getAvailableSlots)).not.toHaveBeenCalled();
+        } finally {
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await app.close();
+        }
+    });
+
     it('contraparte de éxito: token y secreto válidos devuelven disponibilidad truncada a un máximo de dos horarios', async () => {
         vi.mocked(getAvailableSlots).mockResolvedValue([
             { time: '2026-09-01T10:00:00Z' },

@@ -89,6 +89,25 @@ describe('POST /tools/:webhookToken/reschedule', () => {
         }
     });
 
+    it('rechaza con 403 Forbidden cuando la organización está suspendida', async () => {
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/reschedule`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { customerName: 'X', customerEmail: 'x@example.invalid', newStartTime: '2026-09-10T10:00:00Z' },
+            });
+            expect(response.statusCode).toBe(403);
+            expect(response.json().error).toBe('Forbidden');
+            expect(vi.mocked(rescheduleBooking)).not.toHaveBeenCalled();
+        } finally {
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await app.close();
+        }
+    });
+
     it('cita inexistente: nombre/correo que no coinciden con ninguna cita futura responde 200 con mensaje verbalizable, sin llamar a Cal.com', async () => {
         const app = await buildTestApp();
         try {

@@ -8,6 +8,8 @@ export const FEATURE_AUDIT_ACTIONS = {
     ENABLED: 'enabled',
     DISABLED: 'disabled',
     PLAN_CHANGED: 'plan_changed',
+    SUSPENDED: 'suspended',
+    REACTIVATED: 'reactivated',
 } as const;
 
 export type FeatureAuditAction = (typeof FEATURE_AUDIT_ACTIONS)[keyof typeof FEATURE_AUDIT_ACTIONS];

@@ -6,7 +6,9 @@ import {
     setFeatureOverride,
     setOrganizationPlan,
     getFeatureAuditLog,
+    clearEntitlementsCache,
 } from '../../services/entitlements.js';
+import { FEATURE_AUDIT_ACTIONS } from '../../types/feature-audit-actions.js';
 import { PLAN_KEYS } from '../../types/feature-taxonomy.js';
 
 interface OverrideBody {
@@ -18,6 +20,11 @@ interface OverrideBody {
 
 interface PlanBody {
     plan_key: string;
+    reason: string;
+}
+
+interface KillSwitchBody {
+    globally_disabled: boolean;
     reason: string;
 }
 
@@ -198,6 +205,72 @@ export const adminFeaturesRoutes: FastifyPluginAsync = async (fastify) => {
             } catch (err: any) {
                 return reply.status(500).send({ error: err.message });
             }
+        }
+    );
+
+    /**
+     * POST /api/admin/features/:featureKey/kill-switch
+     * Kill switch global: afecta a todos los tenants a la vez. Se audita con
+     * organization_id: null (la fila es nullable exactamente para este caso).
+     */
+    fastify.post<{ Params: { featureKey: string }; Body: KillSwitchBody }>(
+        '/api/admin/features/:featureKey/kill-switch',
+        async (request, reply) => {
+            const { featureKey } = request.params;
+            const { globally_disabled, reason } = request.body || {};
+
+            if (typeof globally_disabled !== 'boolean') {
+                return reply.status(400).send({
+                    error: 'BadRequest',
+                    message: 'El campo "globally_disabled" (boolean) es obligatorio.',
+                });
+            }
+            if (!reason || typeof reason !== 'string' || reason.trim() === '') {
+                return reply.status(400).send({ error: 'BadRequest', message: 'El campo "reason" es obligatorio.' });
+            }
+
+            const { data: feature, error: featureErr } = await supabaseAdmin
+                .from('features')
+                .select('key')
+                .eq('key', featureKey)
+                .maybeSingle();
+
+            if (featureErr || !feature) {
+                return reply.status(404).send({ error: 'NotFound', message: `La feature '${featureKey}' no existe.` });
+            }
+
+            const trimmedReason = reason.trim();
+            const { error: updateErr } = await supabaseAdmin
+                .from('features')
+                .update({
+                    globally_disabled,
+                    disabled_reason: globally_disabled ? trimmedReason : null,
+                })
+                .eq('key', featureKey);
+
+            if (updateErr) {
+                return reply.status(500).send({ error: 'InternalServerError', message: updateErr.message });
+            }
+
+            const { error: auditErr } = await supabaseAdmin
+                .from('feature_audit_log')
+                .insert({
+                    organization_id: null,
+                    feature_key: featureKey,
+                    action: globally_disabled ? FEATURE_AUDIT_ACTIONS.DISABLED : FEATURE_AUDIT_ACTIONS.ENABLED,
+                    reason: trimmedReason,
+                });
+
+            if (auditErr) {
+                request.log.error({ err: auditErr, featureKey, msg: 'Error registrando auditoría de kill switch global' });
+            }
+
+            // Kill switch global: afecta a todos los tenants, se limpia todo el caché.
+            clearEntitlementsCache();
+
+            return reply.status(200).send({
+                message: `Kill switch de '${featureKey}' ${globally_disabled ? 'activado' : 'desactivado'} con éxito.`,
+            });
         }
     );
 };

@@ -62,7 +62,7 @@ export async function elevenLabsPostCallWebhookRoutes(fastify: FastifyInstance) 
         // 1. Resolver la organización por el token de la ruta, antes de leer el cuerpo.
         const { data: org, error: orgError } = await fastify.supabaseAdmin
             .from('organizations')
-            .select('id')
+            .select('id, status')
             .eq('webhook_token', webhookToken)
             .maybeSingle();
 
@@ -84,6 +84,14 @@ export async function elevenLabsPostCallWebhookRoutes(fastify: FastifyInstance) 
                 msg: 'Webhook de ElevenLabs rechazado: firma inválida',
             });
             return reply.status(401).send({ error: 'Unauthorized', message: 'Firma de webhook inválida' });
+        }
+
+        // Verificado DESPUÉS de la firma (nunca antes, mismo motivo que en
+        // tool-auth): una organización suspendida no debe generar ni
+        // call_logs ni usage_events nuevos.
+        if (org.status === 'suspended') {
+            request.log.warn({ organizationId, msg: 'Webhook de ElevenLabs rechazado: organización suspendida' });
+            return reply.status(403).send({ error: 'Forbidden', message: 'Esta organización tiene su implementación suspendida.' });
         }
 
         const eventType = extractEventType(body);

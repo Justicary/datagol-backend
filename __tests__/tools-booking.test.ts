@@ -88,6 +88,25 @@ describe('POST /tools/:webhookToken/booking', () => {
         }
     });
 
+    it('rechaza con 403 Forbidden cuando la organización está suspendida', async () => {
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { conversationId: `booking-test:${Date.now()}:suspended`, customerName: 'X', customerPhone: '+525599999999', startTime: '2026-09-01T10:00:00Z' },
+            });
+            expect(response.statusCode).toBe(403);
+            expect(response.json().error).toBe('Forbidden');
+            expect(vi.mocked(createBooking)).not.toHaveBeenCalled();
+        } finally {
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await app.close();
+        }
+    });
+
     it('contraparte de éxito: crea la cita, resuelve contact_id por teléfono normalizado y responde booked=true', async () => {
         const conversationId = `booking-test:${Date.now()}:success`;
         createdConversationIds.push(conversationId);

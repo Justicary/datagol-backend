@@ -6,7 +6,8 @@ import { SECRET_KEYS } from '../types/secret-keys.js';
 export type ToolAuthResult =
     | { ok: true; organizationId: string; calEventTypeId: number | null }
     | { ok: false; reason: 'invalid_token'; message: string }
-    | { ok: false; reason: 'missing_secret'; message: string };
+    | { ok: false; reason: 'missing_secret'; message: string }
+    | { ok: false; reason: 'suspended'; message: string };
 
 /**
  * Resuelve el tenant de una llamada a `routes/tools/**` y verifica su
@@ -31,7 +32,7 @@ export async function resolveToolOrganization(
 ): Promise<ToolAuthResult> {
     const { data: org, error } = await fastify.supabaseAdmin
         .from('organizations')
-        .select('id, cal_event_type_id')
+        .select('id, cal_event_type_id, status')
         .eq('webhook_token', webhookToken)
         .maybeSingle();
 
@@ -44,6 +45,13 @@ export async function resolveToolOrganization(
 
     if (!expectedSecret || !secretHeader || !timingSafeEqualStrings(secretHeader, expectedSecret)) {
         return { ok: false, reason: 'missing_secret', message: 'Secreto de herramienta inválido o ausente' };
+    }
+
+    // Verificado DESPUÉS de la autenticación (nunca antes): comprobarlo antes
+    // filtraría a un llamador no autenticado si la organización existe y está
+    // suspendida — información que no le corresponde.
+    if (org.status === 'suspended') {
+        return { ok: false, reason: 'suspended', message: 'Esta organización tiene su implementación suspendida.' };
     }
 
     return {
