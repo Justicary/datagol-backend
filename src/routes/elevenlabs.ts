@@ -49,7 +49,7 @@ export async function elevenLabsWebhookRoutes(fastify: FastifyInstance) {
         signedUrl: data.signed_url,
       });
     } catch (err: any) {
-      console.error('❌ Excepción al generar Signed URL de ElevenLabs:', err);
+      request.log.error({ err }, 'Excepción al generar Signed URL de ElevenLabs');
       return reply.status(500).send({ status: 'error', message: err.message });
     }
   });

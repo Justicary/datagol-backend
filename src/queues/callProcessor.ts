@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { sendCallSummaryEmail } from '../services/email.js';
+import { logger } from '../lib/logger.js';
 
 dotenv.config();
 
@@ -19,7 +20,7 @@ export const redisConnection = new Redis(redisUrl, {
 });
 
 redisConnection.on('error', (err: any) => {
-    console.warn('⚠️ Advertencia en conexión Redis:', err.message);
+    logger.warn({ err }, 'Advertencia en conexión Redis');
 });
 
 let openaiInstance: OpenAI | null = null;
@@ -74,14 +75,14 @@ export async function enqueueCallProcessingJob(callData: CallProcessingJobData) 
                 delay: 5000,
             },
         });
-        console.log(`📥 Trabajo de procesamiento encolado exitosamente. Job ID: ${job.id}`);
+        logger.info({ jobId: job.id }, 'Trabajo de procesamiento encolado exitosamente');
         return job;
     } catch (err: any) {
-        console.error('❌ Error al encolar trabajo en BullMQ:', err.message);
+        logger.error({ err }, 'Error al encolar trabajo en BullMQ');
         // Si Redis falla, procesamos la tarea directamente de forma síncrona en fallback
-        console.log('🔄 Ejecutando procesamiento en segundo plano directo (fallback sin Redis)...');
+        logger.info('Ejecutando procesamiento en segundo plano directo (fallback sin Redis)');
         processCallJobDirectly(callData).catch((fallbackErr) => {
-            console.error('❌ Error en procesamiento fallback directo:', fallbackErr.message);
+            logger.error({ err: fallbackErr }, 'Error en procesamiento fallback directo');
         });
         return null;
     }
@@ -142,12 +143,12 @@ Analiza la transcripción de la llamada y responde EXCLUSIVAMENTE con un objeto 
                 enrichedSummary += `\n\n📍 Ubicación identificada: ${locParts.join(', ')}`;
             }
 
-            console.log(`🧠 Análisis con gpt-4o-mini completado. Sentimiento: ${sentiment}`);
+            logger.info({ sentiment }, 'Análisis con gpt-4o-mini completado');
         } catch (aiErr: any) {
             if (aiErr.status === 429 || aiErr.message?.includes('quota')) {
-                console.warn('⚠️ Cuota de OpenAI agotada (429). Se usará el resumen generado por Vapi AI.');
+                logger.warn('Cuota de OpenAI agotada (429). Se usará el resumen generado por Vapi AI');
             } else {
-                console.error('⚠️ Error al generar análisis con OpenAI gpt-4o-mini:', aiErr.message);
+                logger.error({ err: aiErr }, 'Error al generar análisis con OpenAI gpt-4o-mini');
             }
         }
     }
@@ -173,7 +174,7 @@ Analiza la transcripción de la llamada y responde EXCLUSIVAMENTE con un objeto 
 
             // Fallback si la columna 'sentiment' tampoco existe en la tabla call_logs
             if (dbError && dbError.message.includes('sentiment')) {
-                console.warn('⚠️ La columna "sentiment" no existe en call_logs, actualizando únicamente "summary"...');
+                logger.warn('La columna "sentiment" no existe en call_logs, actualizando únicamente "summary"');
                 let fallbackBuilder = supabaseAdmin.from('call_logs').update({ summary: enrichedSummary });
                 if (callData.callLogId) {
                     fallbackBuilder = fallbackBuilder.eq('id', callData.callLogId);
@@ -185,12 +186,12 @@ Analiza la transcripción de la llamada y responde EXCLUSIVAMENTE con un objeto 
             }
 
             if (dbError) {
-                console.error('⚠️ Error al actualizar call_logs en Supabase:', dbError.message);
+                logger.error({ err: dbError }, 'Error al actualizar call_logs en Supabase');
             } else {
-                console.log('✅ Registro en call_logs actualizado exitosamente.');
+                logger.info('Registro en call_logs actualizado exitosamente');
             }
         } catch (dbErr: any) {
-            console.error('⚠️ Error en consulta Supabase:', dbErr.message);
+            logger.error({ err: dbErr }, 'Error en consulta Supabase');
         }
     }
 
@@ -214,10 +215,10 @@ Analiza la transcripción de la llamada y responde EXCLUSIVAMENTE con un objeto 
                     nextSteps: nextSteps,
                 });
             } else {
-                console.log(`ℹ️ La organización ${callData.organizationId} no tiene un email configurado para notificaciones.`);
+                logger.info({ organizationId: callData.organizationId }, 'La organización no tiene un email configurado para notificaciones');
             }
         } catch (emailErr: any) {
-            console.error('⚠️ Error al consultar organización o enviar correo:', emailErr.message);
+            logger.error({ err: emailErr }, 'Error al consultar organización o enviar correo');
         }
     }
 }
@@ -228,7 +229,7 @@ Analiza la transcripción de la llamada y responde EXCLUSIVAMENTE con un objeto 
 export const callWorker = new Worker<CallProcessingJobData>(
     QUEUE_NAME,
     async (job: Job<CallProcessingJobData>) => {
-        console.log(`⚙️ Procesando trabajo de llamada #${job.id}...`);
+        logger.info({ jobId: job.id }, 'Procesando trabajo de llamada');
         await processCallJobDirectly(job.data);
     },
     {
@@ -238,9 +239,9 @@ export const callWorker = new Worker<CallProcessingJobData>(
 );
 
 callWorker.on('completed', (job) => {
-    console.log(`✅ Trabajo #${job.id} procesado exitosamente.`);
+    logger.info({ jobId: job.id }, 'Trabajo procesado exitosamente');
 });
 
 callWorker.on('failed', (job, err) => {
-    console.error(`❌ Trabajo #${job?.id} falló con el error:`, err.message);
+    logger.error({ jobId: job?.id, err }, 'Trabajo falló');
 });

@@ -4,6 +4,7 @@ import {
   OutboundCallResult,
   AgentConfigParams,
 } from './voice-provider.interface.js';
+import { logger } from '../../lib/logger.js';
 
 export class ElevenLabsAdapter implements IVoiceProvider {
   private defaultApiKey: string;
@@ -53,7 +54,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
           }
         }
       } catch (err: any) {
-        console.warn('⚠️ Advertencia: No se pudo resolver automáticamente el phone_number_id de ElevenLabs:', err.message);
+        logger.warn({ err }, 'No se pudo resolver automáticamente el phone_number_id de ElevenLabs');
       }
     }
 
@@ -78,7 +79,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
       },
     };
 
-    console.log(`📡 Disparando llamada SIP Trunk vía ElevenLabs ConvAI a ${params.customerPhone}...`);
+    logger.info({ customerPhone: params.customerPhone }, 'Disparando llamada SIP Trunk vía ElevenLabs ConvAI');
 
     let response = await fetch('https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call', {
       method: 'POST',
@@ -90,7 +91,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
     });
 
     if (!response.ok && (response.status === 404 || response.status === 405)) {
-      console.log('🔄 Reintentando con endpoint alternativo /convai/phone-numbers/call...');
+      logger.info('Reintentando con endpoint alternativo /convai/phone-numbers/call');
       response = await fetch('https://api.elevenlabs.io/v1/convai/phone-numbers/call', {
         method: 'POST',
         headers: {
@@ -115,7 +116,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
     const data = (await response.json()) as Record<string, unknown>;
 
     if (!response.ok) {
-      console.error('❌ Error devuelto por ElevenLabs ConvAI API:', data);
+      logger.error({ data }, 'Error devuelto por ElevenLabs ConvAI API');
       const detailObj = data.detail as any;
       const errorMsg =
         typeof detailObj === 'object' && detailObj?.message
@@ -207,7 +208,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
 
     if (!response.ok) {
       const errorData = (await response.json()) as Record<string, unknown>;
-      console.error('❌ Error al actualizar Agente en ElevenLabs:', errorData);
+      logger.error({ errorData }, 'Error al actualizar Agente en ElevenLabs');
       return false;
     }
 

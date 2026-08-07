@@ -128,6 +128,45 @@ describe('2.2 — RPC process_call_completed', () => {
         await supabaseAdmin.from('leads').delete().eq('conversation_id', secondConversationId);
         await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', secondConversationId);
     });
+
+    it('normalización E.164: un teléfono no normalizable (null) no aborta el procesamiento — el lead se crea sin contact_id', async () => {
+        const noPhoneConversationId = `${conversationId}-no-phone`;
+        const { data, error } = await supabaseAdmin.rpc('process_call_completed', {
+            p_organization_id: REAL_ORG_ID,
+            p_conversation_id: noPhoneConversationId,
+            p_provider_call_id: noPhoneConversationId,
+            p_caller_phone_e164: null,
+            p_full_name: 'Prospecto Del Widget Web',
+            p_email: null,
+            p_business_name: null,
+            p_business_sector: null,
+            p_contact_phone_raw: 'número inválido, sin normalizar',
+            p_inquiry_reason: null,
+            p_temperature: null,
+            p_booked_appointment: false,
+            p_needs_followup: false,
+            p_followup_notes: null,
+            p_call_volume: null,
+            p_transcript: 'Cliente: Hola, escribo desde el widget.\nAgente: Claro, cuéntame.',
+            p_summary: 'Prospecto de widget web sin teléfono normalizable.',
+            p_duration_seconds: 30,
+        });
+
+        expect(error).toBeNull();
+        expect(data.lead_inserted).toBe(true);
+        expect(data.lead_id).toBeTruthy();
+        expect(data.contact_id).toBeNull();
+
+        const { data: lead } = await supabaseAdmin
+            .from('leads')
+            .select('full_name')
+            .eq('id', data.lead_id)
+            .single();
+        expect(lead?.full_name).toBe('Prospecto Del Widget Web');
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', noPhoneConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', noPhoneConversationId);
+    });
 });
 
 /**

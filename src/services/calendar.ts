@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { supabaseAdmin } from '../lib/supabase.js';
+import { logger } from '../lib/logger.js';
 
 dotenv.config();
 
@@ -56,7 +57,7 @@ export async function getAvailableSlots(
     url.searchParams.append('endTime', isoEnd);
     url.searchParams.append('timeZone', timeZone || 'America/Mexico_City');
 
-    console.log(`📅 Consultando disponibilidad en Cal.com v2: ${url.toString()}`);
+    logger.info({ url: url.toString() }, 'Consultando disponibilidad en Cal.com v2');
 
     const response = await fetch(url.toString(), {
         method: 'GET',
@@ -69,7 +70,7 @@ export async function getAvailableSlots(
 
     if (!response.ok) {
         const errText = await response.text();
-        console.error(`❌ Error Cal.com v2 GET /slots/available (${response.status}):`, errText);
+        logger.error({ status: response.status, errText }, 'Error Cal.com v2 GET /slots/available');
         throw new Error(`Error de Cal.com v2 API (${response.status}): ${errText}`);
     }
 
@@ -136,7 +137,7 @@ export async function createBooking(params: CreateBookingParams) {
         },
     };
 
-    console.log(`📌 Creando reserva en Cal.com v2:`, JSON.stringify(bodyPayload, null, 2));
+    logger.info({ bodyPayload }, 'Creando reserva en Cal.com v2');
 
     const response = await fetch(`${CAL_API_V2_BASE_URL}/bookings`, {
         method: 'POST',
@@ -150,7 +151,7 @@ export async function createBooking(params: CreateBookingParams) {
 
     if (!response.ok) {
         const errText = await response.text();
-        console.error(`❌ Error Cal.com v2 POST /bookings (${response.status}):`, errText);
+        logger.error({ status: response.status, errText }, 'Error Cal.com v2 POST /bookings');
         throw new Error(`Error al crear reserva en Cal.com v2 (${response.status}): ${errText}`);
     }
 
@@ -158,7 +159,7 @@ export async function createBooking(params: CreateBookingParams) {
     const booking = calData.data || calData.booking || calData;
     const calBookingId = String(booking.uid || booking.id || 'cal_booking_unknown');
 
-    console.log(`✅ Reserva creada en Cal.com v2 con éxito. Booking ID: ${calBookingId}`);
+    logger.info({ calBookingId }, 'Reserva creada en Cal.com v2 con éxito');
 
     const appointmentPayload: Record<string, any> = {
         organization_id: organizationId,
@@ -183,7 +184,7 @@ export async function createBooking(params: CreateBookingParams) {
         .single();
 
     if (dbError && (dbError.message.includes('service_address') || dbError.message.includes('latitude') || dbError.message.includes('longitude'))) {
-        console.warn('⚠️ Fallback en appointments: omitiendo campos de geolocalización no soportados');
+        logger.warn('Fallback en appointments: omitiendo campos de geolocalización no soportados');
         const fallbackRes = await supabaseAdmin
             .from('appointments')
             .insert({
@@ -205,7 +206,7 @@ export async function createBooking(params: CreateBookingParams) {
     }
 
     if (dbError) {
-        console.error('⚠️ Error al registrar cita en Supabase:', dbError.message);
+        logger.error({ err: dbError }, 'Error al registrar cita en Supabase');
         throw new Error(`Reserva confirmada en Cal.com v2 pero falló la inserción en Supabase: ${dbError.message}`);
     }
 
@@ -240,7 +241,7 @@ export async function rescheduleBooking(params: RescheduleBookingParams) {
 
     if (apiKey && targetBookingId && targetBookingId !== 'cal_booking_unknown') {
         try {
-            console.log(`📌 Reprogramando reserva ${targetBookingId} en Cal.com v2 a: ${isoStart}`);
+            logger.info({ targetBookingId, isoStart }, 'Reprogramando reserva en Cal.com v2');
             const calRes = await fetch(`${CAL_API_V2_BASE_URL}/bookings/${targetBookingId}/reschedule`, {
                 method: 'POST',
                 headers: {
@@ -256,10 +257,10 @@ export async function rescheduleBooking(params: RescheduleBookingParams) {
 
             if (!calRes.ok) {
                 const errText = await calRes.text();
-                console.warn(`⚠️ Advertencia Cal.com v2 POST /bookings/${targetBookingId}/reschedule (${calRes.status}):`, errText);
+                logger.warn({ targetBookingId, status: calRes.status, errText }, 'Advertencia Cal.com v2 POST /bookings/reschedule');
             }
         } catch (calErr: any) {
-            console.warn('⚠️ No se pudo sincronizar la reprogramación en Cal.com:', calErr.message);
+            logger.warn({ err: calErr }, 'No se pudo sincronizar la reprogramación en Cal.com');
         }
     }
 
@@ -329,7 +330,7 @@ export async function updateAppointmentStatus(params: UpdateStatusParams) {
                 }),
             });
         } catch (err: any) {
-            console.warn('⚠️ No se pudo cancelar directamente en Cal.com v2:', err.message);
+            logger.warn({ err }, 'No se pudo cancelar directamente en Cal.com v2');
         }
     }
 

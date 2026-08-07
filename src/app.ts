@@ -23,7 +23,7 @@ import { registerJobs } from './jobs/index.js';
  */
 export async function buildApp() {
     // 1.1 Validación estricta de variables de entorno al arranque
-    const env = validateEnv();
+    validateEnv();
 
     // Configuración del servidor Fastify con Pino Logger y Redacción de Secretos
     const app = Fastify({

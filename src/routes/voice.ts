@@ -63,7 +63,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
         data: result,
       });
     } catch (err: any) {
-      console.error('❌ Error en dispatch de llamada saliente:', err);
+      request.log.error({ err }, 'Error en dispatch de llamada saliente');
       return reply.status(500).send({
         status: 'error',
         message: err.message || 'Error interno en dispatch de llamada saliente.',
@@ -128,7 +128,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
         },
       });
     } catch (err: any) {
-      console.error('❌ Error al obtener configuración del agente:', err);
+      request.log.error({ err }, 'Error al obtener configuración del agente');
       return reply.status(500).send({
         status: 'error',
         message: err.message || 'Error al obtener la configuración del agente de voz.',
@@ -196,7 +196,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
         message: `Configuración de agente actualizada exitosamente en el proveedor '${activeProviderType}'.`,
       });
     } catch (err: any) {
-      console.error('❌ Error al actualizar la configuración del agente:', err);
+      request.log.error({ err }, 'Error al actualizar la configuración del agente');
       return reply.status(500).send({
         status: 'error',
         message: err.message || 'Error al actualizar la configuración del agente de voz.',
@@ -280,7 +280,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
         },
       });
     } catch (err: any) {
-      console.error('❌ Error al calcular métricas de llamadas:', err);
+      request.log.error({ err }, 'Error al calcular métricas de llamadas');
       return reply.status(500).send({
         status: 'error',
         message: err.message || 'Error al calcular las métricas de llamadas de voz.',

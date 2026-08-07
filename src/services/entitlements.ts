@@ -23,7 +23,7 @@ const entitlementsCache = new Map<string, EntitlementsCacheItem>();
 /**
  * Resuelve las características (*features*) habilitadas para una organización.
  * Precedencia estricta:
- *   1. Kill switch global (`features.is_active = false` -> DENEGADO)
+ *   1. Kill switch global (`features.globally_disabled = true` -> DENEGADO)
  *   2. Override de la organización (`organization_features.enabled` no expirado -> ACEPTADO/DENEGADO)
  *   3. Plan contratado (`plan_features` -> ACEPTADO)
  *   4. Denegado por defecto.
@@ -39,15 +39,15 @@ export async function getOrganizationFeatures(organizationId: string): Promise<S
         return cached.enabledFeatures;
     }
 
-    // 1. Obtener kill switches globales (`is_active = false`)
+    // 1. Obtener kill switches globales (`globally_disabled = true`)
     const { data: globalFeatures } = await supabaseAdmin
         .from('features')
-        .select('key, is_active');
+        .select('key, globally_disabled');
 
     const globallyDisabledSet = new Set<string>();
     if (globalFeatures) {
         for (const f of globalFeatures) {
-            if (f.is_active === false) {
+            if (f.globally_disabled === true) {
                 globallyDisabledSet.add(f.key);
             }
         }

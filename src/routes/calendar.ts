@@ -39,13 +39,6 @@ interface UpdateStatusBody {
     reason?: string;
 }
 
-interface ConfirmCallRouteBody {
-    appointmentId?: string;
-    calBookingId?: string;
-    assistantId?: string;
-    phoneNumberId?: string;
-}
-
 /**
  * Plugin de Fastify para la gestión de Agendamiento de Citas con Cal.com.
  */
@@ -338,7 +331,7 @@ export const calendarRoutes: FastifyPluginAsync = async (fastify) => {
             const vapiData = await vapiRes.json();
 
             if (!vapiRes.ok) {
-                console.error('❌ Error devuelto por Vapi API en confirm-call:', vapiData);
+                request.log.error({ vapiData }, 'Error devuelto por Vapi API en confirm-call');
                 return reply.status(vapiRes.status).send({
                     status: 'error',
                     message: vapiData.message || 'Error al iniciar la llamada en Vapi API',

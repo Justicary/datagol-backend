@@ -6,7 +6,11 @@
   ],
   "mutate": [
     "src/services/rate-service.ts",
-    "src/services/usage-registration.ts"
+    "src/services/usage-registration.ts",
+    "src/services/secret-service.ts",
+    "src/services/entitlements.ts",
+    "src/plugins/entitlements.ts",
+    "src/services/webhook-verification.ts"
   ],
   "thresholds": {
     "high": 90,

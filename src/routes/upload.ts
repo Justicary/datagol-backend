@@ -1,7 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import ExcelJS from 'exceljs';
 import { Readable } from 'stream';
-import { supabaseAdmin } from '../lib/supabase.js';
 
 export async function uploadRoutes(fastify: FastifyInstance) {
   /**
@@ -61,7 +60,7 @@ export async function uploadRoutes(fastify: FastifyInstance) {
         }
       });
 
-      console.log(`📊 Excel procesado correctamente: ${rows.length} filas extraídas.`);
+      request.log.info({ rowCount: rows.length }, 'Excel procesado correctamente');
 
       return reply.send({
         status: 'success',
@@ -71,7 +70,7 @@ export async function uploadRoutes(fastify: FastifyInstance) {
       });
 
     } catch (err: any) {
-      console.error('❌ Error procesando Excel en backend:', err);
+      request.log.error({ err }, 'Error procesando Excel en backend');
       return reply.status(500).send({ status: 'error', message: err.message });
     }
   });

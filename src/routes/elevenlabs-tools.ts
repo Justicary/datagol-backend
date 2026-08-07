@@ -270,7 +270,7 @@ export async function elevenLabsToolsRoutes(fastify: FastifyInstance) {
         status: 'success',
       });
     } catch (err: any) {
-      console.error(`❌ Error ejecutando herramienta '${toolName}':`, err);
+      request.log.error({ err, toolName }, 'Error ejecutando herramienta');
       return reply.send({
         result: 'Ocurrió una interrupción al consultar los sistemas de la empresa.',
         status: 'error',
