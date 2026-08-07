@@ -94,33 +94,63 @@ export async function buildApp() {
     // Fase 2.2 — Registro de workers de pg-boss (process-call-completed, ...)
     await registerJobs(app);
 
-    // Ruta de verificación de estado y salud (Healthcheck)
+    // Liveness Probe (/health): verifica únicamente que la aplicación esté viva (sin dependencias).
     app.get('/health', async (request, reply) => {
+        return reply.status(200).send({
+            status: 'ok',
+            service: 'datagol-backend',
+            timestamp: new Date().toISOString(),
+        });
+    });
+
+    // Readiness Probe (/ready): verifica honestamente la base de datos (Supabase) y la cola (pg-boss).
+    app.get('/ready', async (request, reply) => {
+        let dbConnected = false;
+        let queueConnected = false;
+        let dbError: string | null = null;
+        let queueError: string | null = null;
+
+        // 1. Verificar base de datos (Supabase)
         try {
             const { error } = await app.supabaseAdmin
                 .from('organizations')
                 .select('count', { count: 'exact', head: true });
 
             if (error) {
-                return reply.status(500).send({
-                    status: 'error',
-                    message: 'Error al conectar con la base de datos de Supabase',
-                    details: error.message,
-                });
+                dbError = error.message;
+            } else {
+                dbConnected = true;
             }
-
-            return reply.status(200).send({
-                status: 'ok',
-                service: 'datagol-backend',
-                database: 'connected',
-                timestamp: new Date().toISOString(),
-            });
-        } catch (err: any) {
-            return reply.status(500).send({
-                status: 'error',
-                message: err.message || 'Error al verificar salud del servicio',
-            });
+        } catch (err: unknown) {
+            dbError = err instanceof Error ? err.message : String(err);
         }
+
+        // 2. Verificar cola (pg-boss)
+        try {
+            if (app.pgBoss) {
+                await app.pgBoss.getQueues();
+                queueConnected = true;
+            } else {
+                queueError = 'El plugin pg-boss no está disponible';
+            }
+        } catch (err: unknown) {
+            queueError = err instanceof Error ? err.message : String(err);
+        }
+
+        const isReady = dbConnected && queueConnected;
+        const statusCode = isReady ? 200 : 503;
+
+        return reply.status(statusCode).send({
+            status: isReady ? 'ok' : 'unhealthy',
+            service: 'datagol-backend',
+            database: dbConnected ? 'connected' : 'disconnected',
+            queue: queueConnected ? 'connected' : 'disconnected',
+            errors: isReady ? undefined : {
+                ...(dbError ? { database: dbError } : {}),
+                ...(queueError ? { queue: queueError } : {}),
+            },
+            timestamp: new Date().toISOString(),
+        });
     });
 
     // 1.6 Ruta de administración de features/entitlements

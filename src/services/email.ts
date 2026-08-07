@@ -132,7 +132,7 @@ export async function sendCallSummaryEmail(params: SendCallSummaryEmailParams) {
     `;
 
   try {
-    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes<info@ia.datagol.net>';
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes <info@ia.datagol.net>';
     const response = await resend.emails.send({
       from: fromEmail,
       to,
@@ -240,7 +240,7 @@ export async function sendHotLeadAlertEmail(params: SendHotLeadAlertEmailParams)
     `;
 
   try {
-    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes<info@ia.datagol.net>';
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes <info@ia.datagol.net>';
     const response = await resend.emails.send({
       from: fromEmail,
       to,
@@ -324,7 +324,7 @@ export async function sendProspectSummaryEmail(params: SendProspectSummaryEmailP
     `;
 
   try {
-    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes<info@ia.datagol.net>';
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes <info@ia.datagol.net>';
     const response = await resend.emails.send({
       from: fromEmail,
       to,
