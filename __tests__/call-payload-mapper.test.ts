@@ -4,7 +4,7 @@ import { mapElevenLabsPayload } from '../src/services/call-payload-mapper.js';
 function buildPayload(overrides: {
     type?: string;
     dataCollectionResults?: Record<string, unknown>;
-    phoneCall?: { external_number?: string };
+    phoneCall?: { external_number?: string } | null;
     transcript?: Array<{ role: string; message: string }>;
 } = {}) {
     return {
@@ -199,6 +199,32 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
             const payload = buildPayload({ phoneCall: undefined });
             const mapped = mapElevenLabsPayload(payload);
             expect(mapped!.hasPhoneCallLeg).toBe(false);
+        });
+
+        it('no lanza (ni descarta el payload completo) cuando metadata.phone_call llega como null explícito, no ausente — el caso real del widget web que rompió en producción', () => {
+            // ElevenLabs manda `phone_call: null` en vez de omitir la clave
+            // para llamadas sin tramo telefónico. El resto del código ya
+            // maneja null vía optional chaining; el bug real estaba en el
+            // schema Zod (`.optional()` rechaza null, solo permite undefined),
+            // que descartaba TODO el payload antes de mapear ningún campo.
+            const payload = buildPayload({
+                phoneCall: null,
+                dataCollectionResults: {
+                    nombre_completo_prospecto: { value: 'Juana Pérez' },
+                    telefono_contacto_prospecto: { value: '2221234567' },
+                    correo_electronico_prospecto: { value: 'juana@example.com' },
+                    motivo_consulta: { value: 'Cotización de instalación' },
+                    cita_programada: { value: true },
+                },
+            });
+
+            const mapped = mapElevenLabsPayload(payload);
+
+            expect(mapped).not.toBeNull();
+            expect(mapped!.hasPhoneCallLeg).toBe(false);
+            expect(mapped!.fullName).toBe('Juana Pérez');
+            // Sin tramo telefónico SIP, cae al teléfono dictado por voz.
+            expect(mapped!.callerPhoneE164).toBe('+522221234567');
         });
 
         it('usa metadata.start_time_unix_secs para occurredAt cuando está presente', () => {

@@ -39,6 +39,12 @@ const elevenLabsWebhookSchema = z.object({
             .object({
                 call_duration_secs: z.number().optional(),
                 start_time_unix_secs: z.number().optional(),
+                // Llamadas sin tramo telefónico (widget web) mandan
+                // `phone_call: null` explícito, no la omiten — `.optional()`
+                // solo acepta `undefined`. El resto del código ya maneja
+                // `null` vía optional chaining (`data.metadata?.phone_call?.…`,
+                // `Boolean(data.metadata?.phone_call)`), así que el único
+                // cambio necesario es aceptar `null` aquí también.
                 phone_call: z
                     .object({
                         external_number: z.string().optional(),
@@ -46,6 +52,7 @@ const elevenLabsWebhookSchema = z.object({
                         direction: z.string().optional(),
                     })
                     .passthrough()
+                    .nullable()
                     .optional(),
             })
             .passthrough()
