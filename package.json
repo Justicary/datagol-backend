@@ -13,7 +13,9 @@
     "type-check": "tsc --noEmit",
     "build": "tsc",
     "lint": "eslint .",
-    "stryker": "stryker run --ignoreStatic"
+    "stryker": "stryker run --ignoreStatic",
+    "pausarAPI": "./scripts/pause-service.sh",
+    "reanudarAPI": "./scripts/resume-service.sh"
   },
   "keywords": [],
   "author": "",
