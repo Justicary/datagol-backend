@@ -92,14 +92,25 @@ export interface MappedCallData {
 /**
  * Claves de `analysis.data_collection_results` configuradas en el agente de
  * ElevenLabs (Dashboard → Agent → Analysis → Data Collection). No son fijas
- * por la API de ElevenLabs: son específicas de este agente.
+ * por la API de ElevenLabs: son específicas de este agente. La fuente de
+ * verdad es el agente configurado en el dashboard de ElevenLabs, no este
+ * archivo — si alguien renombra un campo de Data Collection allá, este
+ * diccionario se desincroniza en silencio (los 4 campos afectados se
+ * descartan sin error, ver docs/tasks/elevenlabs-data-collection-key-mismatch.md)
+ * y hay que volver a sincronizarlo aquí, nunca al revés.
+ *
+ * `fullName`/`contactPhone`/`email`/`bookedAppointment` verificados contra
+ * una conversación real (captura de Analysis → Data Collection). El resto
+ * (`businessName`, `businessSector`, `temperature`, `needsFollowup`,
+ * `followupNotes`, `callVolume`) son especulativos: el agente aún no los
+ * captura, no hay evidencia de qué nombre tendrían si se configuraran.
  */
 const DATA_COLLECTION_KEYS = {
-    fullName: 'nombre_completo',
-    contactPhone: 'telefono_contacto',
-    email: 'email',
+    fullName: 'nombre_completo_prospecto',
+    contactPhone: 'telefono_contacto_prospecto',
+    email: 'correo_electronico_prospecto',
     inquiryReason: 'motivo_consulta',
-    bookedAppointment: 'agendo_cita',
+    bookedAppointment: 'cita_programada',
     businessName: 'nombre_negocio',
     businessSector: 'giro_negocio',
     temperature: 'temperatura',
@@ -183,8 +194,8 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         .join('\n');
 
     // El número de telefonía (SIP/PSTN) es la fuente autoritativa del contacto
-    // cuando existe; el número dictado por voz (telefono_contacto) es un
-    // respaldo para canales sin telefonía (p. ej. widget web).
+    // cuando existe; el número dictado por voz (telefono_contacto_prospecto)
+    // es un respaldo para canales sin telefonía (p. ej. widget web).
     const telephonyNumber = data.metadata?.phone_call?.external_number || null;
     const contactPhoneRaw = extractString(results, DATA_COLLECTION_KEYS.contactPhone);
     const phoneToNormalize = telephonyNumber || contactPhoneRaw;

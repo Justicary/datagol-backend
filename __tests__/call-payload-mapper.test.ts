@@ -33,11 +33,11 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
     it('mapea todas las claves de data_collection_results configuradas en el agente', () => {
         const payload = buildPayload({
             dataCollectionResults: {
-                nombre_completo: { value: 'Juana Pérez' },
-                telefono_contacto: { value: '2221234567' },
-                email: { value: 'juana@example.com' },
+                nombre_completo_prospecto: { value: 'Juana Pérez' },
+                telefono_contacto_prospecto: { value: '2221234567' },
+                correo_electronico_prospecto: { value: 'juana@example.com' },
                 motivo_consulta: { value: 'Cotización de instalación' },
-                agendo_cita: { value: true },
+                cita_programada: { value: true },
                 nombre_negocio: { value: 'Ferretería Pérez' },
                 giro_negocio: { value: 'Ferretería' },
                 temperatura: { value: 'caliente' },
@@ -65,6 +65,38 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
         expect(mapped!.conversationId).toBe('conv_abc');
         expect(mapped!.providerCallId).toBe('conv_abc');
         expect(mapped!.durationSeconds).toBe(185);
+    });
+
+    it('mapea el payload real de producción: solo los 5 campos que el agente captura hoy, el resto queda null/false sin lanzar (docs/tasks/elevenlabs-data-collection-key-mismatch.md)', () => {
+        const payload = buildPayload({
+            dataCollectionResults: {
+                nombre_completo_prospecto: { value: 'Juana Pérez' },
+                telefono_contacto_prospecto: { value: '2221234567' },
+                correo_electronico_prospecto: { value: 'juana@example.com' },
+                motivo_consulta: { value: 'Cotización de instalación' },
+                cita_programada: { value: true },
+                // nombre_negocio/giro_negocio/temperatura/requiere_seguimiento/
+                // notas_seguimiento/volumen_llamadas: el agente aún no los
+                // captura — ausentes, como en la captura real.
+            },
+        });
+
+        const mapped = mapElevenLabsPayload(payload);
+
+        expect(mapped).not.toBeNull();
+        expect(mapped!.fullName).toBe('Juana Pérez');
+        expect(mapped!.contactPhoneRaw).toBe('2221234567');
+        expect(mapped!.callerPhoneE164).toBe('+522221234567');
+        expect(mapped!.email).toBe('juana@example.com');
+        expect(mapped!.inquiryReason).toBe('Cotización de instalación');
+        expect(mapped!.bookedAppointment).toBe(true);
+
+        expect(mapped!.businessName).toBeNull();
+        expect(mapped!.businessSector).toBeNull();
+        expect(mapped!.temperature).toBeNull();
+        expect(mapped!.needsFollowup).toBe(false);
+        expect(mapped!.followupNotes).toBeNull();
+        expect(mapped!.callVolume).toBeNull();
     });
 
     it('regla de honestidad de datos: sin data_collection_results, todos los campos quedan vacíos, ninguno inventado', () => {
@@ -115,7 +147,7 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
         const payload = buildPayload({
             phoneCall: { external_number: '+522231234567' },
             dataCollectionResults: {
-                telefono_contacto: { value: '111' }, // número inválido/dictado erróneamente
+                telefono_contacto_prospecto: { value: '111' }, // número inválido/dictado erróneamente
             },
         });
         const mapped = mapElevenLabsPayload(payload);
@@ -127,8 +159,8 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
     it('un número de teléfono inválido no aborta el mapeo del lead (queda sin contact_id)', () => {
         const payload = buildPayload({
             dataCollectionResults: {
-                telefono_contacto: { value: '123' },
-                nombre_completo: { value: 'Prospecto sin teléfono válido' },
+                telefono_contacto_prospecto: { value: '123' },
+                nombre_completo_prospecto: { value: 'Prospecto sin teléfono válido' },
             },
         });
         const mapped = mapElevenLabsPayload(payload);
@@ -147,8 +179,8 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
     it('acepta valores escalares (no envueltos en { value }) en data_collection_results', () => {
         const payload = buildPayload({
             dataCollectionResults: {
-                nombre_completo: 'Ana Torres',
-                agendo_cita: false,
+                nombre_completo_prospecto: 'Ana Torres',
+                cita_programada: false,
             },
         });
         const mapped = mapElevenLabsPayload(payload);

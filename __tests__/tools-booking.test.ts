@@ -3,7 +3,7 @@ import Fastify from 'fastify';
 import supabasePlugin from '../src/plugins/supabase.js';
 import { bookingToolRoute } from '../src/routes/tools/booking.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
-import { setSecret, clearSecretCache } from '../src/services/secret-service.js';
+import { setSecret, getSecret, clearSecretCache } from '../src/services/secret-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
 
 vi.mock('../src/services/cal-com-tool-client.js', async (importOriginal) => {
@@ -30,8 +30,14 @@ describe('POST /tools/:webhookToken/booking', () => {
     const TEST_WEBHOOK_TOKEN = `booking-test-token-${Date.now()}`;
     const createdConversationIds: string[] = [];
     const createdContactPhones: string[] = [];
+    let originalWebhookToken: string | null = null;
+    let originalToolWebhookSecret: string | null = null;
 
     beforeAll(async () => {
+        const { data: before } = await supabaseAdmin.from('organizations').select('webhook_token').eq('id', REAL_ORG_ID).maybeSingle();
+        originalWebhookToken = before?.webhook_token ?? null;
+        originalToolWebhookSecret = await getSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET);
+
         const { error: orgErr } = await supabaseAdmin.from('organizations').update({ webhook_token: TEST_WEBHOOK_TOKEN }).eq('id', REAL_ORG_ID);
         if (orgErr) throw new Error(`No se pudo preparar webhook_token: ${orgErr.message}`);
 
@@ -41,8 +47,15 @@ describe('POST /tools/:webhookToken/booking', () => {
     });
 
     afterAll(async () => {
-        await supabaseAdmin.from('organizations').update({ webhook_token: null }).eq('id', REAL_ORG_ID);
-        await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID).eq('secret_key', SECRET_KEYS.TOOL_WEBHOOK_SECRET);
+        // Restaura el valor original en vez de hardcodear null/delete — esta
+        // organización puede tener onboarding real de producción (ver
+        // docs/tasks/elevenlabs-data-collection-key-mismatch.md).
+        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
+        if (originalToolWebhookSecret !== null) {
+            await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, originalToolWebhookSecret);
+        } else {
+            await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID).eq('secret_key', SECRET_KEYS.TOOL_WEBHOOK_SECRET);
+        }
         clearSecretCache(REAL_ORG_ID);
 
         for (const conversationId of createdConversationIds) {

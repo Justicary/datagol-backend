@@ -43,6 +43,8 @@ describe('routes/admin/organizations.ts', () => {
 
     describe('GET /api/admin/organizations', () => {
         it('contraparte de éxito: devuelve el listado, nunca incluye webhook_token crudo', async () => {
+            const { data: before } = await supabaseAdmin.from('organizations').select('webhook_token').eq('id', REAL_ORG_ID).maybeSingle();
+            const originalWebhookToken: string | null = before?.webhook_token ?? null;
             await supabaseAdmin.from('organizations').update({ webhook_token: `admin-list-test-${Date.now()}` }).eq('id', REAL_ORG_ID);
 
             const app = await buildTestApp();
@@ -62,7 +64,7 @@ describe('routes/admin/organizations.ts', () => {
                 expect(org.webhook_token_present).toBe(true);
                 expect(JSON.stringify(body)).not.toContain('admin-list-test-');
             } finally {
-                await supabaseAdmin.from('organizations').update({ webhook_token: null }).eq('id', REAL_ORG_ID);
+                await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
                 await app.close();
             }
         });

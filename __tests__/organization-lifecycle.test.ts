@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { setOrganizationStatus, listOrganizationsForAdmin } from '../src/services/organization-lifecycle.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
 import { getFeatureAuditLog, clearEntitlementsCache } from '../src/services/entitlements.js';
@@ -185,8 +185,19 @@ describe('services/organization-lifecycle.ts — setOrganizationStatus', () => {
 });
 
 describe('services/organization-lifecycle.ts — listOrganizationsForAdmin', () => {
-    afterEach(async () => {
-        await supabaseAdmin.from('organizations').update({ webhook_token: null }).eq('id', REAL_ORG_ID);
+    // Captura el webhook_token original (puede ser el de producción, ver
+    // docs/tasks/elevenlabs-data-collection-key-mismatch.md) y lo restaura al
+    // final — cada test de abajo ya fija su propia precondición (token o
+    // null) al inicio, así que no hace falta un afterEach intermedio.
+    let originalWebhookToken: string | null = null;
+
+    beforeAll(async () => {
+        const { data: before } = await supabaseAdmin.from('organizations').select('webhook_token').eq('id', REAL_ORG_ID).maybeSingle();
+        originalWebhookToken = before?.webhook_token ?? null;
+    });
+
+    afterAll(async () => {
+        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
     });
 
     it('nunca incluye webhook_token crudo, solo webhook_token_present', async () => {

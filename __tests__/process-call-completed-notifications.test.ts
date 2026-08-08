@@ -78,9 +78,9 @@ describe('2.2/4 — process-call-completed: condiciones de disparo de las notifi
 
         const webhookEventId = await insertWebhookEvent(conversationId, {
             temperatura: { value: 'caliente' },
-            agendo_cita: { value: false },
+            cita_programada: { value: false },
             requiere_seguimiento: { value: true },
-            email: { value: 'prospecto@example.invalid' },
+            correo_electronico_prospecto: { value: 'prospecto@example.invalid' },
         });
 
         const { fastify, sendSpy } = buildFakeFastify();
@@ -101,7 +101,7 @@ describe('2.2/4 — process-call-completed: condiciones de disparo de las notifi
 
         const webhookEventId = await insertWebhookEvent(conversationId, {
             temperatura: { value: 'caliente' },
-            agendo_cita: { value: true },
+            cita_programada: { value: true },
         });
 
         const { fastify, sendSpy } = buildFakeFastify();
@@ -118,7 +118,7 @@ describe('2.2/4 — process-call-completed: condiciones de disparo de las notifi
 
         const webhookEventId = await insertWebhookEvent(conversationId, {
             temperatura: { value: 'frio' },
-            agendo_cita: { value: false },
+            cita_programada: { value: false },
         });
 
         const { fastify, sendSpy } = buildFakeFastify();
