@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { mapElevenLabsPayload } from '../src/services/call-payload-mapper.js';
 
 // Organización real existente (ver __tests__/entitlements.test.ts).
 const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
@@ -63,6 +64,27 @@ describe('2.2 — RPC process_call_completed', () => {
         expect(lead?.business_name).toBeNull();
         expect(lead?.inquiry_reason).toBeNull();
         expect(lead?.temperature).toBeNull();
+    });
+
+    it('channel: sin p_channel explícito, cae al DEFAULT \'voice\' de la función (antes de este fix, era el ÚNICO valor posible, a fuego)', async () => {
+        const { data } = await callRpc();
+        const { data: lead } = await supabaseAdmin.from('leads').select('channel').eq('id', data.lead_id).single();
+        expect(lead?.channel).toBe('voice');
+    });
+
+    it('contraparte de éxito: channel respeta el valor explícito que manda el llamador (p_channel)', async () => {
+        const whatsappConversationId = `${conversationId}-channel-whatsapp`;
+        const { data, error } = await callRpc({
+            p_conversation_id: whatsappConversationId,
+            p_provider_call_id: whatsappConversationId,
+            p_channel: 'whatsapp',
+        });
+        expect(error).toBeNull();
+        const { data: lead } = await supabaseAdmin.from('leads').select('channel').eq('id', data.lead_id).single();
+        expect(lead?.channel).toBe('whatsapp');
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', whatsappConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', whatsappConversationId);
     });
 
     it('idempotencia: el mismo conversation_id procesado dos veces no duplica el lead', async () => {
@@ -395,5 +417,114 @@ describe('3.2 — usage_events es append-only (trigger trg_usage_no_update)', ()
             metadata: { diagnostic: 'process-call-completed-rpc.test.ts append-only (insert de control)' },
         });
         expect(error).toBeNull();
+    });
+});
+
+/**
+ * Continuidad cross-canal — caso real de producción encontrado al
+ * investigar esta tarea: el webhook conv_6201kzkmwnd8e658dn4c8fqg1c0d
+ * (organización real, provider='elevenlabs') es una conversación de
+ * WhatsApp cuyo `metadata.whatsapp.whatsapp_user_id` llega como
+ * '5212213528341' (sin '+', con el "1" histórico de trunk móvil de México).
+ * Antes de este fix, ese campo no se leía en ningún lado: el lead quedó con
+ * `contact_id: null`, `channel: 'voice'` (verificado por consulta directa
+ * antes de escribir este test) — completamente desvinculado del contacto
+ * real +522213528341, que YA existe en la base por una llamada de voz previa
+ * de la misma persona (Víctor Mancera Gallardo, conv_8801kzhkm2dyezdah57enffbvwjx).
+ *
+ * Este test no reprocesa el evento real (no lo toca): construye un payload
+ * nuevo con la misma forma real (mismo whatsapp_user_id, mismo formato) bajo
+ * un conversation_id de prueba desechable, y verifica contra el CONTACTO
+ * REAL ya existente — no contra un fixture — que ambos quedan vinculados al
+ * mismo contact_id.
+ */
+describe('Continuidad cross-canal — WhatsApp (whatsapp_user_id) vs. voz previa, mismo contacto', () => {
+    const EXISTING_CONTACT_PHONE = '+522213528341'; // Víctor Mancera Gallardo — contacto real, no se toca ni se borra.
+    const whatsappConversationId = `test-cross-channel-whatsapp:${Date.now()}`;
+
+    afterAll(async () => {
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', whatsappConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', whatsappConversationId);
+        // No se borra el contacto +522213528341: es un contacto real
+        // preexistente de producción, no un fixture de esta prueba.
+    });
+
+    it('un webhook de WhatsApp con whatsapp_user_id="5212213528341" se vincula al MISMO contact_id que la llamada de voz previa de +522213528341', async () => {
+        const { data: existingContact, error: contactError } = await supabaseAdmin
+            .from('contacts')
+            .select('id')
+            .eq('organization_id', REAL_ORG_ID)
+            .eq('phone_e164', EXISTING_CONTACT_PHONE)
+            .maybeSingle();
+
+        if (contactError || !existingContact) {
+            throw new Error(
+                `Precondición no cumplida: no existe el contacto real ${EXISTING_CONTACT_PHONE} en ${REAL_ORG_ID}. ` +
+                    'Este test verifica continuidad contra un contacto real de producción, no un fixture — si ya no existe, hay que reconstruir el escenario.'
+            );
+        }
+
+        const whatsappPayload = {
+            type: 'post_call_transcription',
+            event_timestamp: 1754750000,
+            data: {
+                agent_id: 'agent_0801kyr7h69hehdv6bgz7enntv9h',
+                conversation_id: whatsappConversationId,
+                transcript: [{ role: 'user', message: 'Hola, quiero información' }],
+                analysis: { transcript_summary: 'Prospecto pregunta por información vía WhatsApp.' },
+                metadata: {
+                    call_duration_secs: 45,
+                    conversation_initiation_source: 'whatsapp',
+                    text_only: true,
+                    phone_call: null,
+                    whatsapp: {
+                        direction: 'inbound',
+                        whatsapp_user_id: '5212213528341',
+                        whatsapp_phone_number_id: '932565183274317',
+                    },
+                },
+            },
+        };
+
+        const mapped = mapElevenLabsPayload(whatsappPayload);
+        expect(mapped).not.toBeNull();
+        expect(mapped!.callerPhoneE164).toBe(EXISTING_CONTACT_PHONE);
+        expect(mapped!.channel).toBe('whatsapp');
+
+        const { data, error } = await supabaseAdmin.rpc('process_call_completed', {
+            p_organization_id: REAL_ORG_ID,
+            p_conversation_id: mapped!.conversationId,
+            p_provider_call_id: mapped!.providerCallId,
+            p_caller_phone_e164: mapped!.callerPhoneE164,
+            p_full_name: mapped!.fullName,
+            p_email: mapped!.email,
+            p_business_name: mapped!.businessName,
+            p_business_sector: mapped!.businessSector,
+            p_contact_phone_raw: mapped!.contactPhoneRaw,
+            p_inquiry_reason: mapped!.inquiryReason,
+            p_temperature: mapped!.temperature,
+            p_booked_appointment: mapped!.bookedAppointment,
+            p_needs_followup: mapped!.needsFollowup,
+            p_followup_notes: mapped!.followupNotes,
+            p_call_volume: mapped!.callVolume,
+            p_transcript: mapped!.transcript,
+            p_summary: mapped!.summary,
+            p_duration_seconds: mapped!.durationSeconds,
+            p_usage_entries: [],
+            p_channel: mapped!.channel,
+        });
+
+        expect(error).toBeNull();
+        expect(data.contact_id).toBe(existingContact.id);
+
+        const { data: lead } = await supabaseAdmin
+            .from('leads')
+            .select('contact_id, channel, contact_phone')
+            .eq('id', data.lead_id)
+            .single();
+
+        expect(lead?.contact_id).toBe(existingContact.id);
+        expect(lead?.channel).toBe('whatsapp');
+        expect(lead?.contact_phone).toBe(EXISTING_CONTACT_PHONE);
     });
 });

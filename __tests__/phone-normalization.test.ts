@@ -65,4 +65,82 @@ describe('normalizePhoneE164', () => {
         expect(normalizePhoneE164('  2221234567  ').rawInput).toBe('2221234567');
         expect(normalizePhoneE164('abc').rawInput).toBe('abc');
     });
+
+    /**
+     * Antes de la reforma de numeración de México de 2019, marcar un celular
+     * mexicano desde el extranjero exigía anteponer un "1" de trunk móvil
+     * después del código de país (+52 1 55 1234 5678). La E.164 canónica
+     * vigente ya no lo lleva: celulares y fijos comparten el mismo esquema
+     * de 10 dígitos nacionales (+52 55 1234 5678). Sin manejo explícito,
+     * libphonenumber-js no despoja ese "1" — lo cuenta como parte del número
+     * nacional (11 dígitos en vez de 10) y lo marca inválido, así que ambas
+     * formas del MISMO número terminaban en resultados distintos: una se
+     * normalizaba, la otra se rechazaba en silencio.
+     *
+     * Varios sistemas externos siguen entregando la forma histórica con "1"
+     * en 2026 (más notablemente el wa_id de WhatsApp/Meta para contactos
+     * mexicanos — ver docs/tasks, verificación pendiente de una conversación
+     * real de WhatsApp vía ElevenLabs, que a la fecha no existe en
+     * `webhook_events`: los 12 eventos reales capturados para la
+     * organización de producción son todos `post_call_transcription` de voz,
+     * ninguno de WhatsApp). Mientras no haya un ejemplo real que confirme el
+     * formato exacto que ElevenLabs entregará para ese canal, aceptar ambas
+     * formas de un número mexicano es la postura defensiva correcta.
+     *
+     * Valor canónico verificado: **+522218300450** (sin el "1") — es la
+     * forma que `parsed.isValid()` acepta y la que ya usan
+     * `TELNYX_PHONE_NUMBER` y `NEXT_PUBLIC_WHATSAPP_PHONE_NUMBER` en `.env`
+     * para este mismo número real de producción.
+     */
+    describe('forma histórica con "1" de trunk móvil (+521XXXXXXXXXX) — número real de producción', () => {
+        const LEGACY_FORM = '+5212218300450';
+        const MODERN_FORM = '+522218300450';
+        const CANONICAL = '+522218300450';
+
+        it(`la forma moderna (${MODERN_FORM}) normaliza al valor canónico`, () => {
+            const result = normalizePhoneE164(MODERN_FORM);
+            expect(result.success).toBe(true);
+            expect(result.phoneE164).toBe(CANONICAL);
+        });
+
+        it(`la forma histórica con "1" (${LEGACY_FORM}) también normaliza al MISMO valor canónico`, () => {
+            const result = normalizePhoneE164(LEGACY_FORM);
+            expect(result.success).toBe(true);
+            expect(result.phoneE164).toBe(CANONICAL);
+        });
+
+        it('ambas formas producen exactamente el mismo phoneE164 — no dos contactos distintos para la misma persona', () => {
+            const legacy = normalizePhoneE164(LEGACY_FORM);
+            const modern = normalizePhoneE164(MODERN_FORM);
+            expect(legacy.phoneE164).toBe(modern.phoneE164);
+        });
+
+        it('también reconoce la forma histórica sin el signo +', () => {
+            const result = normalizePhoneE164('5212218300450');
+            expect(result.success).toBe(true);
+            expect(result.phoneE164).toBe(CANONICAL);
+        });
+
+        it('no despoja un "1" que no corresponde a este patrón exacto: 9 dígitos tras 521 no se acepta como si fueran 10', () => {
+            const result = normalizePhoneE164('+521221830045');
+            expect(result.success).toBe(false);
+            expect(result.phoneE164).toBeNull();
+        });
+
+        it('no despoja un "1" que no corresponde a este patrón exacto: 11 dígitos tras 521 no se acepta como si fueran 10', () => {
+            const result = normalizePhoneE164('+52122183004501');
+            expect(result.success).toBe(false);
+            expect(result.phoneE164).toBeNull();
+        });
+
+        it('el despojo de "1" es específico de MX: con defaultCountry distinto no se aplica', () => {
+            // +14155552671 (número real de EE.UU. usado en otra prueba de este
+            // archivo) no coincide con el patrón +521 de todas formas, pero
+            // esta prueba deja explícito que la regla está condicionada a
+            // defaultCountry === 'MX', no a un patrón de dígitos aislado.
+            const result = normalizePhoneE164('+14155552671', 'US');
+            expect(result.success).toBe(true);
+            expect(result.phoneE164).toBe('+14155552671');
+        });
+    });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ALL_LEAD_TEMPERATURES, ALL_LEAD_FOLLOWUP_STATUSES } from '../src/types/lead-enums.js';
+import { ALL_LEAD_TEMPERATURES, ALL_LEAD_FOLLOWUP_STATUSES, ALL_LEAD_CHANNELS } from '../src/types/lead-enums.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
 
 /**
@@ -53,5 +53,29 @@ describe('src/types/lead-enums.ts — sincronizado con los CHECK constraints rea
         expect(error?.code).not.toBe('23514');
 
         await supabaseAdmin.from('leads').delete().eq('conversation_id', conversationId);
+    });
+
+    it.each(ALL_LEAD_CHANNELS)('el canal "%s" es aceptado por el CHECK constraint de leads.channel', async (channel) => {
+        const conversationId = `diag-channel-${Math.random().toString(36).slice(2)}`;
+        const { error } = await supabaseAdmin
+            .from('leads')
+            .insert({ organization_id: testOrgId, channel, conversation_id: conversationId })
+            .select('id')
+            .single();
+
+        expect(error?.code).not.toBe('23514');
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', conversationId);
+    });
+
+    it('contraparte de rechazo: un canal fuera de la lista es rechazado por el CHECK constraint (leads_channel_check)', async () => {
+        const conversationId = `diag-channel-invalido-${Math.random().toString(36).slice(2)}`;
+        const { error } = await supabaseAdmin
+            .from('leads')
+            .insert({ organization_id: testOrgId, channel: 'telegram', conversation_id: conversationId })
+            .select('id')
+            .single();
+
+        expect(error?.code).toBe('23514');
     });
 });

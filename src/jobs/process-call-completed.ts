@@ -76,6 +76,9 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         durationSeconds: mapped.durationSeconds,
         occurredAt: mapped.occurredAt,
         hasPhoneCallLeg: mapped.hasPhoneCallLeg,
+        isTextChannel: mapped.isTextChannel,
+        textMessageQuantity: mapped.whatsappMessageQuantity,
+        llmTokenUsage: mapped.llmTokenUsage,
     });
 
     const { data: result, error: rpcError } = await fastify.supabaseAdmin.rpc('process_call_completed', {
@@ -98,6 +101,7 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         p_summary: mapped.summary,
         p_duration_seconds: mapped.durationSeconds,
         p_usage_entries: usageEntries,
+        p_channel: mapped.channel,
     });
 
     if (rpcError) {

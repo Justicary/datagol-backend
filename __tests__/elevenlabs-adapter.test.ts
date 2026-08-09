@@ -69,3 +69,98 @@ describe('ElevenLabsAdapter.triggerOutboundCall', () => {
         );
     });
 });
+
+/**
+ * Retención/privacidad del agente — pendiente con exposición legal
+ * (transcripciones completas de personas reales, deletion_settings en null).
+ * `retention_days`/`record_voice` están documentados
+ * (https://elevenlabs.io/docs/agents-platform/customization/privacy/retention
+ * y /audio-saving); `delete_transcript_and_pii`/`delete_audio`/
+ * `apply_to_existing_conversations` NO — se descubrieron leyendo de vuelta
+ * el agente real tras un primer PATCH que solo mandaba los dos campos
+ * documentados: `retention_days` por sí solo no activaba ningún borrado.
+ */
+describe('ElevenLabsAdapter.syncAgentPrivacySettings', () => {
+    const fullSettings = {
+        retentionDays: 30,
+        recordVoice: true,
+        deleteTranscriptAndPii: true,
+        deleteAudio: true,
+        applyToExistingConversations: true,
+    };
+
+    beforeEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('manda los 5 campos de platform_settings.privacy en el PATCH al agente', async () => {
+        let capturedBody: any = null;
+        const spy = vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+            const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.startsWith('https://api.elevenlabs.io/')) {
+                capturedBody = JSON.parse(init?.body as string);
+                return new Response(JSON.stringify({}), { status: 200 });
+            }
+            return realFetch(input as any, init);
+        });
+
+        const adapter = new ElevenLabsAdapter();
+        const ok = await adapter.syncAgentPrivacySettings('test-api-key', 'agent-test-123', fullSettings);
+
+        expect(ok).toBe(true);
+        expect(capturedBody).toEqual({
+            platform_settings: {
+                privacy: {
+                    retention_days: 30,
+                    record_voice: true,
+                    delete_transcript_and_pii: true,
+                    delete_audio: true,
+                    apply_to_existing_conversations: true,
+                },
+            },
+        });
+        expect(spy).toHaveBeenCalledWith(
+            'https://api.elevenlabs.io/v1/convai/agents/agent-test-123',
+            expect.objectContaining({ method: 'PATCH' })
+        );
+    });
+
+    it('contraparte de éxito: respeta valores explícitos distintos (delete_transcript_and_pii=false, apply_to_existing_conversations=false)', async () => {
+        let capturedBody: any = null;
+        vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+            const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.startsWith('https://api.elevenlabs.io/')) {
+                capturedBody = JSON.parse(init?.body as string);
+                return new Response(JSON.stringify({}), { status: 200 });
+            }
+            return realFetch(input as any, init);
+        });
+
+        const adapter = new ElevenLabsAdapter();
+        await adapter.syncAgentPrivacySettings('test-api-key', 'agent-test-123', {
+            ...fullSettings,
+            deleteTranscriptAndPii: false,
+            applyToExistingConversations: false,
+        });
+
+        expect(capturedBody.platform_settings.privacy.delete_transcript_and_pii).toBe(false);
+        expect(capturedBody.platform_settings.privacy.apply_to_existing_conversations).toBe(false);
+    });
+
+    it('contraparte de rechazo: sin apiKey ni agentId, lanza sin llegar a hacer la petición', async () => {
+        const spy = vi.spyOn(global, 'fetch');
+        const adapter = new ElevenLabsAdapter();
+
+        await expect(adapter.syncAgentPrivacySettings('', '', fullSettings)).rejects.toThrow(/Se requiere API Key y Agent ID/);
+        expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('contraparte de rechazo: si ElevenLabs responde con error, devuelve false en vez de lanzar', async () => {
+        mockElevenLabsFetchOnce(new Response(JSON.stringify({ detail: 'agent not found' }), { status: 404 }));
+
+        const adapter = new ElevenLabsAdapter();
+        const ok = await adapter.syncAgentPrivacySettings('test-api-key', 'agent-inexistente', fullSettings);
+
+        expect(ok).toBe(false);
+    });
+});

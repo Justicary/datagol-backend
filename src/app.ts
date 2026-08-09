@@ -9,6 +9,7 @@ import adminMeteringRoutes from './routes/admin/metering.js';
 import adminOrganizationsRoutes from './routes/admin/organizations.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
+import contactsRoutes from './routes/contacts.js';
 import vapiRoutes from './routes/vapi.js';
 import calendarRoutes from './routes/calendar.js';
 import voiceRoutes from './routes/voice.js';
@@ -166,6 +167,8 @@ export async function buildApp() {
     // Onboarding de organización (self-service DFY) — reemplaza el legacy
     // POST /api/organizations/onboard eliminado de organizationRoutes.
     await app.register(organizationOnboardingRoutes);
+    // Borrado ARCO por contacto (derecho de cancelación/oposición LFPDPPP).
+    await app.register(contactsRoutes);
     await app.register(vapiRoutes);
     await app.register(calendarRoutes);
     await app.register(voiceRoutes);

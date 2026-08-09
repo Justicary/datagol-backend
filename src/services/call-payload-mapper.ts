@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { normalizePhoneE164 } from './phone-normalization.js';
-import { isLeadTemperature, type LeadTemperature } from '../types/lead-enums.js';
+import { isLeadTemperature, type LeadTemperature, LEAD_CHANNELS, type LeadChannel } from '../types/lead-enums.js';
 
 /**
  * Esquema mínimo del webhook `post_call_transcription` de ElevenLabs.
@@ -54,11 +54,101 @@ const elevenLabsWebhookSchema = z.object({
                     .passthrough()
                     .nullable()
                     .optional(),
+                // Discriminador de canal (docs oficiales de ElevenLabs, campo
+                // `metadata.conversation_initiation_source`, enum que incluye
+                // 'whatsapp' — verificado contra
+                // https://elevenlabs.io/docs/api-reference/conversations/get,
+                // no asumido). `text_only` es el mismo concepto en forma de
+                // booleano — se acepta cualquiera de los dos como señal de
+                // canal de texto.
+                conversation_initiation_source: z.string().optional(),
+                text_only: z.boolean().optional(),
+                // Facturación de mensajería de ElevenLabs para canales de
+                // texto (WhatsApp hoy). `category_usage` es un mapa por
+                // categoría (no un objeto fijo) — 'text_message' es la clave
+                // que corresponde a mensajes de WhatsApp salientes/entrantes
+                // del agente; no confundir con las tarifas de plantilla de
+                // Meta (`provider: 'meta'` en `provider_rates`), que son un
+                // costo aparte que este job no cubre.
+                platform_usage: z
+                    .object({
+                        category_usage: z
+                            .record(z.string(), z.object({ quantity: z.number().optional() }).passthrough())
+                            .optional(),
+                    })
+                    .passthrough()
+                    .optional(),
+                // Continuidad cross-canal: en conversaciones de WhatsApp no hay
+                // `phone_call` — el identificador del contacto viaja aquí. Caso
+                // real verificado contra un webhook de producción: whatsapp_user_id
+                // llega como '5212213528341' (sin '+', con el "1" histórico de
+                // trunk móvil de México) — normalizePhoneE164 ya lo resuelve al
+                // mismo +522213528341 que un contacto de voz previo (fix de
+                // phone-normalization.ts de esta misma sesión).
+                whatsapp: z
+                    .object({
+                        whatsapp_user_id: z.string().optional(),
+                    })
+                    .passthrough()
+                    .nullable()
+                    .optional(),
+                // Tokens de LLM (metering, cierra el hueco del 14% de la
+                // factura). Estructura verificada contra payloads reales de
+                // producción, no contra la documentación pública (que no la
+                // detalla): `charging.llm_usage.irreversible_generation.model_usage`
+                // es un mapa por modelo (ej. 'gemini-2.5-flash', 'gpt-4o'), cada
+                // uno con `input`/`output_total` (los únicos con `price` > 0 en
+                // los ejemplos reales — `input_cache_read`/`input_cache_write`
+                // siempre traen price:0, así que no se registran). Se usa
+                // `irreversible_generation`, nunca `initiated_generation`: esta
+                // última cuenta reintentos del LLM que no llegaron a facturarse,
+                // contarla duplicaría tokens.
+                charging: z
+                    .object({
+                        llm_usage: z
+                            .object({
+                                irreversible_generation: z
+                                    .object({
+                                        model_usage: z
+                                            .record(
+                                                z.string(),
+                                                z
+                                                    .object({
+                                                        input: z.object({ tokens: z.number().optional() }).passthrough().optional(),
+                                                        output_total: z.object({ tokens: z.number().optional() }).passthrough().optional(),
+                                                    })
+                                                    .passthrough()
+                                            )
+                                            .optional(),
+                                    })
+                                    .passthrough()
+                                    .optional(),
+                            })
+                            .passthrough()
+                            .optional(),
+                    })
+                    .passthrough()
+                    .optional(),
             })
             .passthrough()
             .optional(),
     }),
 });
+
+/**
+ * Consumo de tokens de un modelo LLM dentro de una conversación, ya separado
+ * por input/output (tarifas por token distintas — ver
+ * usage-event-unit-type.ts). `model` es la clave cruda del mapa
+ * `model_usage` del payload (ej. 'gemini-2.5-flash'), nunca normalizada ni
+ * validada contra una lista — un modelo nuevo que ElevenLabs empiece a usar
+ * simplemente no tendrá tarifa en `provider_rates` todavía, y el resolver de
+ * metering lo omite con un warn en vez de inventar un precio.
+ */
+export interface LlmModelTokenUsage {
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+}
 
 export interface MappedCallData {
     conversationId: string;
@@ -94,6 +184,39 @@ export interface MappedCallData {
      * esas no tienen un tramo de telefonía que medir en Fase 3.
      */
     hasPhoneCallLeg: boolean;
+    /**
+     * `true` si el canal es de texto (WhatsApp hoy: `conversation_initiation_source
+     * === 'whatsapp'` o `text_only === true`). `agent_minute` no aplica a estas
+     * conversaciones — ElevenLabs no sintetiza audio, `call_duration_secs` no
+     * mide minutos de voz aquí. El metering de Fase 3 debe ramificar en este
+     * flag, nunca derivar consumo de `durationSeconds` cuando es `true`.
+     */
+    isTextChannel: boolean;
+    /**
+     * `metadata.platform_usage.category_usage.text_message.quantity` — cantidad
+     * de mensajes de WhatsApp de la conversación, ya resuelta por ElevenLabs.
+     * `null` cuando el payload no trae ese desglose (payload no-WhatsApp, o
+     * WhatsApp sin ese campo poblado) — nunca se infiere ni se cuenta a mano.
+     */
+    whatsappMessageQuantity: number | null;
+    /**
+     * Canal real de la conversación, derivado de
+     * `metadata.conversation_initiation_source` (nunca un literal fijo —
+     * ver src/types/lead-enums.ts). Antes de esto, `process_call_completed`
+     * escribía `'voice'` a fuego para TODO lead, incluidas conversaciones de
+     * WhatsApp — verificado contra un caso real de producción
+     * (conv_6201kzkmwnd8e658dn4c8fqg1c0d) que quedó con channel='voice'
+     * estando mal.
+     */
+    channel: LeadChannel;
+    /**
+     * Tokens de LLM por modelo (`irreversible_generation`, ver arriba).
+     * Arreglo vacío cuando el payload no trae
+     * `metadata.charging.llm_usage.irreversible_generation.model_usage` —
+     * nunca se inventa un consumo. El resolver de metering (usage-registration.ts)
+     * es responsable de advertir con el conversation_id cuando esto pasa.
+     */
+    llmTokenUsage: LlmModelTokenUsage[];
 }
 
 /**
@@ -172,6 +295,46 @@ function extractTemperature(results: DataCollectionResults | undefined, key: str
 }
 
 /**
+ * Deriva `leads.channel` de `metadata.conversation_initiation_source`
+ * (enum documentado por ElevenLabs, ver el comentario del schema arriba).
+ * Los valores de telefonía (`sip_trunk`, `twilio`, `exotel`, `genesys`,
+ * `audiocodes`) y los SDK embebidos en apps/web (`*_sdk`, `widget`) cuentan
+ * como `voice` salvo que `isTextChannel` diga lo contrario — el mismo SDK
+ * puede servir una conversación de voz o de solo texto, `text_only` es la
+ * señal real, no el SDK en sí.
+ */
+function deriveChannel(conversationInitiationSource: string | undefined, isTextChannel: boolean): LeadChannel {
+    if (conversationInitiationSource === 'whatsapp') return LEAD_CHANNELS.WHATSAPP;
+    if (conversationInitiationSource === 'twilio_sms') return LEAD_CHANNELS.SMS;
+    if (isTextChannel) return LEAD_CHANNELS.WEB;
+    return LEAD_CHANNELS.VOICE;
+}
+
+type ModelUsageMap = Record<
+    string,
+    {
+        input?: { tokens?: number };
+        output_total?: { tokens?: number };
+    }
+>;
+
+/**
+ * Extrae tokens de entrada/salida por modelo de
+ * `metadata.charging.llm_usage.irreversible_generation.model_usage`. Nunca
+ * infiere: un modelo sin `input`/`output_total` en el payload queda en 0
+ * tokens para ese lado, no se omite el modelo completo (podría tener
+ * tokens del otro lado).
+ */
+function extractLlmTokenUsage(modelUsage: ModelUsageMap | undefined): LlmModelTokenUsage[] {
+    if (!modelUsage) return [];
+    return Object.entries(modelUsage).map(([model, usage]) => ({
+        model,
+        inputTokens: usage.input?.tokens ?? 0,
+        outputTokens: usage.output_total?.tokens ?? 0,
+    }));
+}
+
+/**
  * Mapea el payload crudo (ya parseado como JSON) del webhook de post-llamada
  * de ElevenLabs a los campos que consume `process_call_completed`.
  *
@@ -201,15 +364,23 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         .join('\n');
 
     // El número de telefonía (SIP/PSTN) es la fuente autoritativa del contacto
-    // cuando existe; el número dictado por voz (telefono_contacto_prospecto)
-    // es un respaldo para canales sin telefonía (p. ej. widget web).
+    // cuando existe; whatsapp_user_id es la fuente autoritativa en canal
+    // WhatsApp (no hay tramo telefónico ahí, phone_call es null); el número
+    // dictado por voz (telefono_contacto_prospecto) es el último respaldo,
+    // para canales sin ninguno de los dos (p. ej. widget web).
     const telephonyNumber = data.metadata?.phone_call?.external_number || null;
+    const whatsappUserId = data.metadata?.whatsapp?.whatsapp_user_id || null;
     const contactPhoneRaw = extractString(results, DATA_COLLECTION_KEYS.contactPhone);
-    const phoneToNormalize = telephonyNumber || contactPhoneRaw;
+    const phoneToNormalize = telephonyNumber || whatsappUserId || contactPhoneRaw;
     const normalizedPhone = phoneToNormalize ? normalizePhoneE164(phoneToNormalize) : null;
 
     const startUnixSecs = data.metadata?.start_time_unix_secs ?? event_timestamp ?? null;
     const occurredAt = startUnixSecs !== null ? new Date(startUnixSecs * 1000) : new Date();
+
+    const isTextChannel = data.metadata?.conversation_initiation_source === 'whatsapp' || data.metadata?.text_only === true;
+    const whatsappMessageQuantity = data.metadata?.platform_usage?.category_usage?.text_message?.quantity ?? null;
+    const channel = deriveChannel(data.metadata?.conversation_initiation_source, isTextChannel);
+    const llmTokenUsage = extractLlmTokenUsage(data.metadata?.charging?.llm_usage?.irreversible_generation?.model_usage);
 
     return {
         conversationId: data.conversation_id,
@@ -232,5 +403,9 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         callVolume: extractString(results, DATA_COLLECTION_KEYS.callVolume),
         occurredAt,
         hasPhoneCallLeg: Boolean(data.metadata?.phone_call),
+        isTextChannel,
+        whatsappMessageQuantity,
+        channel,
+        llmTokenUsage,
     };
 }

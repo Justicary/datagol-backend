@@ -177,6 +177,77 @@ export class ElevenLabsAdapter implements IVoiceProvider {
   }
 
   /**
+   * Configura la política de retención/borrado del agente en ElevenLabs
+   * (`platform_settings.privacy`). `retention_days`/`record_voice` están
+   * documentados (https://elevenlabs.io/docs/agents-platform/customization/privacy/retention
+   * y /audio-saving); `delete_transcript_and_pii`, `delete_audio` y
+   * `apply_to_existing_conversations` NO aparecen en esa documentación —
+   * salieron a la luz al leer de vuelta el agente real después del primer
+   * PATCH con solo los dos campos documentados: `retention_days` por sí solo
+   * NO activa el borrado, son switches aparte. Sin
+   * `delete_transcript_and_pii`/`delete_audio` en `true`, `retention_days`
+   * queda como un número guardado sin efecto — verificado leyendo la
+   * respuesta real de la API, no asumido de la documentación pública, que
+   * está incompleta en este punto. Es un campo específico de ElevenLabs, sin
+   * equivalente en Vapi — no forma parte de `IVoiceProvider`.
+   *
+   * `retentionDays` es el ÚNICO plazo que expone la API: rige audio y
+   * transcripción juntos en el lado de ElevenLabs, no hay un segundo campo
+   * para separarlos. La retención más larga del transcript vive en nuestra
+   * propia base (`organizations.retention_days`, purgada por
+   * `public.purge_expired_call_content()`), que sí es independiente.
+   *
+   * `applyToExistingConversations`: sin esto, la política solo rige
+   * conversaciones nuevas — las que ya existen (el problema real que
+   * origina esta tarea: transcripciones de personas reales ya en la base)
+   * seguirían expuestas indefinidamente en ElevenLabs.
+   */
+  async syncAgentPrivacySettings(
+    apiKey: string,
+    agentId: string,
+    settings: {
+      retentionDays: number;
+      recordVoice: boolean;
+      deleteTranscriptAndPii: boolean;
+      deleteAudio: boolean;
+      applyToExistingConversations: boolean;
+    }
+  ): Promise<boolean> {
+    if (!apiKey || !agentId) {
+      throw new Error('Se requiere API Key y Agent ID de ElevenLabs para configurar la retención del agente.');
+    }
+
+    const payload = {
+      platform_settings: {
+        privacy: {
+          retention_days: settings.retentionDays,
+          record_voice: settings.recordVoice,
+          delete_transcript_and_pii: settings.deleteTranscriptAndPii,
+          delete_audio: settings.deleteAudio,
+          apply_to_existing_conversations: settings.applyToExistingConversations,
+        },
+      },
+    };
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agentId}`, {
+      method: 'PATCH',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as Record<string, unknown>;
+      logger.error({ errorData, agentId }, 'Error al configurar retención/privacidad del agente en ElevenLabs');
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Sincroniza la configuración del Agente en ElevenLabs ConvAI
    */
   async syncAgentConfig(

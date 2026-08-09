@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { VoiceProviderFactory } from '../services/providers/VoiceProviderFactory.js';
 import { normalizePhoneE164 } from '../services/phone-normalization.js';
+import { LEAD_CHANNELS } from '../types/lead-enums.js';
 
 // Política acordada con el usuario (docs/tasks/outbound-lead-persistence-and-rate-limit.md,
 // Problema 2): 3 llamadas/hora por IP de origen, 2 llamadas/día al mismo
@@ -145,6 +146,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
             p_summary: null,
             p_duration_seconds: 0,
             p_usage_entries: [],
+            p_channel: LEAD_CHANNELS.VOICE,
           });
           if (seedError) {
             request.log.error(

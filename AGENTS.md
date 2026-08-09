@@ -169,6 +169,8 @@ Cada PyME aporta sus propias credenciales de ElevenLabs, Telnyx y Meta.
 
 ### 🧬 10. Pruebas de Mutación con Stryker Mutator
 
+**Stryker** es una herramienta de pruebas de mutación (mutation testing) utilizada por los desarrolladores para evaluar la calidad de sus pruebas unitarias automatizadas. Funciona mediante la inserción temporal y automática de pequeños errores (llamados "mutantes") en el código fuente para comprobar si las pruebas unitarias detectan los fallos o no los perciben. Ayuda a efectividad de las pruebas y mejora de la calidad del código.
+
 Las pruebas unitarias tradicionales pueden dar una falsa sensación de seguridad al medir solo las líneas ejecutadas. Para garantizar que los tests realmente validen la lógica de negocio, implementamos Pruebas de Mutación con Stryker Mutator (`@stryker-mutator/core`).
 
 'break' permanece en 'null' hasta que las Fases 3–6 completen cobertura. Al cerrar la Fase 6 se fija en 80. Los archivos de seguridad y aislamiento (secret-service, entitlements, webhook-verification) deben mantener ≥90% desde ahora, verificado manualmente en cada PR mientras break esté desactivado.

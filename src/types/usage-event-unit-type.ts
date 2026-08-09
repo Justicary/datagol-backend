@@ -15,7 +15,27 @@
 export const USAGE_EVENT_UNIT_TYPES = {
     AGENT_MINUTE: 'agent_minute',
     SIP_INBOUND_LOCAL_MX: 'sip_inbound_local_mx',
+    WA_MESSAGE: 'wa_message',
 } as const;
+
+/**
+ * Tokens de LLM: `unit_type` no puede ser una lista fija — el modelo (clave
+ * de `metadata.charging.llm_usage.irreversible_generation.model_usage` en el
+ * payload de ElevenLabs, ej. `gemini-2.5-flash`, `gpt-4o`) cambia según qué
+ * modelo tenga configurado el agente, y ElevenLabs puede cambiarlo sin avisar.
+ * Estas funciones son la única fuente de verdad para construir ese
+ * `unit_type` dinámico — nunca interpolar el string a mano en otro lugar.
+ * Input y output se miden por separado porque tienen tarifas por token
+ * distintas (el output siempre es más caro que el input en los payloads
+ * reales verificados).
+ */
+export function llmInputTokenUnitType(model: string): string {
+    return `llm_input_token_${model}`;
+}
+
+export function llmOutputTokenUnitType(model: string): string {
+    return `llm_output_token_${model}`;
+}
 
 export type UsageEventUnitType = (typeof USAGE_EVENT_UNIT_TYPES)[keyof typeof USAGE_EVENT_UNIT_TYPES];
 
