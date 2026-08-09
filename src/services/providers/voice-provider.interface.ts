@@ -2,7 +2,9 @@ export interface OutboundCallParams {
   organizationId: string;
   customerPhone: string;
   customerName: string;
+  customerEmail?: string;
   companyName: string;
+  businessSector?: string;
   demoObjective: string;
   customVariables?: Record<string, string>;
 }

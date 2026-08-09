@@ -1,6 +1,24 @@
 import { FastifyPluginAsync } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { VoiceProviderFactory } from '../services/providers/VoiceProviderFactory.js';
+import { normalizePhoneE164 } from '../services/phone-normalization.js';
+
+// Política acordada con el usuario (docs/tasks/outbound-lead-persistence-and-rate-limit.md,
+// Problema 2): 3 llamadas/hora por IP de origen, 2 llamadas/día al mismo
+// número marcado. Cuenta también los intentos que fallan — un atacante no
+// debe poder reintentar sin límite solo porque un intento anterior fue
+// rechazado.
+const IP_RATE_LIMIT = 3;
+const IP_RATE_WINDOW_MS = 60 * 60 * 1000;
+const PHONE_RATE_LIMIT = 2;
+const PHONE_RATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function resolveSourceIp(request: any): string {
+  const forwarded = request.headers['x-forwarded-for'];
+  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const firstIp = raw ? String(raw).split(',')[0].trim() : '';
+  return firstIp || request.ip;
+}
 
 export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
   /**
@@ -12,7 +30,9 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
     const organizationId = body.organizationId || body.orgId;
     const rawPhone = body.customerPhone || body.phone || body.number || body.customer?.number;
     const customerName = body.customerName || body.name || body.customer?.name || 'Cliente Prospecto';
+    const customerEmail = body.customerEmail || body.email || body.customer?.email;
     const companyName = body.companyName || 'Empresa Prospecto';
+    const businessSector = body.industry || body.businessSector;
     const demoObjective = body.demoObjective || 'Probar agente de voz en vivo';
 
     if (!rawPhone) {
@@ -23,6 +43,43 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const phone = String(rawPhone).startsWith('+') ? String(rawPhone) : `+${rawPhone}`;
+    const normalizedTarget = normalizePhoneE164(phone);
+    const phoneKey = normalizedTarget.success ? (normalizedTarget.phoneE164 as string) : phone;
+    const sourceIp = resolveSourceIp(request);
+
+    const [{ count: phoneAttempts }, { count: ipAttempts }] = await Promise.all([
+      supabaseAdmin
+        .from('outbound_call_attempts')
+        .select('id', { count: 'exact', head: true })
+        .eq('target_phone_raw', phoneKey)
+        .gte('created_at', new Date(Date.now() - PHONE_RATE_WINDOW_MS).toISOString()),
+      supabaseAdmin
+        .from('outbound_call_attempts')
+        .select('id', { count: 'exact', head: true })
+        .eq('source_ip', sourceIp)
+        .gte('created_at', new Date(Date.now() - IP_RATE_WINDOW_MS).toISOString()),
+    ]);
+
+    if ((phoneAttempts || 0) >= PHONE_RATE_LIMIT) {
+      return reply.status(429).send({
+        status: 'error',
+        message: 'Este número ya alcanzó el límite de llamadas permitidas hoy.',
+      });
+    }
+
+    if ((ipAttempts || 0) >= IP_RATE_LIMIT) {
+      return reply.status(429).send({
+        status: 'error',
+        message: 'Demasiadas solicitudes de llamada desde este origen.',
+      });
+    }
+
+    await supabaseAdmin.from('outbound_call_attempts').insert({
+      organization_id: organizationId || null,
+      target_phone_raw: phoneKey,
+      source_ip: sourceIp,
+    });
+
     let orgConfig: Record<string, unknown> = {};
 
     if (organizationId) {
@@ -50,12 +107,61 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
           organizationId: organizationId || 'default',
           customerPhone: phone,
           customerName: String(customerName),
+          customerEmail: customerEmail ? String(customerEmail) : undefined,
           companyName: String(companyName),
+          businessSector: businessSector ? String(businessSector) : undefined,
           demoObjective: String(demoObjective),
           customVariables: body.customVariables || body.assistantOverrides?.variableValues,
         },
         orgConfig
       );
+
+      // Siembra inmediata de contacts/call_logs/leads con los datos confiables
+      // del formulario, en cuanto ElevenLabs confirma el conversation_id — no
+      // espera al webhook de post-llamada, que solo persiste lo que el agente
+      // vuelve a preguntar en voz (docs/tasks/outbound-lead-persistence-and-rate-limit.md,
+      // Problema 1). El webhook real, cuando llegue, fusiona sobre esta
+      // siembra vía el ON CONFLICT DO UPDATE de process_call_completed
+      // (migración 13) sin perder temperature/booked_appointment/needs_followup.
+      if (organizationId) {
+        try {
+          const { error: seedError } = await supabaseAdmin.rpc('process_call_completed', {
+            p_organization_id: organizationId,
+            p_conversation_id: result.callId,
+            p_provider_call_id: result.callId,
+            p_caller_phone_e164: normalizedTarget.success ? normalizedTarget.phoneE164 : null,
+            p_full_name: String(customerName),
+            p_email: customerEmail ? String(customerEmail) : null,
+            p_business_name: String(companyName),
+            p_business_sector: businessSector ? String(businessSector) : null,
+            p_contact_phone_raw: phone,
+            p_inquiry_reason: String(demoObjective),
+            p_temperature: null,
+            p_booked_appointment: false,
+            p_needs_followup: false,
+            p_followup_notes: null,
+            p_call_volume: null,
+            p_transcript: null,
+            p_summary: null,
+            p_duration_seconds: 0,
+            p_usage_entries: [],
+          });
+          if (seedError) {
+            request.log.error(
+              { err: seedError, conversationId: result.callId, organizationId },
+              'No se pudo sembrar el lead inicial de la llamada saliente con los datos del formulario'
+            );
+          }
+        } catch (seedErr: any) {
+          // La llamada real de ElevenLabs ya se disparó y cuesta dinero de
+          // cualquier forma — un error al sembrar el lead no debe tumbar la
+          // respuesta al frontend.
+          request.log.error(
+            { err: seedErr, conversationId: result.callId, organizationId },
+            'Error inesperado al sembrar el lead inicial de la llamada saliente'
+          );
+        }
+      }
 
       return reply.send({
         status: 'success',

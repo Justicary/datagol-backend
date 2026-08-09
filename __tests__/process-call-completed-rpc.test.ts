@@ -129,6 +129,64 @@ describe('2.2 — RPC process_call_completed', () => {
         await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', secondConversationId);
     });
 
+    it('fusiona la siembra de formulario (llamada outbound) con el webhook real: temperature/booked_appointment se actualizan, full_name/email del formulario no se pisan con lo dictado por voz (docs/tasks/outbound-lead-persistence-and-rate-limit.md, migración 13)', async () => {
+        const mergeConversationId = `${conversationId}-merge`;
+        const mergePhone = `+521650002${Math.floor(Math.random() * 9000 + 1000)}`;
+
+        // 1. Siembra inmediata (voice.ts, en cuanto ElevenLabs confirma el
+        //    conversation_id): solo datos confiables del formulario, sin
+        //    temperature/booked_appointment (el agente aún no ha hablado).
+        const seed = await callRpc({
+            p_conversation_id: mergeConversationId,
+            p_provider_call_id: mergeConversationId,
+            p_caller_phone_e164: mergePhone,
+            p_full_name: 'Roberto Díaz',
+            p_email: 'roberto@example.com',
+            p_inquiry_reason: 'Probar agente de voz en vivo',
+            p_transcript: null,
+            p_summary: null,
+            p_duration_seconds: 0,
+        });
+        expect(seed.error).toBeNull();
+        expect(seed.data.lead_inserted).toBe(true);
+
+        // 2. Webhook real, minutos después: mismo conversation_id, ahora con
+        //    temperature/booked_appointment capturados en vivo, y un
+        //    full_name distinto (dictado por voz — menos confiable que el
+        //    formulario, no debe pisar el ya capturado).
+        const webhook = await callRpc({
+            p_conversation_id: mergeConversationId,
+            p_provider_call_id: mergeConversationId,
+            p_caller_phone_e164: mergePhone,
+            p_full_name: 'Nombre Mal Entendido Por Voz',
+            p_temperature: 'caliente',
+            p_booked_appointment: true,
+            p_transcript: 'Cliente: Hola.\nAgente: ¿En qué te ayudo?',
+            p_summary: 'Llamada completada.',
+            p_duration_seconds: 95,
+        });
+        expect(webhook.error).toBeNull();
+        expect(webhook.data.lead_inserted).toBe(false);
+        expect(webhook.data.lead_id).toBe(seed.data.lead_id);
+
+        const { data: lead } = await supabaseAdmin
+            .from('leads')
+            .select('full_name, email, temperature, booked_appointment')
+            .eq('id', seed.data.lead_id)
+            .single();
+
+        // temperature/booked_appointment: el webhook sí los actualiza (NULL/false en la siembra).
+        expect(lead?.temperature).toBe('caliente');
+        expect(lead?.booked_appointment).toBe(true);
+        // full_name/email: los del formulario no se pisan con lo dictado por voz.
+        expect(lead?.full_name).toBe('Roberto Díaz');
+        expect(lead?.email).toBe('roberto@example.com');
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', mergeConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', mergeConversationId);
+        await supabaseAdmin.from('contacts').delete().eq('phone_e164', mergePhone);
+    });
+
     it('normalización E.164: un teléfono no normalizable (null) no aborta el procesamiento — el lead se crea sin contact_id', async () => {
         const noPhoneConversationId = `${conversationId}-no-phone`;
         const { data, error } = await supabaseAdmin.rpc('process_call_completed', {

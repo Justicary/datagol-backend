@@ -125,8 +125,16 @@ export class ElevenLabsAdapter implements IVoiceProvider {
       throw new Error(errorMsg);
     }
 
+    const conversationId = (data.conversation_id as string) || (data.call_id as string);
+    if (!conversationId) {
+      // Un ID sintético aquí nunca coincidiría con el conversation_id real
+      // que trae el webhook de post-llamada — generaría dos registros
+      // huérfanos que jamás se fusionan. Mejor un error visible.
+      throw new Error('ElevenLabs no devolvió conversation_id ni call_id en la respuesta de outbound-call.');
+    }
+
     return {
-      callId: (data.conversation_id as string) || (data.call_id as string) || 'el_' + Date.now(),
+      callId: conversationId,
       status: 'queued',
       provider: 'elevenlabs',
       rawResponse: data,
