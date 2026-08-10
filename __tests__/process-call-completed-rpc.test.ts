@@ -619,3 +619,118 @@ describe('Continuidad cross-canal — WhatsApp (whatsapp_user_id) vs. voz previa
         expect(lead?.contact_phone).toBe(EXISTING_CONTACT_PHONE);
     });
 });
+
+/**
+ * Migración 21 — `call_logs.channel` y deduplicación de identidad de
+ * contacto por correo cuando el teléfono no coincide (misma persona, dos
+ * canales, dos teléfonos distintos capturados — ej. un número dictado por
+ * voz mal transcrito vs. un whatsapp_user_id verificado).
+ */
+describe('Migración 21 — call_logs.channel y deduplicación de contacto por correo (fallback de teléfono)', () => {
+    const conversationIdA = `test-migration-21-a:${Date.now()}`;
+    const conversationIdB = `test-migration-21-b:${Date.now()}`;
+    const phoneA = `+521650003${Math.floor(Math.random() * 900 + 100)}`;
+    const phoneB = `+521650004${Math.floor(Math.random() * 900 + 100)}`;
+    const sharedEmail = `dedupe-test-${Date.now()}@example.invalid`;
+
+    afterAll(async () => {
+        await supabaseAdmin.from('leads').delete().in('conversation_id', [conversationIdA, conversationIdB, `${conversationIdA}-c`]);
+        await supabaseAdmin.from('call_logs').delete().in('provider_call_id', [conversationIdA, conversationIdB, `${conversationIdA}-c`]);
+        await supabaseAdmin.from('contacts').delete().in('phone_e164', [phoneA, phoneB]);
+    });
+
+    function callRpc21(overrides: Record<string, unknown>) {
+        return supabaseAdmin.rpc('process_call_completed', {
+            p_organization_id: REAL_ORG_ID,
+            p_full_name: null,
+            p_email: null,
+            p_business_name: null,
+            p_business_sector: null,
+            p_contact_phone_raw: null,
+            p_inquiry_reason: null,
+            p_temperature: null,
+            p_booked_appointment: false,
+            p_needs_followup: false,
+            p_followup_notes: null,
+            p_call_volume: null,
+            p_transcript: '',
+            p_summary: '',
+            p_duration_seconds: 0,
+            p_channel: 'voice',
+            ...overrides,
+        });
+    }
+
+    it('persiste `channel` en call_logs con el mismo valor que leads.channel', async () => {
+        const { data, error } = await callRpc21({
+            p_conversation_id: conversationIdA,
+            p_provider_call_id: conversationIdA,
+            p_caller_phone_e164: phoneA,
+            p_full_name: 'Prospecto Canal Test',
+            p_email: sharedEmail,
+            p_transcript: 'Cliente: Hola por WhatsApp.',
+            p_summary: 'Primer contacto por WhatsApp.',
+            p_duration_seconds: 20,
+            p_channel: 'whatsapp',
+        });
+        expect(error).toBeNull();
+
+        const { data: callLog } = await supabaseAdmin.from('call_logs').select('channel').eq('id', data.call_log_id).single();
+        expect(callLog?.channel).toBe('whatsapp');
+    });
+
+    it('una segunda conversación con TELÉFONO DISTINTO pero el MISMO correo se vincula al contacto existente — no crea un contacto fantasma', async () => {
+        const { data: firstContact } = await supabaseAdmin
+            .from('contacts')
+            .select('id, phone_e164')
+            .eq('organization_id', REAL_ORG_ID)
+            .eq('phone_e164', phoneA)
+            .single();
+        expect(firstContact).not.toBeNull();
+
+        const { data, error } = await callRpc21({
+            p_conversation_id: conversationIdB,
+            p_provider_call_id: conversationIdB,
+            p_caller_phone_e164: phoneB, // teléfono DISTINTO al de la primera conversación
+            p_full_name: 'Prospecto Canal Test',
+            p_email: sharedEmail, // MISMO correo → debe resolver al mismo contacto
+            p_transcript: 'Cliente: Hola, llamé antes por WhatsApp.',
+            p_summary: 'Segundo contacto, ahora por voz, teléfono dictado distinto.',
+            p_duration_seconds: 40,
+        });
+
+        expect(error).toBeNull();
+        expect(data.contact_id).toBe(firstContact!.id); // mismo contacto, no uno nuevo
+
+        const { data: ghostContact } = await supabaseAdmin
+            .from('contacts')
+            .select('id')
+            .eq('organization_id', REAL_ORG_ID)
+            .eq('phone_e164', phoneB)
+            .maybeSingle();
+        expect(ghostContact).toBeNull(); // nunca se creó un contacto fantasma con phoneB
+
+        const { data: contactAfter } = await supabaseAdmin.from('contacts').select('phone_e164').eq('id', firstContact!.id).single();
+        expect(contactAfter?.phone_e164).toBe(phoneA); // el teléfono original nunca se sobreescribe por la coincidencia de correo
+    });
+
+    it('contraparte de éxito: el teléfono tiene prioridad sobre el correo — un teléfono ya conocido resuelve al contacto correcto aunque el correo no coincida', async () => {
+        const conversationIdC = `${conversationIdA}-c`;
+        const { data, error } = await callRpc21({
+            p_conversation_id: conversationIdC,
+            p_provider_call_id: conversationIdC,
+            p_caller_phone_e164: phoneA, // mismo teléfono que la primera conversación
+            p_email: 'correo-diferente@example.invalid', // correo distinto, no debe importar
+        });
+        expect(error).toBeNull();
+
+        const { data: contact } = await supabaseAdmin
+            .from('contacts')
+            .select('id, email')
+            .eq('organization_id', REAL_ORG_ID)
+            .eq('phone_e164', phoneA)
+            .single();
+        expect(data.contact_id).toBe(contact!.id);
+        expect(contact?.email).toBe(sharedEmail); // el correo capturado primero no se sobreescribe
+    });
+});

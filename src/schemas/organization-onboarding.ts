@@ -45,7 +45,7 @@ export const planBodySchema = z.object({
 });
 export type PlanBody = z.infer<typeof planBodySchema>;
 
-export const CREDENTIAL_PROVIDERS = ['elevenlabs', 'telnyx', 'meta', 'cal'] as const;
+export const CREDENTIAL_PROVIDERS = ['elevenlabs', 'telnyx', 'meta', 'cal', 'google_maps'] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export const credentialsBodySchema = z.object({

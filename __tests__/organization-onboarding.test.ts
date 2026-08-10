@@ -8,7 +8,7 @@ import supabasePlugin from '../src/plugins/supabase.js';
 import organizationOnboardingRoutes from '../src/routes/organization-onboarding.js';
 import { setOrganizationPlan, setFeatureOverride, clearEntitlementsCache } from '../src/services/entitlements.js';
 import { reprovisionAgent } from '../src/services/agent-provisioning.js';
-import { setSecret } from '../src/services/secret-service.js';
+import { setSecret, getSecret } from '../src/services/secret-service.js';
 import * as secretService from '../src/services/secret-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
 
@@ -252,6 +252,25 @@ describe('routes/organization-onboarding.ts', () => {
 
                 const allLoggedArgs = JSON.stringify([...logInfoSpy.mock.calls, ...logErrorSpy.mock.calls]);
                 expect(allLoggedArgs).not.toContain(secretValue);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('provider "google_maps" (opcional, geocodificación de dirección del prospecto) se guarda como SECRET_KEYS.GOOGLE_MAPS_KEY', async () => {
+            const secretValue = 'AIzaSyTestGoogleMapsKeyFake123456';
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: `/api/organizations/${orgId}/credentials`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { provider: 'google_maps', value: secretValue },
+                });
+                expect(response.statusCode).toBe(200);
+
+                const stored = await getSecret(orgId, SECRET_KEYS.GOOGLE_MAPS_KEY);
+                expect(stored).toBe(secretValue);
             } finally {
                 await app.close();
             }

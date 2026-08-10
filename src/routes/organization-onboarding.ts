@@ -188,6 +188,10 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
             telnyx: SECRET_KEYS.TELNYX_API_KEY,
             meta: SECRET_KEYS.WHATSAPP_ACCESS_TOKEN,
             cal: SECRET_KEYS.CAL_API_KEY,
+            // Opcional (AGENTS.md, captura de dirección del prospecto): sin
+            // ella, services/geocoding.ts simplemente omite la geocodificación
+            // — nunca bloquea el resto del onboarding ni ninguna feature.
+            google_maps: SECRET_KEYS.GOOGLE_MAPS_KEY,
         };
         const { provider, value } = bodyResult.data;
         const secretKey = PROVIDER_TO_SECRET_KEY[provider];
