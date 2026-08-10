@@ -247,6 +247,97 @@ describe('2.2 — RPC process_call_completed', () => {
         await supabaseAdmin.from('leads').delete().eq('conversation_id', noPhoneConversationId);
         await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', noPhoneConversationId);
     });
+
+    /**
+     * Migración 19 — dirección de servicio del prospecto y coordenadas
+     * geocodificadas. El RPC solo persiste lo que recibe (la geocodificación
+     * real vía Google Maps ocurre antes, en jobs/process-call-completed.ts —
+     * ver __tests__/geocoding.test.ts); aquí se verifica que call_logs
+     * guarda los 6 campos nuevos y que un reintento con esos campos vacíos
+     * no borra un dato ya bueno (mismo patrón COALESCE que customer_name).
+     */
+    it('persiste customer_address/city/state/zip/lat/lng en call_logs', async () => {
+        const addressConversationId = `${conversationId}-address`;
+        const { data, error } = await callRpc({
+            p_conversation_id: addressConversationId,
+            p_provider_call_id: addressConversationId,
+            p_customer_address: 'Calle Reforma 123',
+            p_customer_city: 'Puebla',
+            p_customer_state: 'Puebla',
+            p_customer_zip: '72000',
+            p_customer_lat: 19.0433,
+            p_customer_lng: -98.1982,
+        });
+        expect(error).toBeNull();
+
+        const { data: callLog } = await supabaseAdmin
+            .from('call_logs')
+            .select('customer_address, customer_city, customer_state, customer_zip, customer_lat, customer_lng')
+            .eq('id', data.call_log_id)
+            .single();
+
+        expect(callLog?.customer_address).toBe('Calle Reforma 123');
+        expect(callLog?.customer_city).toBe('Puebla');
+        expect(callLog?.customer_state).toBe('Puebla');
+        expect(callLog?.customer_zip).toBe('72000');
+        expect(Number(callLog?.customer_lat)).toBeCloseTo(19.0433, 4);
+        expect(Number(callLog?.customer_lng)).toBeCloseTo(-98.1982, 4);
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', addressConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', addressConversationId);
+    });
+
+    it('contraparte de éxito: sin los parámetros de dirección (DEFAULT NULL), call_logs no falla y queda con esos campos en null', async () => {
+        const noAddressConversationId = `${conversationId}-no-address`;
+        const { data, error } = await callRpc({
+            p_conversation_id: noAddressConversationId,
+            p_provider_call_id: noAddressConversationId,
+        });
+        expect(error).toBeNull();
+
+        const { data: callLog } = await supabaseAdmin
+            .from('call_logs')
+            .select('customer_address, customer_lat, customer_lng')
+            .eq('id', data.call_log_id)
+            .single();
+
+        expect(callLog?.customer_address).toBeNull();
+        expect(callLog?.customer_lat).toBeNull();
+        expect(callLog?.customer_lng).toBeNull();
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', noAddressConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', noAddressConversationId);
+    });
+
+    it('no sobrescribe una dirección ya buena de call_logs con una vacía en un reintento (mismo patrón COALESCE que customer_name)', async () => {
+        const retryConversationId = `${conversationId}-address-retry`;
+        const first = await callRpc({
+            p_conversation_id: retryConversationId,
+            p_provider_call_id: retryConversationId,
+            p_customer_address: 'Calle Reforma 123',
+            p_customer_city: 'Puebla',
+        });
+        expect(first.error).toBeNull();
+
+        const second = await callRpc({
+            p_conversation_id: retryConversationId,
+            p_provider_call_id: retryConversationId,
+            p_summary: 'Reintento del webhook sin dirección',
+        });
+        expect(second.error).toBeNull();
+
+        const { data: callLog } = await supabaseAdmin
+            .from('call_logs')
+            .select('customer_address, customer_city')
+            .eq('id', first.data.call_log_id)
+            .single();
+
+        expect(callLog?.customer_address).toBe('Calle Reforma 123');
+        expect(callLog?.customer_city).toBe('Puebla');
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', retryConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', retryConversationId);
+    });
 });
 
 /**

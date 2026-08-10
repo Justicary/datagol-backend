@@ -16,6 +16,7 @@ export const SECRET_KEYS = {
     META_APP_SECRET: 'meta_app_secret',
     WEBHOOK_SIGNING_SECRET: 'webhook_signing_secret',
     TOOL_WEBHOOK_SECRET: 'tool_webhook_secret',
+    GOOGLE_MAPS_KEY: 'google_maps_key',
 } as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[keyof typeof SECRET_KEYS];

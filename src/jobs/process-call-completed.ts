@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import type { Job } from 'pg-boss';
 import { mapElevenLabsPayload } from '../services/call-payload-mapper.js';
+import { geocodeAddress } from '../services/geocoding.js';
 import { resolveCallUsageEntries } from '../services/usage-registration.js';
 import { LEAD_TEMPERATURES } from '../types/lead-enums.js';
 import { NOTIFY_HOT_LEAD_QUEUE } from './notify-hot-lead.js';
@@ -81,6 +82,18 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         llmTokenUsage: mapped.llmTokenUsage,
     });
 
+    // Geocodificación (opcional por organización, ver services/geocoding.ts):
+    // resuelta ANTES del RPC porque process_call_completed solo persiste, no
+    // llama a proveedores externos. Sin google_maps_key configurada o sin
+    // dirección capturada, geocodeAddress devuelve null y lat/lng quedan
+    // NULL en call_logs — la dirección en texto se guarda de todos modos.
+    const geocoded = await geocodeAddress(fastify, event.organization_id, {
+        address: mapped.address,
+        city: mapped.city,
+        state: mapped.state,
+        zip: mapped.zip,
+    });
+
     const { data: result, error: rpcError } = await fastify.supabaseAdmin.rpc('process_call_completed', {
         p_organization_id: event.organization_id,
         p_conversation_id: mapped.conversationId,
@@ -102,6 +115,12 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         p_duration_seconds: mapped.durationSeconds,
         p_usage_entries: usageEntries,
         p_channel: mapped.channel,
+        p_customer_address: mapped.address,
+        p_customer_city: mapped.city,
+        p_customer_state: mapped.state,
+        p_customer_zip: mapped.zip,
+        p_customer_lat: geocoded?.lat ?? null,
+        p_customer_lng: geocoded?.lng ?? null,
     });
 
     if (rpcError) {

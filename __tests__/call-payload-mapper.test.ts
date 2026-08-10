@@ -38,6 +38,10 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
                 correo_electronico_prospecto: { value: 'juana@example.com' },
                 motivo_consulta: { value: 'Cotización de instalación' },
                 cita_programada: { value: true },
+                direccion_prospecto: { value: 'Calle Reforma 123' },
+                ciudad_prospecto: { value: 'Puebla' },
+                estado_prospecto: { value: 'Puebla' },
+                cp_prospecto: { value: '72000' },
                 nombre_negocio: { value: 'Ferretería Pérez' },
                 giro_negocio: { value: 'Ferretería' },
                 temperatura: { value: 'caliente' },
@@ -54,6 +58,10 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
         expect(mapped!.email).toBe('juana@example.com');
         expect(mapped!.inquiryReason).toBe('Cotización de instalación');
         expect(mapped!.bookedAppointment).toBe(true);
+        expect(mapped!.address).toBe('Calle Reforma 123');
+        expect(mapped!.city).toBe('Puebla');
+        expect(mapped!.state).toBe('Puebla');
+        expect(mapped!.zip).toBe('72000');
         expect(mapped!.businessName).toBe('Ferretería Pérez');
         expect(mapped!.businessSector).toBe('Ferretería');
         expect(mapped!.temperature).toBe('caliente');
@@ -91,6 +99,10 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
         expect(mapped!.inquiryReason).toBe('Cotización de instalación');
         expect(mapped!.bookedAppointment).toBe(true);
 
+        expect(mapped!.address).toBeNull();
+        expect(mapped!.city).toBeNull();
+        expect(mapped!.state).toBeNull();
+        expect(mapped!.zip).toBeNull();
         expect(mapped!.businessName).toBeNull();
         expect(mapped!.businessSector).toBeNull();
         expect(mapped!.temperature).toBeNull();
@@ -106,6 +118,10 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
         expect(mapped).not.toBeNull();
         expect(mapped!.fullName).toBeNull();
         expect(mapped!.email).toBeNull();
+        expect(mapped!.address).toBeNull();
+        expect(mapped!.city).toBeNull();
+        expect(mapped!.state).toBeNull();
+        expect(mapped!.zip).toBeNull();
         expect(mapped!.businessName).toBeNull();
         expect(mapped!.businessSector).toBeNull();
         expect(mapped!.inquiryReason).toBeNull();
@@ -186,6 +202,32 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
         const mapped = mapElevenLabsPayload(payload);
         expect(mapped!.fullName).toBe('Ana Torres');
         expect(mapped!.bookedAppointment).toBe(false);
+    });
+
+    describe('address/city/state/zip (dirección de servicio del prospecto, campos agregados por el usuario en Data Collection)', () => {
+        it('mapea solo los campos de dirección presentes, sin inventar los ausentes', () => {
+            const payload = buildPayload({
+                dataCollectionResults: {
+                    direccion_prospecto: { value: 'Av. Juárez 45' },
+                    ciudad_prospecto: { value: 'Cholula' },
+                    // estado_prospecto/cp_prospecto ausentes a propósito.
+                },
+            });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.address).toBe('Av. Juárez 45');
+            expect(mapped!.city).toBe('Cholula');
+            expect(mapped!.state).toBeNull();
+            expect(mapped!.zip).toBeNull();
+        });
+
+        it('contraparte de rechazo: sin ninguno de los 4 campos, address/city/state/zip quedan null', () => {
+            const payload = buildPayload({ dataCollectionResults: { motivo_consulta: { value: 'Otra cosa' } } });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.address).toBeNull();
+            expect(mapped!.city).toBeNull();
+            expect(mapped!.state).toBeNull();
+            expect(mapped!.zip).toBeNull();
+        });
     });
 
     describe('3.1/3.2 — occurredAt y hasPhoneCallLeg (soporte de metering)', () => {

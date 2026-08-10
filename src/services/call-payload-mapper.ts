@@ -164,6 +164,19 @@ export interface MappedCallData {
     businessName: string | null;
     businessSector: string | null;
     inquiryReason: string | null;
+    /**
+     * Dirección de servicio del prospecto, tal como la dicta (sin
+     * geocodificar). `address` es la calle y número; `city`/`state`/`zip`
+     * son los campos separados que el agente captura en Data Collection
+     * (`ciudad_prospecto`/`estado_prospecto`/`cp_prospecto`). La
+     * geocodificación a lat/lng ocurre después, en
+     * jobs/process-call-completed.ts vía services/geocoding.ts — este
+     * mapper solo lee lo que ElevenLabs entrega.
+     */
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
     temperature: LeadTemperature | null;
     bookedAppointment: boolean;
     needsFollowup: boolean;
@@ -230,8 +243,11 @@ export interface MappedCallData {
  * y hay que volver a sincronizarlo aquí, nunca al revés.
  *
  * `fullName`/`contactPhone`/`email`/`bookedAppointment` verificados contra
- * una conversación real (captura de Analysis → Data Collection). El resto
- * (`businessName`, `businessSector`, `temperature`, `needsFollowup`,
+ * una conversación real (captura de Analysis → Data Collection).
+ * `address`/`city`/`state`/`zip` igual, agregados por el usuario en el
+ * dashboard de ElevenLabs para capturar la dirección de servicio del
+ * prospecto (ver services/geocoding.ts para la resolución a lat/lng). El
+ * resto (`businessName`, `businessSector`, `temperature`, `needsFollowup`,
  * `followupNotes`, `callVolume`) son especulativos: el agente aún no los
  * captura, no hay evidencia de qué nombre tendrían si se configuraran.
  */
@@ -241,6 +257,10 @@ const DATA_COLLECTION_KEYS = {
     email: 'correo_electronico_prospecto',
     inquiryReason: 'motivo_consulta',
     bookedAppointment: 'cita_programada',
+    address: 'direccion_prospecto',
+    city: 'ciudad_prospecto',
+    state: 'estado_prospecto',
+    zip: 'cp_prospecto',
     businessName: 'nombre_negocio',
     businessSector: 'giro_negocio',
     temperature: 'temperatura',
@@ -396,6 +416,10 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         businessName: extractString(results, DATA_COLLECTION_KEYS.businessName),
         businessSector: extractString(results, DATA_COLLECTION_KEYS.businessSector),
         inquiryReason: extractString(results, DATA_COLLECTION_KEYS.inquiryReason),
+        address: extractString(results, DATA_COLLECTION_KEYS.address),
+        city: extractString(results, DATA_COLLECTION_KEYS.city),
+        state: extractString(results, DATA_COLLECTION_KEYS.state),
+        zip: extractString(results, DATA_COLLECTION_KEYS.zip),
         temperature: extractTemperature(results, DATA_COLLECTION_KEYS.temperature),
         bookedAppointment: extractBoolean(results, DATA_COLLECTION_KEYS.bookedAppointment),
         needsFollowup: extractBoolean(results, DATA_COLLECTION_KEYS.needsFollowup),
