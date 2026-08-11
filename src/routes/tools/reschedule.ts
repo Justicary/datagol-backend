@@ -2,18 +2,20 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { resolveToolOrganization } from '../../lib/tool-auth.js';
 import { withToolTimeout, ToolTimeoutError } from '../../lib/tool-timeout.js';
 import { rescheduleBooking, CalCredentialsMissingError, CalProviderError } from '../../services/cal-com-tool-client.js';
+import { normalizePhoneE164 } from '../../services/phone-normalization.js';
 import { toolParamsSchema, rescheduleBodySchema, rescheduleResponseSchema, isValidDateString } from '../../schemas/tool-routes.js';
 
 const DEGRADED_MESSAGE = 'No puedo reprogramar la cita en este momento, ¿te llamo de vuelta?';
 const NOT_FOUND_MESSAGE =
-    'No encontré una cita a tu nombre con ese correo. ¿Podrías confirmarme el nombre completo y el correo con el que la agendaste?';
+    'No encontré una cita a tu nombre con esos datos. ¿Podrías confirmarme el nombre completo y el teléfono o correo con el que la agendaste?';
+const MISSING_CONTACT_MESSAGE = 'Para buscar tu cita necesito al menos tu número de teléfono o tu correo electrónico, ¿me compartes uno de los dos?';
 const NO_CAL_SYNC_MESSAGE = 'Encontré tu cita pero no puedo sincronizarla con el calendario en este momento. Te recomiendo contactar directamente al negocio.';
 
 /**
  * POST /tools/:webhookToken/reschedule — Fase 5.2.
  * Verifica que la cita exista y pertenezca a quien llama, por nombre y
- * correo, antes de tocarla. Si no coincide, devuelve un mensaje claro que el
- * agente pueda verbalizar — nunca un fallo genérico.
+ * correo y/o teléfono, antes de tocarla. Si no coincide, devuelve un mensaje
+ * claro que el agente pueda verbalizar — nunca un fallo genérico.
  */
 export async function rescheduleToolRoute(fastify: FastifyInstance) {
     fastify.post('/tools/:webhookToken/reschedule', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -37,22 +39,40 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
         if (!bodyResult.success) {
             return reply.status(400).send({ error: 'BadRequest', message: 'Cuerpo de la petición inválido' });
         }
-        const { customerName, customerEmail, newStartTime } = bodyResult.data;
+        const { customerName, customerEmail, customerPhone, newStartTime } = bodyResult.data;
 
         if (!isValidDateString(newStartTime)) {
             return reply.status(400).send({ error: 'BadRequest', message: 'newStartTime no es una fecha válida' });
         }
 
-        // Dueño de la cita verificado por nombre + correo, nunca solo por un
-        // ID que el LLM podría inventar o repetir de otra llamada.
-        const { data: appointment, error: lookupError } = await fastify.supabaseAdmin
+        // La cita original pudo haberse agendado solo con teléfono (canal web
+        // chat sin correo) o solo con correo — pero reprogramar exige alguno
+        // de los dos para poder ubicarla con seguridad.
+        if (!customerEmail && !customerPhone) {
+            return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: MISSING_CONTACT_MESSAGE }));
+        }
+
+        // Dueño de la cita verificado por nombre + (correo y/o teléfono),
+        // nunca solo por un ID que el LLM podría inventar o repetir de otra
+        // llamada. Si se da un solo identificador, se filtra solo por ese;
+        // si se dan ambos, deben coincidir los dos.
+        let appointmentQuery = fastify.supabaseAdmin
             .from('appointments')
             .select('id, cal_booking_id, start_time, end_time, customer_name, customer_email')
             .eq('organization_id', auth.organizationId)
-            .ilike('customer_email', customerEmail.trim())
             .ilike('customer_name', customerName.trim())
             .neq('status', 'cancelled')
-            .gt('start_time', new Date().toISOString())
+            .gt('start_time', new Date().toISOString());
+
+        if (customerEmail) {
+            appointmentQuery = appointmentQuery.ilike('customer_email', customerEmail.trim());
+        }
+        if (customerPhone) {
+            const normalizedPhone = normalizePhoneE164(customerPhone);
+            appointmentQuery = appointmentQuery.eq('customer_phone', normalizedPhone.success ? normalizedPhone.phoneE164 : customerPhone.trim());
+        }
+
+        const { data: appointment, error: lookupError } = await appointmentQuery
             .order('start_time', { ascending: true })
             .limit(1)
             .maybeSingle();

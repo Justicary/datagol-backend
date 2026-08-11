@@ -164,7 +164,7 @@ describe('src/services/cal-com-tool-client.ts', () => {
         const sentBody = JSON.parse(calCall?.[1]?.body as string);
         expect(sentBody.eventTypeId).toBe(42);
         expect(sentBody.attendee.name).toBe('Prospecto de Prueba');
-        expect(sentBody.bookingFieldsResponses.phone).toBe('+525599999999');
+        expect(sentBody.bookingFieldsResponses.attendeePhoneNumber).toBe('+525599999999');
     });
 
     it('rescheduleBooking llama al endpoint de reschedule con el calBookingId correcto', async () => {

@@ -79,7 +79,8 @@ datagol-api/
 │   ├── schemas/               # Esquemas Zod compartidos
 │   ├── lib/                   # Clientes de servicios (supabase, elevenlabs, telnyx, meta)
 │   └── types/                 # Tipos compartidos
-├── db/migrations/             # Migraciones SQL versionadas
+├── db/                        # Esquema de la Base de Datos
+│   └── migrations/            # Migraciones SQL versionadas
 └── __tests__/                 # Pruebas unitarias e integración (Vitest)
 ```
 

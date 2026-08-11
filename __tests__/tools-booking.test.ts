@@ -242,6 +242,75 @@ describe('POST /tools/:webhookToken/booking', () => {
         }
     });
 
+    it('sin teléfono ni correo: responde booked=false pidiendo uno de los dos, sin llamar a Cal.com', async () => {
+        const conversationId = `booking-test:${Date.now()}:no-contact`;
+        createdConversationIds.push(conversationId);
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { conversationId, customerName: 'Cliente Sin Contacto', startTime: '2026-09-04T10:00:00Z' },
+            });
+
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.booked).toBe(false);
+            expect(body.message).toContain('teléfono');
+            expect(vi.mocked(createBooking)).not.toHaveBeenCalled();
+
+            const { data: rows } = await supabaseAdmin.from('appointments').select('id').eq('conversation_id', conversationId);
+            expect(rows).toHaveLength(0);
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('contraparte de éxito: web chat sin teléfono agenda solo con correo, sin contact_id', async () => {
+        const conversationId = `booking-test:${Date.now()}:email-only`;
+        createdConversationIds.push(conversationId);
+
+        vi.mocked(createBooking).mockResolvedValue({
+            calBookingId: 'cal_booking_test_email_only',
+            startTime: '2026-09-05T10:00:00.000Z',
+            endTime: '2026-09-05T10:30:00.000Z',
+        });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { conversationId, customerName: 'Cliente Web Chat Sin Teléfono', customerEmail: 'webchat-sin-telefono@example.invalid', startTime: '2026-09-05T10:00:00Z' },
+            });
+
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.booked).toBe(true);
+
+            const { data: appointment } = await supabaseAdmin
+                .from('appointments')
+                .select('contact_id, customer_phone, customer_email')
+                .eq('conversation_id', conversationId)
+                .single();
+            expect(appointment?.contact_id).toBeNull();
+            expect(appointment?.customer_phone).toBeNull();
+            expect(appointment?.customer_email).toBe('webchat-sin-telefono@example.invalid');
+
+            expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
+                expect.anything(),
+                REAL_ORG_ID,
+                expect.objectContaining({ customerPhone: null, customerEmail: 'webchat-sin-telefono@example.invalid' }),
+                expect.anything()
+            );
+        } finally {
+            await app.close();
+        }
+    });
+
     it('degradación: si Cal.com falla, responde 200 con booked=false y un mensaje verbalizable en vez de un 500', async () => {
         const conversationId = `booking-test:${Date.now()}:degraded`;
         createdConversationIds.push(conversationId);

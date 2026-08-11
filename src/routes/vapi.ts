@@ -194,26 +194,32 @@ export const vapiRoutes: FastifyPluginAsync = async (fastify) => {
                         call.name === 'cancel_appointment'
                     ) {
                         try {
-                            // Resolver organizationId si no fue enviado explícitamente por el modelo
+                            // El tenant se resuelve SIEMPRE por vapi_agent_id, nunca por
+                            // un organizationId que el LLM pudiera incluir en sus propios
+                            // argumentos — sería un parámetro alucinable/falsificable
+                            // (AGENTS.md §5.1), y es exactamente el campo que decide qué
+                            // credenciales de Cal.com se usan.
                             const vapiAgentId = message.call?.assistantId || message.assistant?.id;
-                            if (!call.args.organizationId && vapiAgentId) {
+                            let organizationId: string | null = null;
+                            if (vapiAgentId) {
                                 const { data: orgData } = await supabaseAdmin
                                     .from('organizations')
                                     .select('id')
                                     .eq('vapi_agent_id', vapiAgentId)
                                     .maybeSingle();
-
-                                if (orgData) {
-                                    call.args.organizationId = orgData.id;
-                                }
+                                organizationId = orgData?.id ?? null;
                             }
 
-                            // Resolver callLogId si está disponible
-                            if (!call.args.callLogId && message.call?.id) {
-                                call.args.callLogId = message.call.id;
+                            if (!organizationId) {
+                                fastify.log.error({ vapiAgentId, toolName: call.name }, 'No se pudo resolver organización por vapi_agent_id para tool-call de calendario');
+                                results.push({
+                                    toolCallId: call.id,
+                                    result: 'No se pudo identificar la organización para esta solicitud.',
+                                });
+                                continue;
                             }
 
-                            const responseText = await handleCalendarToolCall(call.name, call.args);
+                            const responseText = await handleCalendarToolCall(fastify, organizationId, call.name, call.args);
                             results.push({
                                 toolCallId: call.id,
                                 result: responseText,

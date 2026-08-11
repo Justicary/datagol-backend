@@ -27,11 +27,20 @@ export const availabilityResponseSchema = z.object({
 });
 export type AvailabilityResponse = z.infer<typeof availabilityResponseSchema>;
 
+// El agente de voz/chat manda `""` para un campo opcional que el cliente no
+// proporcionó (no lo omite del payload) — sin este preprocesamiento,
+// `customerEmail: ""` rompe `.email()` con un 400 genérico que nunca llega a
+// la validación de negocio de más abajo ("necesito teléfono o correo").
+const emptyStringToUndefined = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
+
 export const bookingBodySchema = z.object({
     conversationId: z.string().min(1),
     customerName: z.string().min(1),
-    customerPhone: z.string().min(1),
-    customerEmail: z.string().email().nullish(),
+    // Ninguno de los dos es individualmente obligatorio: el canal web chat
+    // puede no tener teléfono. La ruta exige al menos uno de los dos — ver
+    // routes/tools/booking.ts — con un mensaje verbalizable, no un 400 mudo.
+    customerPhone: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    customerEmail: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
     startTime: z.string().min(1),
     timeZone: z.string().min(1).optional(),
 });
@@ -47,7 +56,11 @@ export type BookingResponse = z.infer<typeof bookingResponseSchema>;
 
 export const rescheduleBodySchema = z.object({
     customerName: z.string().min(1),
-    customerEmail: z.string().email(),
+    // Mismo criterio que bookingBodySchema: la cita original pudo haberse
+    // creado solo con teléfono (sin correo) si vino de un canal sin correo.
+    // La ruta exige al menos uno de los dos para poder ubicarla.
+    customerEmail: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
+    customerPhone: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
     newStartTime: z.string().min(1),
     timeZone: z.string().min(1).optional(),
 });

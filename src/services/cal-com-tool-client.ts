@@ -37,7 +37,10 @@ export interface CreateCalBookingParams {
     eventTypeId: number;
     customerName: string;
     customerEmail: string | null;
-    customerPhone: string;
+    // Opcional: el canal web chat puede no tener teléfono del visitante. La
+    // ruta de negocio (routes/tools/booking.ts) ya garantiza que al menos uno
+    // de los dos (teléfono/correo) llegue no-nulo antes de invocar esto.
+    customerPhone: string | null;
     startTime: string;
     timeZone?: string;
 }
@@ -168,10 +171,15 @@ export async function createBooking(
             timeZone,
             language: 'es',
         },
-        bookingFieldsResponses: {
-            location: 'phone',
-            phone: params.customerPhone,
-        },
+        // `attendeePhoneNumber` es el slug real del campo de teléfono en el
+        // formulario de reserva de Cal.com v2 (campo de sistema, no "phone").
+        // Se omite por completo si no hay teléfono (canal web chat sin
+        // teléfono, solo correo) — es un campo opcional en Cal.com.
+        // `location` se omite a propósito: su valor válido depende de cómo
+        // esté configurado el event type en Cal.com (attendeeAddress, phone,
+        // etc.) y enviar un valor fijo que no coincida con esa configuración
+        // hace que Cal.com rechace la reserva completa.
+        ...(params.customerPhone ? { bookingFieldsResponses: { attendeePhoneNumber: params.customerPhone } } : {}),
     };
 
     const response = await fetch(`${CAL_API_V2_BASE_URL}/bookings`, {
@@ -213,7 +221,10 @@ export async function rescheduleBooking(
         headers: calHeaders(apiKey),
         body: JSON.stringify({
             start: params.newStartTime,
-            rescheduleReason: params.reason || 'Reprogramado por el cliente durante la llamada',
+            // Cal.com v2 rechaza `rescheduleReason` con 400 ("property should
+            // not exist") — el nombre real del campo es `reschedulingReason`,
+            // verificado contra la API real (no está claro en la doc pública).
+            reschedulingReason: params.reason || 'Reprogramado por el cliente durante la llamada',
         }),
         signal,
     });
@@ -232,6 +243,32 @@ export async function rescheduleBooking(
         startTime: booking?.start ?? params.newStartTime,
         endTime: booking?.end ?? null,
     };
+}
+
+/**
+ * Cancela una reserva existente en Cal.com v2.
+ */
+export async function cancelBooking(
+    fastify: FastifyInstance,
+    organizationId: string,
+    calBookingId: string,
+    reason: string | undefined,
+    signal: AbortSignal
+): Promise<void> {
+    const apiKey = await resolveApiKey(organizationId);
+
+    const response = await fetch(`${CAL_API_V2_BASE_URL}/bookings/${calBookingId}/cancel`, {
+        method: 'POST',
+        headers: calHeaders(apiKey),
+        body: JSON.stringify({ cancellationReason: reason || 'Cancelado por el cliente o asistente de voz' }),
+        signal,
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        fastify.log.warn({ organizationId, status: response.status, msg: 'Cal.com respondió error en /bookings/:id/cancel' });
+        throw new CalProviderError(response.status, errText);
+    }
 }
 
 /**

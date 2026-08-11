@@ -6,6 +6,7 @@ import { normalizePhoneE164 } from '../../services/phone-normalization.js';
 import { toolParamsSchema, bookingBodySchema, bookingResponseSchema, isValidDateString } from '../../schemas/tool-routes.js';
 
 const DEGRADED_MESSAGE = 'No puedo agendar la cita en este momento, ¿te llamo de vuelta para confirmarla?';
+const MISSING_CONTACT_MESSAGE = 'Para confirmar tu cita necesito al menos tu número de teléfono o tu correo electrónico, ¿me compartes uno de los dos?';
 // appointments.end_time es NOT NULL, pero Cal.com no siempre devuelve `end`
 // en la respuesta de /bookings. Se usa la duración del evento configurada
 // no está disponible en este punto (solo el eventTypeId), así que se aplica
@@ -46,6 +47,15 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
             return reply.status(400).send({ error: 'BadRequest', message: 'startTime no es una fecha válida' });
         }
 
+        // Un canal sin caller ID (web chat) puede no traer teléfono, y el
+        // cliente puede no dar correo por voz — pero no ambos a la vez: sin
+        // ninguna forma de contacto no hay a quién confirmarle la cita.
+        if (!customerPhone && !customerEmail) {
+            return reply.status(200).send(
+                bookingResponseSchema.parse({ booked: false, message: MISSING_CONTACT_MESSAGE })
+            );
+        }
+
         if (!auth.calEventTypeId) {
             request.log.error({ organizationId: auth.organizationId, msg: 'Organización sin cal_event_type_id configurado' });
             return reply.status(200).send(degradedResponse());
@@ -71,7 +81,9 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
             );
         }
 
-        const contactId = await upsertContactBestEffort(fastify, auth.organizationId, customerName, customerPhone, customerEmail ?? null);
+        const contactId = customerPhone
+            ? await upsertContactBestEffort(fastify, auth.organizationId, customerName, customerPhone, customerEmail ?? null)
+            : null;
 
         try {
             const calResult = await withToolTimeout((signal) =>
@@ -82,7 +94,7 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
                         eventTypeId: auth.calEventTypeId!,
                         customerName,
                         customerEmail: customerEmail ?? null,
-                        customerPhone,
+                        customerPhone: customerPhone ?? null,
                         startTime,
                         timeZone,
                     },
@@ -98,7 +110,7 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
                     conversation_id: conversationId,
                     customer_name: customerName,
                     customer_email: customerEmail ?? null,
-                    customer_phone: customerPhone,
+                    customer_phone: customerPhone ?? null,
                     start_time: calResult.startTime,
                     end_time: calResult.endTime ?? new Date(new Date(calResult.startTime).getTime() + DEFAULT_APPOINTMENT_DURATION_MS).toISOString(),
                     cal_booking_id: calResult.calBookingId,

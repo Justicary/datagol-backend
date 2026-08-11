@@ -7,15 +7,17 @@ import entitlementsPlugin from './plugins/entitlements.js';
 import adminFeaturesRoutes from './routes/admin/features.js';
 import adminMeteringRoutes from './routes/admin/metering.js';
 import adminOrganizationsRoutes from './routes/admin/organizations.js';
+import adminPlansRoutes from './routes/admin/plans.js';
+import adminFactoryResetRoutes from './routes/admin/factory-reset.js';
+import plansRoutes from './routes/plans.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
 import contactsRoutes from './routes/contacts.js';
+import organizationMetricsRoutes from './routes/organization-metrics.js';
 import vapiRoutes from './routes/vapi.js';
-import calendarRoutes from './routes/calendar.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
 import { elevenLabsPostCallWebhookRoutes } from './routes/webhooks/elevenlabs.js';
-import { elevenLabsToolsRoutes } from './routes/elevenlabs-tools.js';
 import { toolRoutes } from './routes/tools/index.js';
 import { uploadRoutes } from './routes/upload.js';
 import { registerJobs } from './jobs/index.js';
@@ -161,20 +163,25 @@ export async function buildApp() {
     await app.register(adminMeteringRoutes);
     // Suspensión de organización completa y kill switch global
     await app.register(adminOrganizationsRoutes);
+    // Gestión de precios/planes (fuente de verdad de /pricing)
+    await app.register(adminPlansRoutes);
+    // Restaurar valores de fábrica (vaciar historial de interacciones para un cliente nuevo)
+    await app.register(adminFactoryResetRoutes);
 
     // Registro modular de otros plugins y rutas de la API
+    await app.register(plansRoutes);
     await app.register(organizationRoutes);
     // Onboarding de organización (self-service DFY) — reemplaza el legacy
     // POST /api/organizations/onboard eliminado de organizationRoutes.
     await app.register(organizationOnboardingRoutes);
     // Borrado ARCO por contacto (derecho de cancelación/oposición LFPDPPP).
     await app.register(contactsRoutes);
+    // Métricas por canal (docs/tasks/opus.md) — GET /api/organizations/:id/metrics
+    await app.register(organizationMetricsRoutes);
     await app.register(vapiRoutes);
-    await app.register(calendarRoutes);
     await app.register(voiceRoutes);
     await app.register(elevenLabsWebhookRoutes);
     await app.register(elevenLabsPostCallWebhookRoutes);
-    await app.register(elevenLabsToolsRoutes);
     // Fase 5 — Tool calls en vivo del agente de voz (routes/tools/**)
     await app.register(toolRoutes);
     await app.register(uploadRoutes);

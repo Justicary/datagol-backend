@@ -231,6 +231,57 @@ describe('POST /tools/:webhookToken/reschedule', () => {
         }
     });
 
+    it('sin teléfono ni correo: responde rescheduled=false pidiendo uno de los dos, sin consultar appointments', async () => {
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/reschedule`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { customerName: 'Cliente Sin Contacto', newStartTime: '2026-09-11T10:00:00Z' },
+            });
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.rescheduled).toBe(false);
+            expect(body.message).toContain('teléfono');
+            expect(vi.mocked(rescheduleBooking)).not.toHaveBeenCalled();
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('encuentra y reprograma una cita agendada solo con teléfono (sin correo, canal web chat), buscando por teléfono', async () => {
+        const appointment = await createAppointment({
+            customer_name: 'Cliente Solo Teléfono',
+            customer_email: null,
+            customer_phone: '+525588877766',
+        });
+        createdAppointmentIds.push(appointment.id);
+
+        const newStartIso = '2026-09-16T15:00:00.000Z';
+        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: 'cal_booking_reschedule_base', startTime: newStartIso, endTime: null });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/reschedule`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                // Formato distinto al guardado (guardado en E.164): debe normalizar y emparejar igual.
+                payload: { customerName: 'Cliente Solo Teléfono', customerPhone: '55 8887 7766', newStartTime: newStartIso },
+            });
+
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.rescheduled).toBe(true);
+
+            const { data: updated } = await supabaseAdmin.from('appointments').select('status').eq('id', appointment.id).single();
+            expect(updated?.status).toBe('rescheduled');
+        } finally {
+            await app.close();
+        }
+    });
+
     it('degradación: si Cal.com falla, responde 200 con rescheduled=false sin haber modificado la cita', async () => {
         const appointment = await createAppointment({ customer_name: 'Cliente Degradado', customer_email: 'cliente-degradado@example.invalid' });
         createdAppointmentIds.push(appointment.id);

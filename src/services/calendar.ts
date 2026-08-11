@@ -1,415 +1,128 @@
-import dotenv from 'dotenv';
+import { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { logger } from '../lib/logger.js';
+import { withToolTimeout } from '../lib/tool-timeout.js';
+import {
+    getAvailableSlots as calGetAvailableSlots,
+    createBooking as calCreateBooking,
+    rescheduleBooking as calRescheduleBooking,
+    cancelBooking as calCancelBooking,
+    CalCredentialsMissingError,
+    CalProviderError,
+} from './cal-com-tool-client.js';
 
-dotenv.config();
-
-export interface CreateBookingParams {
-    organizationId: string;
-    callLogId?: string;
-    eventTypeId: number;
-    customerName: string;
-    customerEmail?: string;
-    customerPhone: string;
-    startTime: string;
-    timeZone?: string;
-    serviceAddress?: string;
-    latitude?: number;
-    longitude?: number;
-}
-
-export interface RescheduleBookingParams {
-    appointmentId?: string;
-    calBookingId?: string;
-    newStartTime: string;
-    reason?: string;
-}
-
-export interface UpdateStatusParams {
-    appointmentId?: string;
-    calBookingId?: string;
-    status: 'confirmed' | 'cancelled' | 'rescheduled' | string;
-    reason?: string;
-}
-
-const CAL_API_V2_BASE_URL = 'https://api.cal.com/v2';
+const DEFAULT_APPOINTMENT_DURATION_MS = 30 * 60 * 1000;
 
 /**
- * Consulta la disponibilidad de horarios en Cal.com utilizando la API v2.
+ * Handler de tool-calling de calendario para el proveedor Vapi
+ * (routes/vapi.ts). Delega toda la integración con Cal.com a
+ * cal-com-tool-client.ts — el mismo cliente tenant-scoped que usan las rutas
+ * /tools/:webhookToken/** de ElevenLabs (Fase 5) — en vez de mantener una
+ * segunda implementación con credenciales globales (process.env.CAL_API_KEY):
+ * eso permitía que un tool-call resolviera el Cal.com equivocado según qué
+ * organización tuviera configurada esa variable de entorno, y fue la causa
+ * raíz de un bug de producción real (bookings que siempre fallaban).
+ *
+ * `organizationId` lo resuelve el llamador (routes/vapi.ts, vía
+ * organizations.vapi_agent_id) ANTES de invocar esto — nunca se toma de
+ * `args`, que es contenido generado por el LLM (AGENTS.md §5.1). Todas las
+ * consultas/actualizaciones a `appointments` están además filtradas por
+ * `organization_id`: sin eso, un tool-call de la organización A podía leer o
+ * modificar una cita de la organización B con solo adivinar su UUID.
  */
-export async function getAvailableSlots(
-    eventTypeId: number,
-    startTime: string,
-    endTime: string,
-    timeZone: string = 'America/Mexico_City'
-) {
-    const apiKey = process.env.CAL_API_KEY;
-    if (!apiKey) {
-        throw new Error('Falta la variable de entorno CAL_API_KEY en el archivo .env');
-    }
-
-    const isoStart = new Date(startTime).toISOString();
-    const isoEnd = new Date(endTime).toISOString();
-
-    const url = new URL(`${CAL_API_V2_BASE_URL}/slots/available`);
-    url.searchParams.append('eventTypeId', String(Number(eventTypeId)));
-    url.searchParams.append('startTime', isoStart);
-    url.searchParams.append('endTime', isoEnd);
-    url.searchParams.append('timeZone', timeZone || 'America/Mexico_City');
-
-    logger.info({ url: url.toString() }, 'Consultando disponibilidad en Cal.com v2');
-
-    const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'cal-api-version': '2024-08-13',
-        },
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        logger.error({ status: response.status, errText }, 'Error Cal.com v2 GET /slots/available');
-        throw new Error(`Error de Cal.com v2 API (${response.status}): ${errText}`);
-    }
-
-    const json = await response.json();
-    const rawSlots = json.data?.slots || json.data || json.slots || json;
-
-    const formattedSlots: Array<{ time: string }> = [];
-
-    if (Array.isArray(rawSlots)) {
-        for (const slot of rawSlots) {
-            const timeStr = typeof slot === 'string' ? slot : (slot.start || slot.time || JSON.stringify(slot));
-            formattedSlots.push({ time: timeStr });
-        }
-    } else if (typeof rawSlots === 'object' && rawSlots !== null) {
-        for (const dateKey of Object.keys(rawSlots)) {
-            const daySlots = rawSlots[dateKey];
-            if (Array.isArray(daySlots)) {
-                for (const slot of daySlots) {
-                    const timeStr = typeof slot === 'string' ? slot : (slot.start || slot.time || JSON.stringify(slot));
-                    formattedSlots.push({ time: timeStr });
-                }
-            }
-        }
-    }
-
-    return formattedSlots;
-}
-
-/**
- * Crea una reserva en Cal.com utilizando la API v2 e inserta la cita en la tabla `appointments` de Supabase.
- */
-export async function createBooking(params: CreateBookingParams) {
-    const apiKey = process.env.CAL_API_KEY;
-    if (!apiKey) {
-        throw new Error('Falta la variable de entorno CAL_API_KEY en el archivo .env');
-    }
-
-    const {
-        organizationId,
-        callLogId,
-        eventTypeId,
-        customerName,
-        customerEmail,
-        customerPhone,
-        startTime,
-        timeZone = 'America/Mexico_City',
-        serviceAddress,
-        latitude,
-        longitude,
-    } = params;
-
-    const bodyPayload = {
-        start: startTime,
-        eventTypeId: Number(eventTypeId),
-        attendee: {
-            name: customerName,
-            email: customerEmail || 'cliente@datagol.net',
-            timeZone: timeZone || 'America/Mexico_City',
-            language: 'es',
-        },
-        bookingFieldsResponses: {
-            location: 'phone',
-            phone: customerPhone,
-        },
-    };
-
-    logger.info({ bodyPayload }, 'Creando reserva en Cal.com v2');
-
-    const response = await fetch(`${CAL_API_V2_BASE_URL}/bookings`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'cal-api-version': '2024-08-13',
-        },
-        body: JSON.stringify(bodyPayload),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        logger.error({ status: response.status, errText }, 'Error Cal.com v2 POST /bookings');
-        throw new Error(`Error al crear reserva en Cal.com v2 (${response.status}): ${errText}`);
-    }
-
-    const calData = await response.json();
-    const booking = calData.data || calData.booking || calData;
-    const calBookingId = String(booking.uid || booking.id || 'cal_booking_unknown');
-
-    logger.info({ calBookingId }, 'Reserva creada en Cal.com v2 con éxito');
-
-    const appointmentPayload: Record<string, any> = {
-        organization_id: organizationId,
-        call_log_id: callLogId || null,
-        customer_name: customerName,
-        customer_email: customerEmail || null,
-        customer_phone: customerPhone,
-        start_time: startTime,
-        end_time: booking.end || null,
-        cal_booking_id: calBookingId,
-        status: 'confirmed',
-    };
-
-    if (serviceAddress !== undefined) appointmentPayload.service_address = serviceAddress;
-    if (latitude !== undefined) appointmentPayload.latitude = latitude;
-    if (longitude !== undefined) appointmentPayload.longitude = longitude;
-
-    let { data: appointment, error: dbError } = await supabaseAdmin
-        .from('appointments')
-        .insert(appointmentPayload)
-        .select()
-        .single();
-
-    if (dbError && (dbError.message.includes('service_address') || dbError.message.includes('latitude') || dbError.message.includes('longitude'))) {
-        logger.warn('Fallback en appointments: omitiendo campos de geolocalización no soportados');
-        const fallbackRes = await supabaseAdmin
-            .from('appointments')
-            .insert({
-                organization_id: organizationId,
-                call_log_id: callLogId || null,
-                customer_name: customerName,
-                customer_email: customerEmail || null,
-                customer_phone: customerPhone,
-                start_time: startTime,
-                end_time: booking.end || null,
-                cal_booking_id: calBookingId,
-                status: 'confirmed',
-            })
-            .select()
-            .single();
-
-        appointment = fallbackRes.data;
-        dbError = fallbackRes.error;
-    }
-
-    if (dbError) {
-        logger.error({ err: dbError }, 'Error al registrar cita en Supabase');
-        throw new Error(`Reserva confirmada en Cal.com v2 pero falló la inserción en Supabase: ${dbError.message}`);
-    }
-
-    return {
-        appointment,
-        cal_booking_id: calBookingId,
-    };
-}
-
-/**
- * Reprograma una cita existente en Cal.com v2 y actualiza Supabase.
- */
-export async function rescheduleBooking(params: RescheduleBookingParams) {
-    const apiKey = process.env.CAL_API_KEY;
-    const { appointmentId, calBookingId, newStartTime, reason } = params;
-
-    let targetBookingId = calBookingId;
-
-    if (!targetBookingId && appointmentId) {
-        const { data } = await supabaseAdmin
-            .from('appointments')
-            .select('*')
-            .eq('id', appointmentId)
-            .maybeSingle();
-
-        if (data) {
-            targetBookingId = data.cal_booking_id;
-        }
-    }
-
-    const isoStart = new Date(newStartTime).toISOString();
-
-    if (apiKey && targetBookingId && targetBookingId !== 'cal_booking_unknown') {
-        try {
-            logger.info({ targetBookingId, isoStart }, 'Reprogramando reserva en Cal.com v2');
-            const calRes = await fetch(`${CAL_API_V2_BASE_URL}/bookings/${targetBookingId}/reschedule`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                    'cal-api-version': '2024-08-13',
-                },
-                body: JSON.stringify({
-                    start: isoStart,
-                    rescheduleReason: reason || 'Reprogramado por el cliente o asistente de voz',
-                }),
-            });
-
-            if (!calRes.ok) {
-                const errText = await calRes.text();
-                logger.warn({ targetBookingId, status: calRes.status, errText }, 'Advertencia Cal.com v2 POST /bookings/reschedule');
-            }
-        } catch (calErr: any) {
-            logger.warn({ err: calErr }, 'No se pudo sincronizar la reprogramación en Cal.com');
-        }
-    }
-
-    const updatePayload: Record<string, any> = {
-        start_time: isoStart,
-        status: 'rescheduled',
-    };
-
-    let query = supabaseAdmin.from('appointments').update(updatePayload);
-
-    if (appointmentId) {
-        query = query.eq('id', appointmentId);
-    } else if (targetBookingId) {
-        query = query.eq('cal_booking_id', targetBookingId);
-    } else {
-        throw new Error('Se requiere appointmentId o calBookingId para reprogramar la cita.');
-    }
-
-    const { data: updatedAppointment, error: dbErr } = await query.select().single();
-
-    if (dbErr) {
-        throw new Error(`Error al actualizar la cita reprogramada en Supabase: ${dbErr.message}`);
-    }
-
-    return {
-        appointment: updatedAppointment,
-        status: 'rescheduled',
-        newStartTime: isoStart,
-    };
-}
-
-/**
- * Actualiza el estado de una cita en Supabase (ej: 'confirmed', 'cancelled', 'rescheduled').
- */
-export async function updateAppointmentStatus(params: UpdateStatusParams) {
-    const { appointmentId, calBookingId, status, reason } = params;
-
-    let query = supabaseAdmin.from('appointments').update({
-        status: status,
-    });
-
-    if (appointmentId) {
-        query = query.eq('id', appointmentId);
-    } else if (calBookingId) {
-        query = query.eq('cal_booking_id', calBookingId);
-    } else {
-        throw new Error('Se requiere appointmentId o calBookingId para actualizar el estado de la cita.');
-    }
-
-    const { data, error } = await query.select().single();
-
-    if (error) {
-        throw new Error(`Error al actualizar el estado de la cita en Supabase: ${error.message}`);
-    }
-
-    if (status === 'cancelled' && data?.cal_booking_id && process.env.CAL_API_KEY) {
-        try {
-            await fetch(`${CAL_API_V2_BASE_URL}/bookings/${data.cal_booking_id}/cancel`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${process.env.CAL_API_KEY}`,
-                    'cal-api-version': '2024-08-13',
-                },
-                body: JSON.stringify({
-                    cancellationReason: reason || 'Cancelado por el cliente o asistente de voz',
-                }),
-            });
-        } catch (err: any) {
-            logger.warn({ err }, 'No se pudo cancelar directamente en Cal.com v2');
-        }
-    }
-
-    return data;
-}
-
-/**
- * Función auxiliar para procesar llamadas a herramientas de calendario desde agentes de voz Vapi AI.
- */
-export async function handleCalendarToolCall(toolName: string, args: any): Promise<string> {
+export async function handleCalendarToolCall(
+    fastify: FastifyInstance,
+    organizationId: string,
+    toolName: string,
+    args: Record<string, any>
+): Promise<string> {
     const normalizedName = (toolName || '').trim();
 
-    if (
-        normalizedName === 'checkAvailability' ||
-        normalizedName === 'getAvailableSlots' ||
-        normalizedName === 'check_availability'
-    ) {
-        const eventTypeId = args.eventTypeId;
+    const { data: org, error: orgError } = await supabaseAdmin
+        .from('organizations')
+        .select('cal_event_type_id')
+        .eq('id', organizationId)
+        .maybeSingle();
+
+    if (orgError || !org) {
+        logger.error({ organizationId, err: orgError?.message }, 'No se pudo resolver la organización para tool-call de calendario (Vapi)');
+        return 'No se pudo identificar la configuración de agenda de esta organización.';
+    }
+
+    if (normalizedName === 'checkAvailability' || normalizedName === 'getAvailableSlots' || normalizedName === 'check_availability') {
+        const eventTypeId = Number(args.eventTypeId ?? org.cal_event_type_id);
         const startTime = args.start || args.startTime;
         const endTime = args.end || args.endTime;
         const timeZone = args.timeZone || 'America/Mexico_City';
 
         if (!eventTypeId || !startTime || !endTime) {
-            return 'Faltan parámetros requeridos para consultar disponibilidad (eventTypeId, start/startTime, end/endTime).';
+            return 'Faltan parámetros requeridos para consultar disponibilidad (startTime, endTime).';
         }
 
-        const slots = await getAvailableSlots(
-            Number(eventTypeId),
-            String(startTime),
-            String(endTime),
-            String(timeZone)
-        );
+        try {
+            const slots = await withToolTimeout((signal) =>
+                calGetAvailableSlots(fastify, organizationId, { eventTypeId, startTime: String(startTime), endTime: String(endTime), timeZone }, signal)
+            );
 
-        if (!slots || slots.length === 0) {
-            return 'No se encontraron horarios disponibles para la fecha y rango solicitados.';
+            if (slots.length === 0) {
+                return 'No se encontraron horarios disponibles para la fecha y rango solicitados.';
+            }
+            const timesList = slots.slice(0, 8).map((s) => s.time).join(', ');
+            return `Horarios disponibles encontrados (${slots.length}): ${timesList}`;
+        } catch (err) {
+            logCalendarFailure(organizationId, 'checkAvailability', err);
+            return 'No puedo consultar la agenda en este momento, ¿te llamo de vuelta?';
         }
-
-        const timesList = slots.slice(0, 8).map((s) => s.time).join(', ');
-        return `Horarios disponibles encontrados (${slots.length}): ${timesList}`;
     }
 
-    if (
-        normalizedName === 'bookAppointment' ||
-        normalizedName === 'createBooking' ||
-        normalizedName === 'book_appointment'
-    ) {
-        const {
-            organizationId,
-            callLogId,
-            eventTypeId,
-            customerName,
-            customerEmail,
-            customerPhone,
-            startTime = args.start,
-            timeZone = 'America/Mexico_City',
-            serviceAddress = args.serviceAddress || args.address,
-            latitude = args.latitude,
-            longitude = args.longitude,
-        } = args || {};
+    if (normalizedName === 'bookAppointment' || normalizedName === 'createBooking' || normalizedName === 'book_appointment') {
+        const customerName = args.customerName;
+        const customerEmail = args.customerEmail ? String(args.customerEmail) : null;
+        const customerPhone = args.customerPhone ? String(args.customerPhone) : null;
+        const startTime = args.startTime || args.start;
+        const timeZone = args.timeZone || 'America/Mexico_City';
+        const eventTypeId = Number(args.eventTypeId ?? org.cal_event_type_id);
 
-        if (!organizationId || !eventTypeId || !customerName || !customerPhone || !startTime) {
-            return 'Faltan datos obligatorios para agendar la cita (organizationId, eventTypeId, customerName, customerPhone, startTime).';
+        if (!customerName || !startTime || !eventTypeId) {
+            return 'Faltan datos obligatorios para agendar la cita (customerName, startTime).';
+        }
+        if (!customerPhone && !customerEmail) {
+            return 'Para confirmar tu cita necesito al menos tu número de teléfono o tu correo electrónico.';
         }
 
-        const result = await createBooking({
-            organizationId: String(organizationId),
-            callLogId: callLogId ? String(callLogId) : undefined,
-            eventTypeId: Number(eventTypeId),
-            customerName: String(customerName),
-            customerEmail: customerEmail ? String(customerEmail) : undefined,
-            customerPhone: String(customerPhone),
-            startTime: String(startTime),
-            timeZone: String(timeZone),
-            serviceAddress: serviceAddress ? String(serviceAddress) : undefined,
-            latitude: latitude !== undefined ? Number(latitude) : undefined,
-            longitude: longitude !== undefined ? Number(longitude) : undefined,
-        });
+        try {
+            const calResult = await withToolTimeout((signal) =>
+                calCreateBooking(
+                    fastify,
+                    organizationId,
+                    { eventTypeId, customerName: String(customerName), customerEmail, customerPhone, startTime: String(startTime), timeZone },
+                    signal
+                )
+            );
 
-        return `Cita agendada correctamente. ID de reserva: ${result.cal_booking_id} para ${customerName} a las ${startTime}.`;
+            const { error: insertError } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: organizationId,
+                    customer_name: String(customerName),
+                    customer_email: customerEmail,
+                    customer_phone: customerPhone,
+                    start_time: calResult.startTime,
+                    end_time: calResult.endTime ?? new Date(new Date(calResult.startTime).getTime() + DEFAULT_APPOINTMENT_DURATION_MS).toISOString(),
+                    cal_booking_id: calResult.calBookingId,
+                    status: 'confirmed',
+                });
+
+            if (insertError) {
+                logger.error({ organizationId, err: insertError.message }, 'Cita creada en Cal.com pero falló la inserción en appointments (Vapi)');
+                return 'Tu cita se agendó, pero tuvimos un problema registrándola internamente. Un agente humano la confirmará contigo.';
+            }
+
+            return `Cita agendada correctamente para ${customerName} el ${calResult.startTime}.`;
+        } catch (err) {
+            logCalendarFailure(organizationId, 'bookAppointment', err);
+            return 'No puedo agendar la cita en este momento, ¿te llamo de vuelta para confirmarla?';
+        }
     }
 
     if (
@@ -418,61 +131,110 @@ export async function handleCalendarToolCall(toolName: string, args: any): Promi
         normalizedName === 'updateAppointment' ||
         normalizedName === 'changeAppointment'
     ) {
-        const { appointmentId, calBookingId, newStartTime = args.startTime || args.start, reason } = args || {};
+        const { appointmentId, calBookingId, reason } = args || {};
+        const newStartTime = args.newStartTime || args.startTime || args.start;
 
         if (!newStartTime || (!appointmentId && !calBookingId)) {
-            return 'Falta la nueva fecha/hora (newStartTime) o el identificador de la cita para modificarla.';
+            return 'Falta la nueva fecha/hora o el identificador de la cita para modificarla.';
         }
 
-        const result = await rescheduleBooking({
-            appointmentId: appointmentId ? String(appointmentId) : undefined,
-            calBookingId: calBookingId ? String(calBookingId) : undefined,
-            newStartTime: String(newStartTime),
-            reason: reason ? String(reason) : undefined,
-        });
+        const appointment = await findAppointment(organizationId, appointmentId, calBookingId);
+        if (!appointment || !appointment.cal_booking_id) {
+            return 'No encontré esa cita para esta organización.';
+        }
 
-        return `Cita reprogramada exitosamente para la nueva fecha: ${result.newStartTime}.`;
+        try {
+            const calResult = await withToolTimeout((signal) =>
+                calRescheduleBooking(
+                    fastify,
+                    organizationId,
+                    { calBookingId: appointment.cal_booking_id as string, newStartTime: String(newStartTime), reason: reason ? String(reason) : undefined },
+                    signal
+                )
+            );
+
+            // end_time es NOT NULL; si Cal.com no devuelve `end`, se preserva
+            // la duración original en vez de asumir un valor arbitrario.
+            const originalDurationMs = new Date(appointment.end_time).getTime() - new Date(appointment.start_time).getTime();
+            const fallbackEndTime = new Date(new Date(calResult.startTime).getTime() + originalDurationMs).toISOString();
+
+            const { error: updateError } = await supabaseAdmin
+                .from('appointments')
+                .update({ start_time: calResult.startTime, end_time: calResult.endTime ?? fallbackEndTime, status: 'rescheduled' })
+                .eq('id', appointment.id);
+
+            if (updateError) {
+                logger.error({ organizationId, appointmentId: appointment.id, err: updateError.message }, 'Cal.com reprogramó pero falló la actualización en appointments (Vapi)');
+                return 'No puedo reprogramar la cita en este momento, ¿te llamo de vuelta?';
+            }
+
+            return `Cita reprogramada exitosamente para la nueva fecha: ${calResult.startTime}.`;
+        } catch (err) {
+            logCalendarFailure(organizationId, 'rescheduleAppointment', err);
+            return 'No puedo reprogramar la cita en este momento, ¿te llamo de vuelta?';
+        }
     }
 
     if (
         normalizedName === 'confirmAppointment' ||
-        normalizedName === 'confirm_appointment'
-    ) {
-        const { appointmentId, calBookingId, status = 'confirmed', reason } = args || {};
-
-        if (!appointmentId && !calBookingId) {
-            return 'Se requiere el ID de la cita para confirmar su estado.';
-        }
-
-        const updated = await updateAppointmentStatus({
-            appointmentId: appointmentId ? String(appointmentId) : undefined,
-            calBookingId: calBookingId ? String(calBookingId) : undefined,
-            status: String(status),
-            reason: reason ? String(reason) : undefined,
-        });
-
-        return `El estado de la cita ha sido actualizado a '${updated.status}' exitosamente.`;
-    }
-
-    if (
+        normalizedName === 'confirm_appointment' ||
         normalizedName === 'cancelAppointment' ||
         normalizedName === 'cancel_appointment'
     ) {
         const { appointmentId, calBookingId, reason } = args || {};
+        const isCancel = normalizedName === 'cancelAppointment' || normalizedName === 'cancel_appointment';
+        const targetStatus = isCancel ? 'cancelled' : String(args.status || 'confirmed');
 
         if (!appointmentId && !calBookingId) {
-            return 'Se requiere el ID de la cita para cancelarla.';
+            return 'Se requiere el ID de la cita para actualizar su estado.';
         }
 
-        await updateAppointmentStatus({
-            appointmentId: appointmentId ? String(appointmentId) : undefined,
-            calBookingId: calBookingId ? String(calBookingId) : undefined,
-            status: 'cancelled',
-            reason: reason ? String(reason) : undefined,
-        });
+        const appointment = await findAppointment(organizationId, appointmentId, calBookingId);
+        if (!appointment) {
+            return 'No encontré esa cita para esta organización.';
+        }
 
-        return `La cita ha sido cancelada correctamente.`;
+        const { error: updateError } = await supabaseAdmin.from('appointments').update({ status: targetStatus }).eq('id', appointment.id);
+        if (updateError) {
+            logger.error({ organizationId, appointmentId: appointment.id, err: updateError.message }, 'Error actualizando estado de cita (Vapi)');
+            return 'No pude actualizar el estado de la cita en este momento.';
+        }
+
+        if (isCancel && appointment.cal_booking_id) {
+            try {
+                await withToolTimeout((signal) =>
+                    calCancelBooking(fastify, organizationId, appointment.cal_booking_id as string, reason ? String(reason) : undefined, signal)
+                );
+            } catch (err) {
+                logCalendarFailure(organizationId, 'cancelAppointment', err);
+            }
+        }
+
+        return isCancel ? 'La cita ha sido cancelada correctamente.' : `El estado de la cita ha sido actualizado a '${targetStatus}' exitosamente.`;
     }
 
     return `Herramienta de calendario '${toolName}' no reconocida.`;
+}
+
+async function findAppointment(organizationId: string, appointmentId: unknown, calBookingId: unknown) {
+    let query = supabaseAdmin
+        .from('appointments')
+        .select('id, cal_booking_id, start_time, end_time')
+        .eq('organization_id', organizationId);
+
+    query = appointmentId ? query.eq('id', String(appointmentId)) : query.eq('cal_booking_id', String(calBookingId));
+
+    const { data } = await query.maybeSingle();
+    return data;
+}
+
+function logCalendarFailure(organizationId: string, toolName: string, err: unknown): void {
+    if (err instanceof CalCredentialsMissingError) {
+        logger.error({ organizationId, toolName, msg: 'Tool de calendario degradado: cal_api_key no configurado (Vapi)' });
+    } else if (err instanceof CalProviderError) {
+        logger.warn({ organizationId, toolName, status: err.status, msg: 'Tool de calendario degradado: Cal.com respondió error (Vapi)' });
+    } else {
+        const errMessage = err instanceof Error ? err.message : String(err);
+        logger.error({ organizationId, toolName, errMessage, msg: 'Tool de calendario degradado: error inesperado (Vapi)' });
+    }
 }
