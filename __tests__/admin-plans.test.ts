@@ -29,7 +29,7 @@ describe('routes/admin/plans.ts', () => {
     });
 
     describe('GET /api/admin/plans', () => {
-        it('contraparte de éxito: devuelve el catálogo completo, incluye isActive/sortOrder (no expuestos en el público)', async () => {
+        it('contraparte de éxito: devuelve el catálogo completo, incluye isActive/sortOrder y la lista de features', async () => {
             const app = await buildTestApp();
             try {
                 const response = await app.inject({
@@ -43,6 +43,7 @@ describe('routes/admin/plans.ts', () => {
                 expect(starter).toBeDefined();
                 expect(typeof starter.isActive).toBe('boolean');
                 expect(typeof starter.sortOrder).toBe('number');
+                expect(Array.isArray(starter.features)).toBe(true);
             } finally {
                 await app.close();
             }
@@ -192,6 +193,44 @@ describe('routes/admin/plans.ts', () => {
                     payload: { setupFeeMxn: 1 },
                 });
                 expect(response.statusCode).toBe(404);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('rechaza con 400 si se envía una característica inexistente en features', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    headers: { 'x-platform-admin': 'true' },
+                    payload: { features: ['feature_inventada_inexistente'] },
+                });
+                expect(response.statusCode).toBe(400);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('contraparte de éxito: actualiza la lista de características en plan_features', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    headers: { 'x-platform-admin': 'true' },
+                    payload: { features: ['voice_inbound', 'calendar_booking'] },
+                });
+                expect(response.statusCode).toBe(200);
+
+                const getRes = await app.inject({
+                    method: 'GET',
+                    url: '/api/admin/plans',
+                    headers: { 'x-platform-admin': 'true' },
+                });
+                const starter = getRes.json().data.find((p: any) => p.key === TEST_PLAN_KEY);
+                expect(starter.features).toEqual(expect.arrayContaining(['voice_inbound', 'calendar_booking']));
             } finally {
                 await app.close();
             }

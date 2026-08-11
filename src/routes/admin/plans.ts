@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { isPlatformAdmin } from '../../lib/platform-admin.js';
+import { clearEntitlementsCache } from '../../services/entitlements.js';
 
 interface PlanUpdateBody {
     name?: string;
@@ -15,6 +16,7 @@ interface PlanUpdateBody {
     retainerIncludes?: string[];
     ctaText?: string;
     showRetainer?: boolean;
+    features?: string[];
 }
 
 interface ExchangeRateBody {
@@ -42,13 +44,29 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
 
     /**
      * GET /api/admin/plans
-     * Catálogo completo (incluye planes inactivos) para la consola de admin.
+     * Catálogo completo (incluye planes inactivos y sus features asignadas) para la consola de admin.
      */
     fastify.get('/api/admin/plans', async (request, reply) => {
         const { data, error } = await supabaseAdmin.from('plans').select('*').order('sort_order', { ascending: true });
 
         if (error) {
             return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+        }
+
+        const { data: pfData, error: pfErr } = await supabaseAdmin
+            .from('plan_features')
+            .select('plan_key, feature_key')
+            .eq('enabled', true);
+
+        if (pfErr) {
+            return reply.status(500).send({ error: 'InternalServerError', message: pfErr.message });
+        }
+
+        const planFeaturesMap = new Map<string, string[]>();
+        for (const pf of pfData ?? []) {
+            const list = planFeaturesMap.get(pf.plan_key) ?? [];
+            list.push(pf.feature_key);
+            planFeaturesMap.set(pf.plan_key, list);
         }
 
         return reply.send({
@@ -67,6 +85,7 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
                 retainerIncludes: plan.retainer_includes ?? [],
                 ctaText: plan.cta_text,
                 showRetainer: plan.show_retainer,
+                features: planFeaturesMap.get(plan.key) ?? [],
             })),
         });
     });
@@ -76,6 +95,7 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
      * Actualización parcial: solo se tocan los campos presentes en el body.
      * `monthlyFeeMxn`/`badge` aceptan `null` explícito ("Iguala A Medida" /
      * sin badge) — distinto de omitir el campo (no tocar el valor actual).
+     * `features` (opcional): arreglos de claves activas en `plan_features`.
      */
     fastify.patch<{ Params: { key: string }; Body: PlanUpdateBody }>(
         '/api/admin/plans/:key',
@@ -161,22 +181,73 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
                 }
             }
 
-            if (Object.keys(updatePayload).length === 0) {
+            if (body.features !== undefined) {
+                if (!isStringArray(body.features)) {
+                    return reply.status(400).send({ error: 'BadRequest', message: 'El campo "features" debe ser un arreglo de strings.' });
+                }
+            }
+
+            if (Object.keys(updatePayload).length === 0 && body.features === undefined) {
                 return reply.status(400).send({ error: 'BadRequest', message: 'No se envió ningún campo para actualizar.' });
             }
 
-            const { data, error } = await supabaseAdmin
+            const { data: existingPlan, error: checkError } = await supabaseAdmin
                 .from('plans')
-                .update(updatePayload)
-                .eq('key', key)
                 .select('key')
+                .eq('key', key)
                 .maybeSingle();
 
-            if (error) {
-                return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+            if (checkError) {
+                return reply.status(500).send({ error: 'InternalServerError', message: checkError.message });
             }
-            if (!data) {
+            if (!existingPlan) {
                 return reply.status(404).send({ error: 'NotFound', message: `El plan '${key}' no existe.` });
+            }
+
+            if (Object.keys(updatePayload).length > 0) {
+                const { error: updateError } = await supabaseAdmin
+                    .from('plans')
+                    .update(updatePayload)
+                    .eq('key', key);
+
+                if (updateError) {
+                    return reply.status(500).send({ error: 'InternalServerError', message: updateError.message });
+                }
+            }
+
+            if (body.features !== undefined) {
+                const { data: allFeatures, error: featError } = await supabaseAdmin
+                    .from('features')
+                    .select('key');
+
+                if (featError) {
+                    return reply.status(500).send({ error: 'InternalServerError', message: featError.message });
+                }
+
+                const validFeatureKeys = new Set((allFeatures ?? []).map((f) => f.key));
+                const requestedFeatures = new Set(body.features);
+
+                for (const fKey of requestedFeatures) {
+                    if (!validFeatureKeys.has(fKey)) {
+                        return reply.status(400).send({ error: 'BadRequest', message: `La característica '${fKey}' no existe en el catálogo.` });
+                    }
+                }
+
+                const rowsToUpsert = Array.from(validFeatureKeys).map((fKey) => ({
+                    plan_key: key,
+                    feature_key: fKey,
+                    enabled: requestedFeatures.has(fKey),
+                }));
+
+                const { error: upsertError } = await supabaseAdmin
+                    .from('plan_features')
+                    .upsert(rowsToUpsert, { onConflict: 'plan_key,feature_key' });
+
+                if (upsertError) {
+                    return reply.status(500).send({ error: 'InternalServerError', message: upsertError.message });
+                }
+
+                clearEntitlementsCache();
             }
 
             return reply.status(200).send({ message: `Plan '${key}' actualizado con éxito.` });

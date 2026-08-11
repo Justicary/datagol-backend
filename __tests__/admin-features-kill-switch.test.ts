@@ -193,4 +193,27 @@ describe('POST /api/admin/features/:featureKey/kill-switch', () => {
             await app.close();
         }
     });
+
+    describe('GET /api/admin/features', () => {
+        it('retorna el catálogo completo de características ordenado por sort_order', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'GET',
+                    url: '/api/admin/features',
+                    headers: { 'x-platform-admin': 'true' },
+                });
+                expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(Array.isArray(body.data)).toBe(true);
+                expect(body.data.length).toBeGreaterThan(0);
+                const first = body.data[0];
+                expect(first).toHaveProperty('key');
+                expect(first).toHaveProperty('name');
+                expect(first).toHaveProperty('sort_order');
+            } finally {
+                await app.close();
+            }
+        });
+    });
 });

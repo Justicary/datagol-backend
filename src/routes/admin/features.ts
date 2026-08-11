@@ -36,6 +36,23 @@ export const adminFeaturesRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.addHook('preHandler', isPlatformAdmin);
 
     /**
+     * GET /api/admin/features
+     * Catálogo completo de características para la consola de administración.
+     */
+    fastify.get('/api/admin/features', async (request, reply) => {
+        const { data, error } = await supabaseAdmin
+            .from('features')
+            .select('key, name, description, category, requires_provider, has_cost_impact, globally_disabled, disabled_reason, sort_order, created_at')
+            .order('sort_order', { ascending: true });
+
+        if (error) {
+            return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+        }
+
+        return reply.send({ data: data ?? [] });
+    });
+
+    /**
      * GET /api/admin/features/organization/:orgId
      * Listar las features de una organización detallando su origen (plan u override).
      */

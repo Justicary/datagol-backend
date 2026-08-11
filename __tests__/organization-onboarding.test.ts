@@ -429,6 +429,8 @@ describe('routes/organization-onboarding.ts', () => {
             // missingCredentials se satisface trivialmente por no tener nada que
             // verificar, de forma determinista (sin depender de qué proveedor
             // requiere cada feature).
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', orgId);
+            await supabaseAdmin.from('plan_features').delete().eq('plan_key', 'starter').eq('feature_key', 'whatsapp');
             const planResult = await setOrganizationPlan(orgId, 'starter', 'Prueba readiness ready:true');
             expect(planResult.success).toBe(true);
 

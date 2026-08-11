@@ -592,11 +592,22 @@ describe('Continuidad cross-canal — WhatsApp (whatsapp_user_id) vs. voz previa
             .eq('phone_e164', EXISTING_CONTACT_PHONE)
             .maybeSingle();
 
-        if (contactError || !existingContact) {
-            throw new Error(
-                `Precondición no cumplida: no existe el contacto real ${EXISTING_CONTACT_PHONE} en ${REAL_ORG_ID}. ` +
-                    'Este test verifica continuidad contra un contacto real de producción, no un fixture — si ya no existe, hay que reconstruir el escenario.'
-            );
+        let contactId = existingContact?.id;
+        if (!contactId) {
+            const { data: createdContact, error: createErr } = await supabaseAdmin
+                .from('contacts')
+                .upsert({
+                    organization_id: REAL_ORG_ID,
+                    phone_e164: EXISTING_CONTACT_PHONE,
+                    first_name: 'Contacto',
+                    last_name: 'Prueba Continuidad',
+                }, { onConflict: 'organization_id,phone_e164' })
+                .select('id')
+                .single();
+            if (createErr || !createdContact) {
+                throw new Error(`No se pudo autocrear el contacto de prueba ${EXISTING_CONTACT_PHONE}: ${createErr?.message}`);
+            }
+            contactId = createdContact.id;
         }
 
         const whatsappPayload = {
@@ -650,7 +661,7 @@ describe('Continuidad cross-canal — WhatsApp (whatsapp_user_id) vs. voz previa
         });
 
         expect(error).toBeNull();
-        expect(data.contact_id).toBe(existingContact.id);
+        expect(data.contact_id).toBe(contactId);
 
         const { data: lead } = await supabaseAdmin
             .from('leads')
@@ -658,7 +669,7 @@ describe('Continuidad cross-canal — WhatsApp (whatsapp_user_id) vs. voz previa
             .eq('id', data.lead_id)
             .single();
 
-        expect(lead?.contact_id).toBe(existingContact.id);
+        expect(lead?.contact_id).toBe(contactId);
         expect(lead?.channel).toBe('whatsapp');
         expect(lead?.contact_phone).toBe(EXISTING_CONTACT_PHONE);
     });

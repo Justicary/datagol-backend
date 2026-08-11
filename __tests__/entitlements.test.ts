@@ -55,10 +55,12 @@ const FAKE_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 describe('FASE 1 — Fundaciones & Entitlements', () => {
     beforeEach(async () => {
-        // Asegurar que la org siempre inicia en plan starter y sin cache residual
-        await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
-        clearEntitlementsCache();
         vi.restoreAllMocks();
+        // Asegurar que la org siempre inicia en plan starter, sin overrides residuales ni cache
+        await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+        await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', 'whatsapp');
+        await supabaseAdmin.from('plan_features').delete().eq('plan_key', 'starter').eq('feature_key', 'whatsapp');
+        clearEntitlementsCache();
     });
 
     // ======================================================================
