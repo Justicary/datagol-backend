@@ -64,19 +64,19 @@ BEGIN
     -- ya sería rechazado por el trigger append-only de usage_events.
     UPDATE public.usage_events SET call_log_id = NULL WHERE call_log_id IS NOT NULL;
 
-    DELETE FROM public.appointments;
+    DELETE FROM public.appointments WHERE id IS NOT NULL;
     GET DIAGNOSTICS v_appointments_deleted = ROW_COUNT;
 
-    DELETE FROM public.leads;
+    DELETE FROM public.leads WHERE id IS NOT NULL;
     GET DIAGNOSTICS v_leads_deleted = ROW_COUNT;
 
-    DELETE FROM public.call_logs;
+    DELETE FROM public.call_logs WHERE id IS NOT NULL;
     GET DIAGNOSTICS v_call_logs_deleted = ROW_COUNT;
 
-    DELETE FROM public.contacts;
+    DELETE FROM public.contacts WHERE id IS NOT NULL;
     GET DIAGNOSTICS v_contacts_deleted = ROW_COUNT;
 
-    DELETE FROM public.feature_audit_log;
+    DELETE FROM public.feature_audit_log WHERE id IS NOT NULL;
     GET DIAGNOSTICS v_feature_audit_log_deleted = ROW_COUNT;
 
     SET LOCAL session_replication_role = DEFAULT;

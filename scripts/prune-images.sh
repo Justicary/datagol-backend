@@ -101,7 +101,7 @@ cleanup_revisions() {
         fi
 
         echo "   - Eliminando revisión antigua: $rev..."
-        gcloud run revisions delete "$rev" --region="$REGION" --project="$PROJECT_ID" --quiet 2>/dev/null || echo "   ⚠️  No se pudo eliminar $rev (puede estar recibiendo tráfico o activa)"
+        gcloud run revisions delete "$rev" --region="$REGION" --project="$PROJECT_ID" --quiet || echo "   ⚠️  No se pudo eliminar $rev (puede estar recibiendo tráfico o activa)"
     done
     
     echo "✅ Limpieza de revisiones completada para $SERVICE_NAME."

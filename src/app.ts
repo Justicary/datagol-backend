@@ -72,7 +72,7 @@ export async function buildApp() {
     // Soporte para CORS básico mediante hooks de Fastify
     app.addHook('onRequest', async (request, reply) => {
         reply.header('Access-Control-Allow-Origin', '*');
-        reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-organization-id, x-tenant-id');
 
         if (request.method === 'OPTIONS') {

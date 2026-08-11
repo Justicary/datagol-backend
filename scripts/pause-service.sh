@@ -37,7 +37,7 @@ gcloud run services update "$SERVICE_NAME" \
     --region="$REGION" \
     --project="$PROJECT_ID" \
     --min-instances=0 \
-    --max-instances=0 \
+    --ingress=internal \
     --quiet
 
 echo "================================================================="

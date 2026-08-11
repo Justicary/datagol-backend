@@ -36,6 +36,7 @@ gcloud run services update "$SERVICE_NAME" \
     --project="$PROJECT_ID" \
     --min-instances="$MIN_INSTANCES" \
     --max-instances="$MAX_INSTANCES" \
+    --ingress=all \
     --quiet
 
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region="$REGION" --project="$PROJECT_ID" --format="value(status.url)")

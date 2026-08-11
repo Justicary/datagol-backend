@@ -99,6 +99,7 @@ echo ""
 echo "🎉 Web Deployment Complete!"
 
 # Auto-prune old images to save costs (si el script existe y es ejecutable)
-if [ -x "./scripts/prune-images.sh" ]; then
-    ./scripts/prune-images.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$SCRIPT_DIR/prune-images.sh" ]; then
+    "$SCRIPT_DIR/prune-images.sh"
 fi
