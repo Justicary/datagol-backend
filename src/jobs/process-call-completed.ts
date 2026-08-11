@@ -3,7 +3,7 @@ import type { Job } from 'pg-boss';
 import { mapElevenLabsPayload } from '../services/call-payload-mapper.js';
 import { geocodeAddress } from '../services/geocoding.js';
 import { resolveCallUsageEntries } from '../services/usage-registration.js';
-import { LEAD_TEMPERATURES } from '../types/lead-enums.js';
+import { LEAD_TEMPERATURES, LEAD_CHANNELS } from '../types/lead-enums.js';
 import { CONTACT_ADDRESS_TYPES } from '../types/contact-enums.js';
 import { NOTIFY_HOT_LEAD_QUEUE } from './notify-hot-lead.js';
 import { SEND_CALL_SUMMARY_QUEUE } from './send-call-summary.js';
@@ -161,6 +161,44 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
                 contactId: result.contact_id,
                 err: addressError.message,
                 msg: 'No se pudo consolidar la dirección del prospecto en contact_addresses',
+            });
+        }
+    }
+
+    // Respaldo de `whatsapp_messages` por turno individual (docs pendiente
+    // 2026-08-11, datagol-frontend): ElevenLabs no expone ningún webhook por
+    // mensaje individual (solo éste, post-llamada) — Meta le entrega los
+    // webhooks de WhatsApp directo a ElevenLabs, nunca a este backend. No hay
+    // forma de mostrar el chat en vivo con la integración actual; esto solo
+    // reemplaza el párrafo único de `call_logs.transcript` por burbujas
+    // individuales en el panel del dashboard, disponibles al terminar la
+    // conversación, no durante ella.
+    //
+    // `wa_message_id` sintético (`backfill:{conversationId}:{índice}`), no un
+    // ID real de Meta — ElevenLabs no entrega uno por turno. Existe solo para
+    // que la restricción UNIQUE de la columna deduplique reintentos de este
+    // job (idempotencia): un reintento reenvía las mismas filas con el mismo
+    // ID sintético, `ignoreDuplicates` las descarta sin error.
+    if (result?.contact_id && mapped.channel === LEAD_CHANNELS.WHATSAPP && mapped.transcriptTurns.length > 0) {
+        const whatsappMessageRows = mapped.transcriptTurns.map((turn, index) => ({
+            organization_id: event.organization_id,
+            contact_id: result.contact_id,
+            direction: turn.role === 'user' ? 'inbound' : 'outbound',
+            body: turn.message,
+            wa_message_id: `backfill:${mapped.conversationId}:${index}`,
+        }));
+
+        const { error: whatsappMessagesError } = await fastify.supabaseAdmin
+            .from('whatsapp_messages')
+            .upsert(whatsappMessageRows, { onConflict: 'wa_message_id', ignoreDuplicates: true });
+
+        if (whatsappMessagesError) {
+            fastify.log.warn({
+                webhookEventId,
+                organizationId: event.organization_id,
+                contactId: result.contact_id,
+                err: whatsappMessagesError.message,
+                msg: 'No se pudo respaldar el transcript en whatsapp_messages',
             });
         }
     }

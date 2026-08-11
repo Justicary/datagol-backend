@@ -340,3 +340,79 @@ export async function sendProspectSummaryEmail(params: SendProspectSummaryEmailP
     return null;
   }
 }
+
+export interface SendElevenLabsCreditsAlertEmailParams {
+  to: string;
+  organizationName?: string | null;
+  remainingPercentage: number;
+  threshold: number;
+}
+
+/**
+ * Alerta de créditos de ElevenLabs agotándose (umbrales 15%/10%/5%
+ * restante). El job `check-elevenlabs-credits` decide qué umbral se cruzó y
+ * la deduplicación por ciclo; aquí solo se arma y envía el correo.
+ */
+export async function sendElevenLabsCreditsAlertEmail(params: SendElevenLabsCreditsAlertEmailParams) {
+  const resend = getResendClient();
+  if (!resend) {
+    logger.warn('[Email] Omitiendo alerta de créditos de ElevenLabs por falta de RESEND_API_KEY.');
+    return null;
+  }
+
+  const { to, remainingPercentage, threshold } = params;
+  const organizationName = params.organizationName || 'tu organización';
+
+  const isUrgent = threshold <= 5;
+  const accentColor = isUrgent ? '#ef4444' : '#f59e0b';
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <title>Créditos de ElevenLabs por agotarse</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f6f8; color: #111827; margin: 0; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 3px solid ${accentColor}; }
+        .header { background: ${accentColor}; padding: 20px 24px; color: #ffffff; }
+        .header h1 { margin: 0; font-size: 20px; font-weight: 700; }
+        .content { padding: 24px; font-size: 15px; line-height: 1.6; color: #334155; }
+        .cta { background: #fef2f2; border-left: 4px solid ${accentColor}; padding: 14px 16px; font-size: 15px; font-weight: 600; color: #991b1b; border-radius: 6px; margin-bottom: 16px; }
+        .footer { background: #f8fafc; text-align: center; padding: 16px; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>⚠️ Créditos de ElevenLabs al ${remainingPercentage}%</h1>
+        </div>
+        <div class="content">
+          <div class="cta">A ${organizationName} le queda ${remainingPercentage}% de créditos de voz este ciclo de facturación. Si se agotan, tu agente no podrá contestar ni realizar llamadas.</div>
+          <p>Ingresa a tu panel de ElevenLabs para ampliar tu plan o esperar al siguiente ciclo de renovación.</p>
+        </div>
+        <div class="footer">
+          Alerta automática de créditos — Datagol Agentes IA
+        </div>
+      </div>
+    </body>
+    </html>
+    `;
+
+  try {
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'Datagol Agentes <info@ia.datagol.net>';
+    const response = await resend.emails.send({
+      from: fromEmail,
+      to,
+      subject: `⚠️ Créditos de ElevenLabs al ${remainingPercentage}% — ${organizationName}`,
+      html: htmlContent,
+    });
+
+    logger.info({ to, emailId: response.data?.id, threshold }, '[Email] Alerta de créditos de ElevenLabs enviada');
+    return response;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err, msg, threshold }, '[Email] Error al enviar la alerta de créditos de ElevenLabs con Resend');
+    return null;
+  }
+}

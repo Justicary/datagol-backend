@@ -150,11 +150,28 @@ export interface LlmModelTokenUsage {
     outputTokens: number;
 }
 
+/**
+ * Un turno individual del transcript, con el mismo mapeo `role==='user' →
+ * cliente` que la versión aplanada (`transcript: string`). Se usa para
+ * respaldar `whatsapp_messages` con mensajes individuales en vez del párrafo
+ * único de `transcript` — ver jobs/process-call-completed.ts.
+ */
+export interface TranscriptTurn {
+    role: 'user' | 'agent';
+    message: string;
+}
+
 export interface MappedCallData {
     conversationId: string;
     agentId: string;
     providerCallId: string;
     transcript: string;
+    /**
+     * Mismos turnos que `transcript`, sin aplanar y sin los turnos vacíos
+     * (`message` null/vacío) — ElevenLabs no entrega `wa_message_id` por
+     * turno, así que no hay forma de deduplicar un turno sin contenido.
+     */
+    transcriptTurns: TranscriptTurn[];
     summary: string | null;
     durationSeconds: number;
     callerPhoneE164: string | null;
@@ -383,6 +400,13 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         .map((turn) => `${turn.role === 'user' ? 'Cliente' : 'Agente'}: ${turn.message || ''}`)
         .join('\n');
 
+    const transcriptTurns: TranscriptTurn[] = (data.transcript || [])
+        .filter((turn) => turn.message && turn.message.trim() !== '')
+        .map((turn) => ({
+            role: turn.role === 'user' ? 'user' : 'agent',
+            message: turn.message as string,
+        }));
+
     // El número de telefonía (SIP/PSTN) es la fuente autoritativa del contacto
     // cuando existe; whatsapp_user_id es la fuente autoritativa en canal
     // WhatsApp (no hay tramo telefónico ahí, phone_call es null); el número
@@ -407,6 +431,7 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         agentId: data.agent_id,
         providerCallId: data.conversation_id,
         transcript,
+        transcriptTurns,
         summary: data.analysis?.transcript_summary || null,
         durationSeconds: data.metadata?.call_duration_secs ?? 0,
         callerPhoneE164: normalizedPhone?.success ? normalizedPhone.phoneE164 : null,

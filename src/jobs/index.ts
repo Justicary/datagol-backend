@@ -4,6 +4,7 @@ import { registerProcessVapiCallCompletedWorker } from './process-vapi-call-comp
 import { registerNotifyHotLeadWorker } from './notify-hot-lead.js';
 import { registerSendCallSummaryWorker } from './send-call-summary.js';
 import { registerSendProspectSummaryWorker } from './send-prospect-summary.js';
+import { registerCheckElevenLabsCreditsWorker } from './check-elevenlabs-credits.js';
 
 /**
  * Registra todos los workers de pg-boss de la aplicación. Se invoca una vez
@@ -15,4 +16,5 @@ export async function registerJobs(fastify: FastifyInstance): Promise<void> {
     await registerNotifyHotLeadWorker(fastify);
     await registerSendCallSummaryWorker(fastify);
     await registerSendProspectSummaryWorker(fastify);
+    await registerCheckElevenLabsCreditsWorker(fastify);
 }
