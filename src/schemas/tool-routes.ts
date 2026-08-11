@@ -43,14 +43,38 @@ export const bookingBodySchema = z.object({
     customerEmail: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
     startTime: z.string().min(1),
     timeZone: z.string().min(1).optional(),
+    // Fase C (docs/tasks/opus.md): si el agente ya confirmó con el cliente
+    // que reutiliza la dirección propuesta (ver `proposedAddress` de
+    // GET.../booking anterior o de este mismo intento), manda su id en vez
+    // de dictarla de nuevo.
+    contactAddressId: z.preprocess(emptyStringToUndefined, z.string().uuid().optional()),
+    // Dirección nueva dictada por el cliente en esta llamada (no coincide
+    // con la propuesta, o el contacto no tenía ninguna en archivo). Texto
+    // libre: se resuelve/consolida vía resolve_contact_address.
+    serviceAddress: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
 });
 export type BookingBody = z.infer<typeof bookingBodySchema>;
+
+const proposedAddressSchema = z.object({
+    addressId: z.string(),
+    street: z.string(),
+    neighborhood: z.string().nullable(),
+    city: z.string().nullable(),
+    state: z.string().nullable(),
+    postalCode: z.string().nullable(),
+});
+export type ProposedAddress = z.infer<typeof proposedAddressSchema>;
 
 export const bookingResponseSchema = z.object({
     booked: z.boolean(),
     message: z.string(),
     startTime: z.string().nullish(),
     appointmentId: z.string().nullish(),
+    // Solo poblado cuando el llamador NO mandó contactAddressId/serviceAddress
+    // y el contacto ya tiene una dirección principal en archivo (Fase C): el
+    // agente puede proponerla ("¿confirmas que es en Av. Reforma 123?") en
+    // vez de pedirla de cero.
+    proposedAddress: proposedAddressSchema.nullish(),
 });
 export type BookingResponse = z.infer<typeof bookingResponseSchema>;
 

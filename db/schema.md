@@ -110,6 +110,7 @@
 | `longitude` | `numeric` |  Nullable |
 | `contact_id` | `uuid` |  Nullable |
 | `conversation_id` | `text` |  Nullable |
+| `contact_address_id` | `uuid` |  Nullable |
 
 ## Table `organization_members`
 
@@ -131,7 +132,7 @@
 |------|------|-------------|
 | `id` | `uuid` | Primary |
 | `organization_id` | `uuid` |  |
-| `phone_e164` | `text` |  |
+| `phone_e164` | `text` |  Nullable |
 | `full_name` | `text` |  Nullable |
 | `email` | `text` |  Nullable |
 | `business_name` | `text` |  Nullable |
@@ -142,6 +143,13 @@
 | `last_seen_at` | `timestamptz` |  |
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
+| `lifecycle_stage` | `text` |  |
+| `pipeline_stage` | `text` |  |
+| `pipeline_updated_at` | `timestamptz` |  |
+| `won_at` | `timestamptz` |  Nullable |
+| `lost_reason` | `text` |  Nullable |
+| `archived_at` | `timestamptz` |  Nullable |
+| `last_activity_at` | `timestamptz` |  |
 
 ## Table `leads`
 
@@ -173,7 +181,7 @@
 | `updated_at` | `timestamptz` |  |
 | `hot_lead_notified_at` | `timestamptz` |  Nullable |
 | `prospect_summary_sent_at` | `timestamptz` |  Nullable |
-| `pipeline_stage` | `text` |  Nullable |
+| `deprecated_pipeline_stage` | `text` |  Nullable |
 
 ## Table `usage_events`
 
@@ -348,6 +356,47 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 | `source_ip` | `text` |  Nullable |
 | `created_at` | `timestamptz` |  |
 
+## Table `contact_addresses`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `contact_id` | `uuid` |  |
+| `label` | `text` |  Nullable |
+| `address_type` | `text` |  |
+| `is_primary` | `bool` |  |
+| `street` | `text` |  |
+| `interior` | `text` |  Nullable |
+| `neighborhood` | `text` |  Nullable |
+| `city` | `text` |  Nullable |
+| `state` | `text` |  Nullable |
+| `postal_code` | `text` |  Nullable |
+| `country` | `text` |  |
+| `latitude` | `numeric` |  Nullable |
+| `longitude` | `numeric` |  Nullable |
+| `dedupe_key` | `text` |  Nullable |
+| `notes` | `text` |  Nullable |
+| `verified_at` | `timestamptz` |  Nullable |
+| `archived_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `contact_notes`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `contact_id` | `uuid` |  |
+| `body` | `text` |  |
+| `author_user_id` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
 ## RLS Policies
 
 ### `organization_members`
@@ -355,12 +404,6 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `members_self_access` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
-
-### `contacts`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 
 ### `platform_admins`
 
@@ -410,18 +453,18 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 |--------|---------|-------|--------|-------|------------|
 | `catalog_read` | SELECT | authenticated | PERMISSIVE | `true` | — |
 
-### `appointments`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
-
 ### `organization_features`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `admin_write_features` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
 | `tenant_read_features` | SELECT | public | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
+
+### `appointments`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 
 ### `feature_audit_log`
 
@@ -441,4 +484,22 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `tenant_read_usage` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
+### `contact_notes`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `contact_addresses`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `contacts`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 

@@ -56,3 +56,34 @@ export async function requireOrganizationMembership(
     const { data, error } = await scopedClient.from('organizations').select('id').eq('id', organizationId).maybeSingle();
     return !error && !!data;
 }
+
+/**
+ * Verifica que el usuario tenga uno de los roles indicados en
+ * `organization_members` para esta organización — para acciones que exigen
+ * más que pertenencia (ej. `merge_contacts`, docs/tasks/opus.md Fase E:
+ * "solo por un rol admin u owner"). Usa `fastify.supabaseUser(jwt)` (RLS),
+ * mismo criterio que `requireOrganizationMembership`.
+ *
+ * `userId` se filtra explícitamente: la policy `members_self_access` de
+ * `organization_members` da SELECT sobre TODAS las filas de una
+ * organización a la que el usuario pertenece (para que el dashboard pueda
+ * listar al equipo), no solo la fila propia — sin el filtro por
+ * `user_id`, `.maybeSingle()` podría devolver el rol de otro miembro
+ * cualquiera de esa organización.
+ */
+export async function requireOrganizationRole(
+    fastify: FastifyInstance,
+    jwt: string,
+    organizationId: string,
+    userId: string,
+    allowedRoles: readonly string[]
+): Promise<boolean> {
+    const scopedClient = fastify.supabaseUser(jwt);
+    const { data, error } = await scopedClient
+        .from('organization_members')
+        .select('role')
+        .eq('organization_id', organizationId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    return !error && !!data && allowedRoles.includes(data.role);
+}

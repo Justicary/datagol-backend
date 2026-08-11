@@ -249,6 +249,50 @@ describe('2.2 — RPC process_call_completed', () => {
     });
 
     /**
+     * Fase B (docs/tasks/opus.md) — antes de delegar en resolve_contact(),
+     * esta rama solo resolvía contact_id si había teléfono; un widget web
+     * que solo captura correo (sin caller ID) nunca vinculaba contacto,
+     * aunque hubiera identidad suficiente. Contraparte directa del test de
+     * arriba (null/null → sin contacto): aquí solo el correo SÍ debe
+     * resolver/crear uno.
+     */
+    it('widget web sin teléfono, solo correo: SÍ resuelve/crea contact_id (contraparte del caso anterior)', async () => {
+        const emailOnlyConversationId = `${conversationId}-email-only`;
+        const widgetEmail = `widget-sin-telefono-${Date.now()}@example.invalid`;
+        const { data, error } = await supabaseAdmin.rpc('process_call_completed', {
+            p_organization_id: REAL_ORG_ID,
+            p_conversation_id: emailOnlyConversationId,
+            p_provider_call_id: emailOnlyConversationId,
+            p_caller_phone_e164: null,
+            p_full_name: 'Prospecto Del Widget Web',
+            p_email: widgetEmail,
+            p_business_name: null,
+            p_business_sector: null,
+            p_contact_phone_raw: null,
+            p_inquiry_reason: null,
+            p_temperature: null,
+            p_booked_appointment: false,
+            p_needs_followup: false,
+            p_followup_notes: null,
+            p_call_volume: null,
+            p_transcript: 'Cliente: Hola, escribo desde el widget, mi correo es ...',
+            p_summary: 'Prospecto de widget web, solo correo.',
+            p_duration_seconds: 30,
+        });
+
+        expect(error).toBeNull();
+        expect(data.contact_id).toBeTruthy();
+
+        const { data: contact } = await supabaseAdmin.from('contacts').select('id, email, phone_e164').eq('id', data.contact_id).single();
+        expect(contact?.email).toBe(widgetEmail);
+        expect(contact?.phone_e164).toBeNull();
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', emailOnlyConversationId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', emailOnlyConversationId);
+        await supabaseAdmin.from('contacts').delete().eq('id', data.contact_id);
+    });
+
+    /**
      * Migración 19 — dirección de servicio del prospecto y coordenadas
      * geocodificadas. El RPC solo persiste lo que recibe (la geocodificación
      * real vía Google Maps ocurre antes, en jobs/process-call-completed.ts —

@@ -13,6 +13,7 @@ import plansRoutes from './routes/plans.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
 import contactsRoutes from './routes/contacts.js';
+import contactsCrmRoutes from './routes/contacts-crm.js';
 import organizationMetricsRoutes from './routes/organization-metrics.js';
 import vapiRoutes from './routes/vapi.js';
 import voiceRoutes from './routes/voice.js';
@@ -176,6 +177,8 @@ export async function buildApp() {
     await app.register(organizationOnboardingRoutes);
     // Borrado ARCO por contacto (derecho de cancelación/oposición LFPDPPP).
     await app.register(contactsRoutes);
+    // CRM de contactos: pipeline, direcciones, notas, merge, kanban (docs/tasks/opus.md Fase D)
+    await app.register(contactsCrmRoutes);
     // Métricas por canal (docs/tasks/opus.md) — GET /api/organizations/:id/metrics
     await app.register(organizationMetricsRoutes);
     await app.register(vapiRoutes);

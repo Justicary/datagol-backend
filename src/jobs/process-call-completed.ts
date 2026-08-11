@@ -4,6 +4,7 @@ import { mapElevenLabsPayload } from '../services/call-payload-mapper.js';
 import { geocodeAddress } from '../services/geocoding.js';
 import { resolveCallUsageEntries } from '../services/usage-registration.js';
 import { LEAD_TEMPERATURES } from '../types/lead-enums.js';
+import { CONTACT_ADDRESS_TYPES } from '../types/contact-enums.js';
 import { NOTIFY_HOT_LEAD_QUEUE } from './notify-hot-lead.js';
 import { SEND_CALL_SUMMARY_QUEUE } from './send-call-summary.js';
 import { SEND_PROSPECT_SUMMARY_QUEUE } from './send-prospect-summary.js';
@@ -129,6 +130,39 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
             .update({ error: rpcError.message })
             .eq('id', webhookEventId);
         throw new Error(`process_call_completed falló para webhook_events.id=${webhookEventId}: ${rpcError.message}`);
+    }
+
+    // Fase B (docs/tasks/opus.md) — consolidar la dirección capturada por el
+    // agente en el contacto, no dejarla morir solo en call_logs. Best-effort
+    // y DESPUÉS del RPC (que ya persistió contacto/call_log/lead/usage_events
+    // con éxito): un fallo aquí no debe reintentar todo el job vía pg-boss,
+    // solo perderse esta consolidación puntual — se registra para poder
+    // investigarla. `mapped.address` es hoy siempre null en producción
+    // (verificado contra los últimos webhook_events reales: el agente de
+    // ElevenLabs no tiene esos campos en su Data Collection todavía), así
+    // que esta rama queda lista pero inactiva hasta que se configuren.
+    if (result?.contact_id && mapped.address) {
+        const { error: addressError } = await fastify.supabaseAdmin.rpc('resolve_contact_address', {
+            p_org_id: event.organization_id,
+            p_contact_id: result.contact_id,
+            p_street: mapped.address,
+            p_city: mapped.city,
+            p_state: mapped.state,
+            p_postal_code: mapped.zip,
+            p_lat: geocoded?.lat ?? null,
+            p_lng: geocoded?.lng ?? null,
+            p_type: CONTACT_ADDRESS_TYPES.SERVICIO,
+        });
+
+        if (addressError) {
+            fastify.log.warn({
+                webhookEventId,
+                organizationId: event.organization_id,
+                contactId: result.contact_id,
+                err: addressError.message,
+                msg: 'No se pudo consolidar la dirección del prospecto en contact_addresses',
+            });
+        }
     }
 
     // Fase 4 — Encolar notificaciones. Los workers vuelven a verificar sus

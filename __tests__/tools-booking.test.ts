@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import supabasePlugin from '../src/plugins/supabase.js';
-import { bookingToolRoute } from '../src/routes/tools/booking.js';
+import { bookingToolRoute, invalidatePrimaryAddressCache } from '../src/routes/tools/booking.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
 import { setSecret, getSecret, clearSecretCache } from '../src/services/secret-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
@@ -30,6 +30,8 @@ describe('POST /tools/:webhookToken/booking', () => {
     const TEST_WEBHOOK_TOKEN = `booking-test-token-${Date.now()}`;
     const createdConversationIds: string[] = [];
     const createdContactPhones: string[] = [];
+    const createdContactEmails: string[] = [];
+    const createdContactAddressIds: string[] = [];
     let originalWebhookToken: string | null = null;
     let originalToolWebhookSecret: string | null = null;
 
@@ -61,13 +63,22 @@ describe('POST /tools/:webhookToken/booking', () => {
         for (const conversationId of createdConversationIds) {
             await supabaseAdmin.from('appointments').delete().eq('conversation_id', conversationId);
         }
+        // contact_addresses antes que contacts (FK): appointments.contact_address_id
+        // ya quedó libre al borrar las citas de arriba.
+        for (const addressId of createdContactAddressIds) {
+            await supabaseAdmin.from('contact_addresses').delete().eq('id', addressId);
+        }
         for (const phone of createdContactPhones) {
             await supabaseAdmin.from('contacts').delete().eq('organization_id', REAL_ORG_ID).eq('phone_e164', phone);
+        }
+        for (const email of createdContactEmails) {
+            await supabaseAdmin.from('contacts').delete().eq('organization_id', REAL_ORG_ID).eq('email', email);
         }
     });
 
     beforeEach(() => {
         vi.mocked(createBooking).mockReset();
+        invalidatePrimaryAddressCache();
     });
 
     it('rechaza con 401 cuando el webhookToken no resuelve a ninguna organización', async () => {
@@ -268,9 +279,11 @@ describe('POST /tools/:webhookToken/booking', () => {
         }
     });
 
-    it('contraparte de éxito: web chat sin teléfono agenda solo con correo, sin contact_id', async () => {
+    it('contraparte de éxito: web chat sin teléfono agenda solo con correo, resuelve contact_id por correo (resolve_contact)', async () => {
         const conversationId = `booking-test:${Date.now()}:email-only`;
         createdConversationIds.push(conversationId);
+        const email = `webchat-sin-telefono-${Date.now()}@example.invalid`;
+        createdContactEmails.push(email);
 
         vi.mocked(createBooking).mockResolvedValue({
             calBookingId: 'cal_booking_test_email_only',
@@ -284,7 +297,7 @@ describe('POST /tools/:webhookToken/booking', () => {
                 method: 'POST',
                 url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
                 headers: { 'x-tool-secret': TEST_TOOL_SECRET },
-                payload: { conversationId, customerName: 'Cliente Web Chat Sin Teléfono', customerEmail: 'webchat-sin-telefono@example.invalid', startTime: '2026-09-05T10:00:00Z' },
+                payload: { conversationId, customerName: 'Cliente Web Chat Sin Teléfono', customerEmail: email, startTime: '2026-09-05T10:00:00Z' },
             });
 
             expect(response.statusCode).toBe(200);
@@ -296,16 +309,204 @@ describe('POST /tools/:webhookToken/booking', () => {
                 .select('contact_id, customer_phone, customer_email')
                 .eq('conversation_id', conversationId)
                 .single();
-            expect(appointment?.contact_id).toBeNull();
+            // Fase B/C: resolve_contact ahora resuelve/crea contacto también
+            // solo por correo — antes de esto quedaba en null.
+            expect(appointment?.contact_id).toBeTruthy();
             expect(appointment?.customer_phone).toBeNull();
-            expect(appointment?.customer_email).toBe('webchat-sin-telefono@example.invalid');
+            expect(appointment?.customer_email).toBe(email);
+
+            const { data: contact } = await supabaseAdmin.from('contacts').select('email, phone_e164').eq('id', appointment!.contact_id).single();
+            expect(contact?.email).toBe(email);
+            expect(contact?.phone_e164).toBeNull();
 
             expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
                 expect.anything(),
                 REAL_ORG_ID,
-                expect.objectContaining({ customerPhone: null, customerEmail: 'webchat-sin-telefono@example.invalid' }),
+                expect.objectContaining({ customerPhone: null, customerEmail: email }),
                 expect.anything()
             );
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('Fase C — sin contactAddressId/serviceAddress y el contacto ya tiene dirección principal: la propone en la respuesta, sin asignarla a la cita', async () => {
+        const conversationId = `booking-test:${Date.now()}:propose-address`;
+        createdConversationIds.push(conversationId);
+        const phone = `55${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        const phoneE164 = `+52${phone}`;
+        createdContactPhones.push(phoneE164);
+
+        const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: REAL_ORG_ID, p_phone: phoneE164, p_email: null });
+        const { data: addressId } = await supabaseAdmin.rpc('resolve_contact_address', {
+            p_org_id: REAL_ORG_ID,
+            p_contact_id: contactId,
+            p_street: 'Av. Ya Registrada 200',
+            p_city: 'CDMX',
+        });
+        createdContactAddressIds.push(addressId as string);
+
+        vi.mocked(createBooking).mockResolvedValue({
+            calBookingId: 'cal_booking_test_propose_address',
+            startTime: '2026-09-06T10:00:00.000Z',
+            endTime: '2026-09-06T10:30:00.000Z',
+        });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { conversationId, customerName: 'Cliente Con Dirección Previa', customerPhone: phone, startTime: '2026-09-06T10:00:00Z' },
+            });
+
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.booked).toBe(true);
+            expect(body.proposedAddress).toMatchObject({ addressId, street: 'Av. Ya Registrada 200', city: 'CDMX' });
+
+            const { data: appointment } = await supabaseAdmin
+                .from('appointments')
+                .select('contact_address_id, service_address')
+                .eq('conversation_id', conversationId)
+                .single();
+            // Proponer no es asignar: la cita no queda con dirección hasta que se confirme explícitamente.
+            expect(appointment?.contact_address_id).toBeNull();
+            expect(appointment?.service_address).toBeNull();
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('Fase C — serviceAddress nuevo se consolida en contact_addresses y la cita guarda contact_address_id + instantánea de texto', async () => {
+        const conversationId = `booking-test:${Date.now()}:new-address`;
+        createdConversationIds.push(conversationId);
+        const phone = `55${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        createdContactPhones.push(`+52${phone}`);
+
+        vi.mocked(createBooking).mockResolvedValue({
+            calBookingId: 'cal_booking_test_new_address',
+            startTime: '2026-09-07T10:00:00.000Z',
+            endTime: '2026-09-07T10:30:00.000Z',
+        });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: {
+                    conversationId,
+                    customerName: 'Cliente Dirección Nueva',
+                    customerPhone: phone,
+                    startTime: '2026-09-07T10:00:00Z',
+                    serviceAddress: 'Calle Nueva Dictada 300',
+                },
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.json().booked).toBe(true);
+
+            const { data: appointment } = await supabaseAdmin
+                .from('appointments')
+                .select('contact_address_id, service_address')
+                .eq('conversation_id', conversationId)
+                .single();
+            expect(appointment?.contact_address_id).toBeTruthy();
+            expect(appointment?.service_address).toBe('Calle Nueva Dictada 300');
+            createdContactAddressIds.push(appointment!.contact_address_id as string);
+
+            const { data: addressRow } = await supabaseAdmin.from('contact_addresses').select('street, address_type').eq('id', appointment!.contact_address_id).single();
+            expect(addressRow?.street).toBe('Calle Nueva Dictada 300');
+            expect(addressRow?.address_type).toBe('servicio');
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('Fase C — contactAddressId ya confirmado por el agente se usa directamente, sin volver a pedir la dirección', async () => {
+        const conversationId = `booking-test:${Date.now()}:confirmed-address`;
+        createdConversationIds.push(conversationId);
+        const phone = `55${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        const phoneE164 = `+52${phone}`;
+        createdContactPhones.push(phoneE164);
+
+        const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: REAL_ORG_ID, p_phone: phoneE164, p_email: null });
+        const { data: addressId } = await supabaseAdmin.rpc('resolve_contact_address', {
+            p_org_id: REAL_ORG_ID,
+            p_contact_id: contactId,
+            p_street: 'Av. Confirmada Por El Cliente 400',
+        });
+        createdContactAddressIds.push(addressId as string);
+
+        vi.mocked(createBooking).mockResolvedValue({
+            calBookingId: 'cal_booking_test_confirmed_address',
+            startTime: '2026-09-08T10:00:00.000Z',
+            endTime: '2026-09-08T10:30:00.000Z',
+        });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: { conversationId, customerName: 'Cliente Confirma Dirección', customerPhone: phone, startTime: '2026-09-08T10:00:00Z', contactAddressId: addressId },
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.json().booked).toBe(true);
+
+            const { data: appointment } = await supabaseAdmin
+                .from('appointments')
+                .select('contact_address_id, service_address')
+                .eq('conversation_id', conversationId)
+                .single();
+            expect(appointment?.contact_address_id).toBe(addressId);
+            expect(appointment?.service_address).toBe('Av. Confirmada Por El Cliente 400');
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('Fase C — contraparte de rechazo: un contactAddressId que no pertenece al contacto se ignora sin bloquear la cita', async () => {
+        const conversationId = `booking-test:${Date.now()}:foreign-address`;
+        createdConversationIds.push(conversationId);
+        const phone = `55${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        createdContactPhones.push(`+52${phone}`);
+
+        vi.mocked(createBooking).mockResolvedValue({
+            calBookingId: 'cal_booking_test_foreign_address',
+            startTime: '2026-09-09T10:00:00.000Z',
+            endTime: '2026-09-09T10:30:00.000Z',
+        });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/booking`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: {
+                    conversationId,
+                    customerName: 'Cliente Dirección Ajena',
+                    customerPhone: phone,
+                    startTime: '2026-09-09T10:00:00Z',
+                    contactAddressId: '00000000-0000-0000-0000-000000000000',
+                },
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.json().booked).toBe(true);
+
+            const { data: appointment } = await supabaseAdmin
+                .from('appointments')
+                .select('contact_address_id')
+                .eq('conversation_id', conversationId)
+                .single();
+            expect(appointment?.contact_address_id).toBeNull();
         } finally {
             await app.close();
         }
