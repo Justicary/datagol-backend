@@ -42,6 +42,7 @@
 | `suspended_reason` | `text` |  Nullable |
 | `suspended_at` | `timestamptz` |  Nullable |
 | `retention_days` | `int4` |  |
+| `widget_daily_session_limit` | `int4` |  |
 
 ## Table `knowledge_base`
 
@@ -397,6 +398,64 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 | `author_user_id` | `uuid` |  Nullable |
 | `created_at` | `timestamptz` |  |
 
+## Table `organization_usage_alerts`
+
+Registro de alertas de créditos de ElevenLabs (15%/10%/5% restante) ya enviadas por organización y ciclo de facturación — evita reenviar el mismo umbral dos veces dentro del mismo ciclo. RLS habilitada sin políticas: solo service_role la atraviesa.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `alert_type` | `text` |  |
+| `cycle_reset_at` | `timestamptz` |  |
+| `sent_at` | `timestamptz` |  |
+
+## Table `whatsapp_messages`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `contact_id` | `uuid` |  |
+| `direction` | `text` |  |
+| `body` | `text` |  |
+| `wa_message_id` | `text` |  Nullable Unique |
+| `sent_by_user_id` | `uuid` |  Nullable |
+| `status` | `text` |  |
+| `created_at` | `timestamptz` |  |
+
+## Table `widget_origins`
+
+Orígenes (esquema+host) autorizados a usar el widget de chat web de una organización, cada uno con su propia public_key no secreta. POST /api/widget/session valida el par (public_key, header Origin) exacto contra esta tabla antes de emitir un token efímero de conversación de ElevenLabs.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `origin` | `text` |  |
+| `public_key` | `text` |  |
+| `enabled` | `bool` |  |
+| `created_at` | `timestamptz` |  |
+
+## Table `widget_session_attempts`
+
+Log de sesiones de widget concedidas (no de intentos rechazados por origen/entitlement) usado únicamente para el cortafuegos de costo de POST /api/widget/session: límite por IP/hora y por organización/día. RLS habilitada sin políticas: solo service_role (backend) la lee/escribe.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  Nullable |
+| `source_ip` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
 ## RLS Policies
 
 ### `organization_members`
@@ -472,18 +531,18 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 |--------|---------|-------|--------|-------|------------|
 | `audit_read` | SELECT | public | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
 
+### `usage_events`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_read_usage` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
 ### `organizations`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `admin_delete_organizations` | DELETE | authenticated | PERMISSIVE | `is_platform_admin()` | — |
 | `org_self_access` | ALL | authenticated | PERMISSIVE | `(id IN ( SELECT auth_organization_ids() AS auth_organization_ids))` | `(id IN ( SELECT auth_organization_ids() AS auth_organization_ids))` |
-
-### `usage_events`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `tenant_read_usage` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
 
 ### `contact_notes`
 
@@ -498,6 +557,18 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 | `tenant_isolation` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 
 ### `contacts`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `whatsapp_messages`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `widget_origins`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|

@@ -16,6 +16,12 @@ export const USAGE_EVENT_UNIT_TYPES = {
     AGENT_MINUTE: 'agent_minute',
     SIP_INBOUND_LOCAL_MX: 'sip_inbound_local_mx',
     WA_MESSAGE: 'wa_message',
+    // Sesión de widget de chat web concedida (POST /api/widget/session,
+    // services/widget-session.ts). Sin costo directo propio (unit_rate_usd
+    // 0) — es un registro de auditoría/abuso, no una línea facturable: el
+    // costo real (minutos de agente) se mide aparte cuando ElevenLabs
+    // manda el webhook de post-conversación, igual que una llamada.
+    WEB_WIDGET_SESSION: 'web_widget_session',
 } as const;
 
 /**

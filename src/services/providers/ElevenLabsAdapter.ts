@@ -144,7 +144,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
   /**
    * Obtiene la Signed URL para conexión Inbound WebRTC / WebSocket conversacional en tiempo real
    */
-  async getSignedUrl(agentId?: string, apiKey?: string): Promise<{ signedUrl: string }> {
+  async getSignedUrl(agentId?: string, apiKey?: string, signal?: AbortSignal): Promise<{ signedUrl: string }> {
     const keyToUse = apiKey || this.defaultApiKey;
     const targetAgentId = agentId || this.defaultAgentId;
 
@@ -159,6 +159,7 @@ export class ElevenLabsAdapter implements IVoiceProvider {
           'xi-api-key': keyToUse,
           'Content-Type': 'application/json',
         },
+        signal,
       }
     );
 

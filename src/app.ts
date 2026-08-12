@@ -12,6 +12,7 @@ import adminFactoryResetRoutes from './routes/admin/factory-reset.js';
 import plansRoutes from './routes/plans.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
+import organizationWidgetRoutes from './routes/organization-widget.js';
 import contactsRoutes from './routes/contacts.js';
 import contactsCrmRoutes from './routes/contacts-crm.js';
 import organizationMetricsRoutes from './routes/organization-metrics.js';
@@ -20,6 +21,7 @@ import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
 import { elevenLabsPostCallWebhookRoutes } from './routes/webhooks/elevenlabs.js';
 import { toolRoutes } from './routes/tools/index.js';
+import { widgetRoutes } from './routes/widget.js';
 import { uploadRoutes } from './routes/upload.js';
 import { registerJobs } from './jobs/index.js';
 
@@ -71,6 +73,15 @@ export async function buildApp() {
 
     // Soporte para CORS básico mediante hooks de Fastify
     app.addHook('onRequest', async (request, reply) => {
+        // El widget de chat público (routes/widget.ts) gestiona su propio
+        // CORS restringido a orígenes registrados en widget_origins — nunca
+        // el comodín de aquí abajo (AGENTS.md, tarea "chatbot web": "jamás
+        // comodín"). Se excluye por completo de este hook global para que
+        // el hook propio de esa ruta sea el único que decide
+        // Access-Control-Allow-Origin en /api/widget/**.
+        if (request.url.startsWith('/api/widget/')) {
+            return;
+        }
         reply.header('Access-Control-Allow-Origin', '*');
         reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-organization-id, x-tenant-id');
@@ -175,6 +186,8 @@ export async function buildApp() {
     // Onboarding de organización (self-service DFY) — reemplaza el legacy
     // POST /api/organizations/onboard eliminado de organizationRoutes.
     await app.register(organizationOnboardingRoutes);
+    // Gestión de orígenes/tope diario del widget de chat web, desde el dashboard del tenant.
+    await app.register(organizationWidgetRoutes);
     // Borrado ARCO por contacto (derecho de cancelación/oposición LFPDPPP).
     await app.register(contactsRoutes);
     // CRM de contactos: pipeline, direcciones, notas, merge, kanban (docs/tasks/opus.md Fase D)
@@ -187,6 +200,8 @@ export async function buildApp() {
     await app.register(elevenLabsPostCallWebhookRoutes);
     // Fase 5 — Tool calls en vivo del agente de voz (routes/tools/**)
     await app.register(toolRoutes);
+    // Widget de chat web embebido — endpoint público, CORS propio (ver hook arriba)
+    await app.register(widgetRoutes);
     await app.register(uploadRoutes);
 
     return app;

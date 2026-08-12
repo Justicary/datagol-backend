@@ -46,6 +46,11 @@ export const FEATURE_KEYS = {
     HOT_LEAD_ALERTS: 'hot_lead_alerts',
     EMAIL_SUMMARIES: 'email_summaries',
     WHATSAPP: 'whatsapp',
+    // Widget de chat web embebido (db/migrations/32_widget_origins.sql
+    // siembra la fila real en `features`). Verificado en POST
+    // /api/widget/session (src/routes/widget.ts) antes de emitir un token
+    // efímero de conversación de ElevenLabs.
+    WEB_WIDGET: 'web_widget',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];
