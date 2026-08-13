@@ -6,9 +6,10 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { getOrganizationFeatures, clearEntitlementsCache } from '../src/services/entitlements.js';
 
 // Organización real existente con plan 'starter' (ver __tests__/entitlements.test.ts).
-// 'lead_capture' viene de plan_features del plan starter.
+// 'calendar_booking' viene de plan_features del plan starter con enabled:true
+// (a diferencia de 'lead_capture', que ese plan tiene con enabled:false).
 const PLAN_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
-const PLAN_FEATURE = 'lead_capture';
+const PLAN_FEATURE = 'calendar_booking';
 // Feature que NO viene del plan starter — se concede exclusivamente por override.
 const OVERRIDE_FEATURE = 'sms_agent';
 

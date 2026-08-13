@@ -12,9 +12,10 @@ vi.mock('../src/services/email.js', () => ({
 import { sendCallSummaryEmail } from '../src/services/email.js';
 import { sendCallSummaryHandler, type SendCallSummaryJobData } from '../src/jobs/send-call-summary.js';
 
-// Organización real existente, plan 'starter' — SÍ incluye email_summaries
-// (ver plan_features), a diferencia de hot_lead_alerts. No requiere override
-// para probar la ruta de éxito.
+// Organización real existente, plan 'starter'. El plan starter tiene
+// email_summaries con enabled:false en plan_features — la ruta de éxito
+// necesita un override explícito para concederla (ver beforeAll del primer
+// test), igual que la ruta de rechazo usa un override explícito para negarla.
 const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 
 function buildFakeFastify(): FastifyInstance {
@@ -62,23 +63,31 @@ describe('4.2 — send-call-summary', () => {
         }
     });
 
-    it('con la feature email_summaries habilitada (plan starter), envía la minuta y marca call_summary_sent_at', async () => {
-        const callLogId = await createCallLog();
-        createdCallLogIds.push(callLogId);
+    it('con la feature email_summaries habilitada (por override; el plan starter la tiene apagada), envía la minuta y marca call_summary_sent_at', async () => {
+        const overrideResult = await setFeatureOverride(REAL_ORG_ID, FEATURE_KEYS.EMAIL_SUMMARIES, true, 'Prueba 4.2 ruta de éxito');
+        expect(overrideResult.success).toBe(true);
 
-        vi.mocked(sendCallSummaryEmail).mockResolvedValue({ data: { id: 'fake-email-id' } } as any);
+        try {
+            const callLogId = await createCallLog();
+            createdCallLogIds.push(callLogId);
 
-        await sendCallSummaryHandler(buildFakeFastify(), buildJob(callLogId));
+            vi.mocked(sendCallSummaryEmail).mockResolvedValue({ data: { id: 'fake-email-id' } } as any);
 
-        expect(sendCallSummaryEmail).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(sendCallSummaryEmail).mock.calls[0][0]).toMatchObject({
-            to: 'datagolmx@gmail.com',
-            callerPhone: '+525599999999',
-            summary: 'El cliente pidió información de precios.',
-        });
+            await sendCallSummaryHandler(buildFakeFastify(), buildJob(callLogId));
 
-        const { data: callLog } = await supabaseAdmin.from('call_logs').select('call_summary_sent_at').eq('id', callLogId).single();
-        expect(callLog?.call_summary_sent_at).not.toBeNull();
+            expect(sendCallSummaryEmail).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(sendCallSummaryEmail).mock.calls[0][0]).toMatchObject({
+                to: 'datagolmx@gmail.com',
+                callerPhone: '+525599999999',
+                summary: 'El cliente pidió información de precios.',
+            });
+
+            const { data: callLog } = await supabaseAdmin.from('call_logs').select('call_summary_sent_at').eq('id', callLogId).single();
+            expect(callLog?.call_summary_sent_at).not.toBeNull();
+        } finally {
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', FEATURE_KEYS.EMAIL_SUMMARIES);
+            clearEntitlementsCache(REAL_ORG_ID);
+        }
     });
 
     it('contraparte de rechazo: sin la feature email_summaries, se omite y no se envía correo', async () => {

@@ -79,11 +79,18 @@ export async function getOrganizationFeatures(organizationId: string): Promise<S
 
     const planKey = org?.plan_key || 'starter';
 
-    // Cargar features del plan
+    // Cargar features del plan — filtrado por enabled=true: una fila con
+    // enabled:false en plan_features documenta que la feature EXISTE en el
+    // catálogo del plan pero está apagada, no que esté concedida. Sin este
+    // filtro, cualquier feature con una fila (aunque sea enabled:false) se
+    // concedía igual en este camino de respaldo — divergiendo del RPC
+    // organization_enabled_features(), que sí respeta enabled a nivel de
+    // base de datos.
     const { data: planFeatures } = await supabaseAdmin
         .from('plan_features')
         .select('feature_key')
-        .eq('plan_key', planKey);
+        .eq('plan_key', planKey)
+        .eq('enabled', true);
 
     const resultSet = new Set<string>();
     if (planFeatures) {

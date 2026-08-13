@@ -625,8 +625,10 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
             });
 
             it('isFeatureEnabled delega en getOrganizationFeatures y verifica membership real', async () => {
-                // 'lead_capture' está en el plan starter (verificado contra plan_features real).
-                expect(await isFeatureEnabled(REAL_ORG_ID, 'lead_capture')).toBe(true);
+                // 'calendar_booking' está en el plan starter con enabled:true
+                // (verificado contra plan_features real — a diferencia de
+                // 'lead_capture', que el plan starter tiene con enabled:false).
+                expect(await isFeatureEnabled(REAL_ORG_ID, 'calendar_booking')).toBe(true);
                 expect(await isFeatureEnabled(REAL_ORG_ID, 'feature_inexistente_xyz')).toBe(false);
             });
 
@@ -801,10 +803,11 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                 clearEntitlementsCache(FAKE_ORG_ID);
                 const features = await getOrganizationFeatures(FAKE_ORG_ID);
 
-                // 'lead_capture' solo puede haber llegado vía el plan 'starter'
-                // por defecto — FAKE_ORG_ID no existe, así que org?.plan_key es
-                // undefined y debe caer al default.
-                expect(features.has('lead_capture')).toBe(true);
+                // 'calendar_booking' solo puede haber llegado vía el plan
+                // 'starter' por defecto (enabled:true ahí) — FAKE_ORG_ID no
+                // existe, así que org?.plan_key es undefined y debe caer al
+                // default.
+                expect(features.has('calendar_booking')).toBe(true);
                 expect(orgSelectArgs).toContain('plan_key');
                 expect(orgEqArgs).toContainEqual(['id', FAKE_ORG_ID]);
                 expect(pfSelectArgs).toContain('feature_key');
@@ -868,7 +871,11 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     if (table === 'plan_features') {
                         return {
                             select: () => ({
-                                eq: () => Promise.resolve({ data: null, error: { message: 'Simulated plan_features failure' } }),
+                                // Dos .eq() encadenados (plan_key, luego enabled) —
+                                // el segundo es el que finalmente falla.
+                                eq: () => ({
+                                    eq: () => Promise.resolve({ data: null, error: { message: 'Simulated plan_features failure' } }),
+                                }),
                             }),
                         } as any;
                     }
