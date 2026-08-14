@@ -16,7 +16,9 @@
     "stryker": "stryker run --ignoreStatic",
     "limpiarImagenes": "./scripts/prune-images.sh",
     "pausarAPI": "./scripts/pause-service-dev.sh",
-    "reanudarAPI": "./scripts/resume-service.sh"
+    "reanudarAPI": "./scripts/resume-service-dev.sh",
+    "reanudarAPI:dev": "./scripts/resume-service-dev.sh",
+    "reanudarAPI:prod": "./scripts/resume-service.sh"
   },
   "keywords": [],
   "author": "",
