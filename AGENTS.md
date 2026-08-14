@@ -225,13 +225,22 @@ docker build -t datagol-api:local .
 * **Métricas mínimas:** latencia por ruta de tool (p50/p95/p99), tasa de error por proveedor, profundidad de cola, jobs fallidos.
 * **Observabilidad de conversación:** las excepciones no cuentan la historia completa. Cada llamada persiste transcripción y desenlace (`outcome`) para revisión periódica. Un agente que entendió mal y colgó es un fallo de producto que ningún monitor de errores detecta.
 
-### 🐳 15. Contenedores y Despliegue
+### 🐳 15. Contenedores, Despliegue y Gestión de Infraestructura
 
 * Imagen base `node:24-alpine`. Build multi-etapa; la imagen final no contiene `devDependencies` ni código fuente TypeScript.
 * El proceso corre como usuario no-root.
 * **Toda la configuración por variables de entorno**, validadas con Zod al arranque. La aplicación debe fallar de inmediato y con mensaje claro si falta una variable, nunca a mitad de una llamada.
 * **Cero dependencias de un proveedor de nube específico** en el camino crítico. Migrar de hosting debe ser cambiar un origin, no reescribir código.
 * El API de voz y los workers se despliegan co-ubicados con la región del proveedor de voz, no con la región del usuario final.
+* **Ciclo de vida y diferenciación estricta de entornos (DEV vs PROD):**
+  * **Entorno de Desarrollo (`datagol-dev`):** Prioridad en costo $0. Se opera bajo demanda (`--min-instances=0`, `--cpu-throttling`, cubierto por el *Free Tier* de GCP).
+    * `pnpm pausarAPI` (`scripts/pause-service-dev.sh`): Bloquea tráfico externo (`ingress=internal`) y escala a 0 instancias (costo $0 absoluto).
+    * `pnpm reanudarAPI:dev` / `pnpm reanudarAPI` (`scripts/resume-service-dev.sh`): Abre tráfico (`ingress=all`) manteniendo escalado a 0 en reposo.
+  * **Entorno de Producción:** Prioridad en latencia (<300ms p95, §3). Requiere `--min-instances=1` y `--no-cpu-throttling` (CPU *Always Allocated*, ~$15 USD/mes) para eliminar *cold starts* en llamadas telefónicas.
+    * `pnpm reanudarAPI:prod` (`scripts/resume-service.sh`): Aplica los parámetros contractuales de producción.
+* **Higiene de almacenamiento en GCP:**
+  * Todo despliegue o mantenimiento debe asegurar la poda de artefactos con `pnpm limpiarImagenes` (`scripts/prune-images.sh`).
+  * **Política de retención:** Conservar únicamente las **últimas 3 versiones/objetos** en Artifact Registry (`datagol-repo` y `cloud-run-source-deploy`), buckets de Cloud Storage (`gs://*-cloudbuild` y `gs://run-sources-*`) y revisiones inactivas de Cloud Run. Prohibido acumular imágenes o tarballs de compilación históricos.
 
 ### 🎛️ 16. Entitlements y Control de Features
 
