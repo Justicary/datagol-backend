@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 
 # =============================================================================
-# DATAGOL API — Pausar Instancia de Cloud Run (ahorro de costos)
+# DATAGOL API — Pausar Instancia de Cloud Run a Costo $0 en DEV
 # =============================================================================
-# Cloud Run no tiene un botón de "pausa" nativo. Lo que sí permite es que un
-# servicio quede en 0 instancias posibles (--max-instances=0): ningún request
-# puede ejecutarse (responden 503), así que no hay tiempo de cómputo que
-# facturar. Es la forma correcta de "apagar" el servicio sin borrarlo — la
-# imagen, la revisión y la configuración quedan intactas para reanudar con
-# scripts/resume-service.sh.
+# Para llevar los costos a $0:
+# 1. --min-instances=0 : Permite a Cloud Run escalar a 0 instancias en reposo.
+# 2. --cpu-throttling  : Desactiva "CPU Always Allocated", asegurando que no haya
+#                        reserva de vCPU/RAM facturable.
+# 3. --ingress=internal: Bloquea todo tráfico público externo. Al no recibir peticiones,
+#                        el conteo de instancias permanece en 0 absoluto.
 #
-# ⚠️  Mientras está pausado: el webhook de post-llamada de ElevenLabs, los
-# tool calls en vivo y el widget de demo del frontend van a fallar (503). No
-# lo uses si hay una llamada real en curso o esperada.
+# La imagen, revisión y variables de entorno quedan intactas para reanudar con:
+# ./scripts/resume-service.sh
 # =============================================================================
 
 set -euo pipefail
@@ -22,7 +21,7 @@ PROJECT_ID="${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || e
 SERVICE_NAME="${GCP_SERVICE_NAME:-datagol-api}"
 
 echo "================================================================="
-echo "⏸️  Pausando Datagol API en Cloud Run"
+echo "⏸️  Pausando Datagol API en Cloud Run (Costo \$0 en DEV)"
 echo "📍 Proyecto GCP:  $PROJECT_ID"
 echo "📍 Región:        $REGION"
 echo "📦 Servicio:      $SERVICE_NAME"
@@ -33,16 +32,20 @@ if ! command -v gcloud &>/dev/null; then
     exit 1
 fi
 
+echo "⚙️  Aplicando configuración de costo \$0..."
 gcloud run services update "$SERVICE_NAME" \
     --region="$REGION" \
     --project="$PROJECT_ID" \
     --min-instances=0 \
+    --cpu-throttling \
     --ingress=internal \
     --quiet
 
 echo "================================================================="
-echo "✅ Servicio pausado — 0 instancias permitidas, sin costo de cómputo."
-echo "   El webhook de ElevenLabs, los tool calls y el widget de demo"
-echo "   responderán 503 mientras esté así."
+echo "✅ Servicio pausado a Costo \$0:"
+echo "   • min-instances: 0"
+echo "   • cpu-throttling: activado (sin costo de CPU/RAM en reposo)"
+echo "   • ingress: internal (tráfico público bloqueado, 0 instancias generadas)"
+echo ""
 echo "🔁 Para reanudar: ./scripts/resume-service.sh"
 echo "================================================================="

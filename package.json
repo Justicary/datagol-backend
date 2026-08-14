@@ -14,7 +14,8 @@
     "build": "tsc",
     "lint": "eslint .",
     "stryker": "stryker run --ignoreStatic",
-    "pausarAPI": "./scripts/pause-service.sh",
+    "limpiarImagenes": "./scripts/prune-images.sh",
+    "pausarAPI": "./scripts/pause-service-dev.sh",
     "reanudarAPI": "./scripts/resume-service.sh"
   },
   "keywords": [],
