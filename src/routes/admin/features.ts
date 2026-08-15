@@ -10,6 +10,7 @@ import {
 } from '../../services/entitlements.js';
 import { FEATURE_AUDIT_ACTIONS } from '../../types/feature-audit-actions.js';
 import { PLAN_KEYS } from '../../types/feature-taxonomy.js';
+import { upsertFeatureBodySchema } from '../../schemas/features.js';
 
 interface OverrideBody {
     feature_key: string;
@@ -37,19 +38,138 @@ export const adminFeaturesRoutes: FastifyPluginAsync = async (fastify) => {
 
     /**
      * GET /api/admin/features
-     * Catálogo completo de características para la consola de administración.
+     * Catálogo completo de características con sus planes asociados ordenadas por sort_order.
      */
     fastify.get('/api/admin/features', async (request, reply) => {
-        const { data, error } = await supabaseAdmin
+        const { data: features, error } = await supabaseAdmin
             .from('features')
             .select('key, name, description, category, requires_provider, has_cost_impact, globally_disabled, disabled_reason, sort_order, created_at')
-            .order('sort_order', { ascending: true });
+            .order('sort_order', { ascending: true })
+            .order('key', { ascending: true });
 
         if (error) {
             return reply.status(500).send({ error: 'InternalServerError', message: error.message });
         }
 
-        return reply.send({ data: data ?? [] });
+        const { data: pfData, error: pfErr } = await supabaseAdmin
+            .from('plan_features')
+            .select('plan_key, feature_key')
+            .eq('enabled', true);
+
+        if (pfErr) {
+            return reply.status(500).send({ error: 'InternalServerError', message: pfErr.message });
+        }
+
+        const featurePlansMap = new Map<string, string[]>();
+        for (const pf of pfData ?? []) {
+            const list = featurePlansMap.get(pf.feature_key) ?? [];
+            list.push(pf.plan_key);
+            featurePlansMap.set(pf.feature_key, list);
+        }
+
+        const enrichedFeatures = (features ?? []).map((feature) => ({
+            ...feature,
+            plans: featurePlansMap.get(feature.key) ?? [],
+        }));
+
+        return reply.send({ data: enrichedFeatures });
+    });
+
+    /**
+     * POST /api/admin/features
+     * Crea o actualiza (upsert) una característica en el catálogo con validación estricta Zod.
+     * Permite asociar la característica a los planes seleccionados (plan_features).
+     */
+    fastify.post('/api/admin/features', async (request, reply) => {
+        const parseResult = upsertFeatureBodySchema.safeParse(request.body);
+
+        if (!parseResult.success) {
+            const firstIssue = parseResult.error.issues[0];
+            return reply.status(400).send({
+                error: 'BadRequest',
+                message: firstIssue?.message || 'Los datos de la característica no son válidos.',
+                details: parseResult.error.issues,
+            });
+        }
+
+        const body = parseResult.data;
+
+        let allPlanKeys: string[] = [];
+        if (body.plans !== undefined) {
+            const { data: plansData, error: plansError } = await supabaseAdmin
+                .from('plans')
+                .select('key');
+
+            if (plansError) {
+                return reply.status(500).send({ error: 'InternalServerError', message: plansError.message });
+            }
+
+            allPlanKeys = (plansData ?? []).map((p) => p.key);
+            const validPlanKeysSet = new Set(allPlanKeys);
+            const requestedPlans = new Set(body.plans);
+
+            for (const requestedKey of requestedPlans) {
+                if (!validPlanKeysSet.has(requestedKey)) {
+                    return reply.status(400).send({
+                        error: 'BadRequest',
+                        message: `El plan '${requestedKey}' no existe en el catálogo de planes.`,
+                    });
+                }
+            }
+        }
+
+        const featurePayload = {
+            key: body.key,
+            name: body.name,
+            description: body.description ?? null,
+            category: body.category,
+            requires_provider: body.requires_provider ?? null,
+            has_cost_impact: body.has_cost_impact,
+            globally_disabled: body.globally_disabled ?? false,
+            disabled_reason: body.globally_disabled ? (body.disabled_reason ?? null) : null,
+            sort_order: body.sort_order ?? 0,
+        };
+
+        const { data: savedFeature, error: upsertError } = await supabaseAdmin
+            .from('features')
+            .upsert(featurePayload, { onConflict: 'key' })
+            .select('*')
+            .single();
+
+        if (upsertError) {
+            return reply.status(500).send({ error: 'InternalServerError', message: upsertError.message });
+        }
+
+        if (body.plans !== undefined && allPlanKeys.length > 0) {
+            const requestedPlans = new Set(body.plans);
+            const rowsToUpsert = allPlanKeys.map((planKey) => ({
+                plan_key: planKey,
+                feature_key: body.key,
+                enabled: requestedPlans.has(planKey),
+            }));
+
+            const { error: pfUpsertError } = await supabaseAdmin
+                .from('plan_features')
+                .upsert(rowsToUpsert, { onConflict: 'plan_key,feature_key' });
+
+            if (pfUpsertError) {
+                return reply.status(500).send({ error: 'InternalServerError', message: pfUpsertError.message });
+            }
+
+            clearEntitlementsCache();
+        }
+
+        if (body.globally_disabled !== undefined) {
+            clearEntitlementsCache();
+        }
+
+        return reply.status(200).send({
+            message: `Característica '${body.key}' guardada con éxito.`,
+            data: {
+                ...savedFeature,
+                plans: body.plans ?? [],
+            },
+        });
     });
 
     /**
