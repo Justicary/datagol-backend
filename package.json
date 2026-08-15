@@ -18,7 +18,9 @@
     "pausarAPI": "./scripts/pause-service-dev.sh",
     "reanudarAPI": "./scripts/resume-service-dev.sh",
     "reanudarAPI:dev": "./scripts/resume-service-dev.sh",
-    "reanudarAPI:prod": "./scripts/resume-service.sh"
+    "reanudarAPI:prod": "./scripts/resume-service.sh",
+    "test:endpoints": "./scripts/test-endpoints.sh",
+    "probarEndpoints": "./scripts/test-endpoints.sh"
   },
   "keywords": [],
   "author": "",
