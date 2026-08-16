@@ -174,7 +174,7 @@ async function main() {
         durationMs: availBadAuth.durationMs,
     });
 
-    // 3.3 checkAvailability con secreto válido (espera 200)
+    // 3.3 checkAvailability con secreto válido y formato ISO estándar (espera 200)
     const now = new Date();
     const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
     const availValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/availability`, {
@@ -187,7 +187,7 @@ async function main() {
         }),
     });
     recordResult({
-        name: 'POST /tools/availability [Secreto válido -> Responde 200]',
+        name: 'POST /tools/availability [Formato ISO UTC -> Responde 200]',
         passed: availValid.status === 200 && typeof availValid.data?.available === 'boolean',
         statusCode: availValid.status,
         expectedStatus: 200,
@@ -195,7 +195,46 @@ async function main() {
         details: availValid.data ? `Mensaje: "${availValid.data.message}" | Slots: [${(availValid.data.slots || []).join(', ')}]` : undefined,
     });
 
-    // 3.4 rescheduleAppointment con secreto válido (espera 200 con mensaje verbalizable)
+    // 3.4 checkAvailability con formato generado por LLM de ElevenLabs (fecha local sin 'Z' ej. 2026-08-17T11:00:00)
+    const nextMonday = new Date();
+    nextMonday.setDate(nextMonday.getDate() + ((1 + 7 - nextMonday.getDay()) % 7 || 7));
+    const mondayStr = nextMonday.toISOString().split('T')[0];
+    const availLlmFormat = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/availability`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({
+            startTime: `${mondayStr}T09:00:00`,
+            endTime: `${mondayStr}T18:00:00`,
+            timeZone: 'America/Mexico_City',
+        }),
+    });
+    recordResult({
+        name: 'POST /tools/availability [Formato LLM ElevenLabs (Local ISO) -> Responde 200]',
+        passed: availLlmFormat.status === 200 && typeof availLlmFormat.data?.available === 'boolean',
+        statusCode: availLlmFormat.status,
+        expectedStatus: 200,
+        durationMs: availLlmFormat.durationMs,
+        details: availLlmFormat.data ? `Mensaje: "${availLlmFormat.data.message}" | Slots: [${(availLlmFormat.data.slots || []).join(', ')}]` : undefined,
+    });
+
+    // 3.5 bookAppointment validación de requerimientos (espera 400 si faltan datos requeridos)
+    const bookingInvalid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/booking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({
+            customerName: 'Cliente Prueba',
+            // Sin teléfono ni correo ni conversationId
+        }),
+    });
+    recordResult({
+        name: 'POST /tools/booking [Faltan campos requeridos -> Rechaza 400]',
+        passed: bookingInvalid.status === 400,
+        statusCode: bookingInvalid.status,
+        expectedStatus: 400,
+        durationMs: bookingInvalid.durationMs,
+    });
+
+    // 3.6 rescheduleAppointment con secreto válido (espera 200 con mensaje verbalizable)
     const rescheduleValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/reschedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },

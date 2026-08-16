@@ -4,7 +4,7 @@
  * cualquier llamada saliente al proveedor de calendario dentro del camino
  * crítico de un tool call. Un tool que se cuelga es una llamada perdida.
  */
-export const TOOL_HARD_TIMEOUT_MS = 400;
+export const TOOL_HARD_TIMEOUT_MS = 2500;
 
 export class ToolTimeoutError extends Error {
     constructor(ms: number) {
