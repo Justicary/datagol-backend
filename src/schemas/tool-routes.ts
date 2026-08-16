@@ -97,6 +97,38 @@ export const rescheduleResponseSchema = z.object({
 });
 export type RescheduleResponse = z.infer<typeof rescheduleResponseSchema>;
 
+export const locationItemSchema = z.object({
+    id: z.string().uuid(),
+    label: z.string().nullable(),
+    addressType: z.string(),
+    isPrimary: z.boolean(),
+    street: z.string(),
+    interior: z.string().nullable(),
+    neighborhood: z.string().nullable(),
+    city: z.string().nullable(),
+    state: z.string().nullable(),
+    postalCode: z.string().nullable(),
+    country: z.string(),
+    latitude: z.number().nullable(),
+    longitude: z.number().nullable(),
+    fullAddress: z.string(),
+    notes: z.string().nullable(),
+});
+export type LocationItem = z.infer<typeof locationItemSchema>;
+
+export const locationsBodySchema = z.object({
+    addressType: z.preprocess(emptyStringToUndefined, z.enum(['matriz', 'sucursal', 'facturacion', 'domicilio', 'servicio']).optional()),
+    label: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+});
+export type LocationsBody = z.infer<typeof locationsBodySchema>;
+
+export const locationsResponseSchema = z.object({
+    locations: z.array(locationItemSchema),
+    primaryLocation: locationItemSchema.nullable(),
+    message: z.string(),
+});
+export type LocationsResponse = z.infer<typeof locationsResponseSchema>;
+
 export function isValidDateString(value: string): boolean {
     return !Number.isNaN(new Date(value).getTime());
 }

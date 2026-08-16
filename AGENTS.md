@@ -268,6 +268,16 @@ Bitácora. Todo cambio de entitlement escribe en feature_audit_log dentro de la 
 
 Prohibido. Está prohibido introducir un sistema de flags paralelo — ni variables de entorno por cliente, ni banderas en integration_settings, ni condicionales sobre plan_key dispersas en el código. La resolución pasa siempre por las funciones de base de datos.
 
+### 📚 17. Bibliografía y Documentación de Referencia
+
+A continuación se indexan los documentos técnicos y manuales operativos que norman la arquitectura y las integraciones del backend:
+
+1. [Manual de Integración y Endpoints de ElevenLabs](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/elevenlabs-endpoints-manual.md) (`docs/elevenlabs-endpoints-manual.md`): Contratos OpenAPI, especificaciones de tools en vivo (`/tools/:token/*`), webhook post-call HMAC y firmado de WebSockets.
+2. [Análisis Técnico de Integraciones: ElevenLabs, Cal.com, Maps y Resend](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/analisis-integraciones-cal-elevenlabs-maps.md) (`docs/analisis-integraciones-cal-elevenlabs-maps.md`): Hallazgos de QA sobre Data Collection, zonas horarias en Cal.com v2, geocodificación de servidor con Google Maps y matriz de notificaciones por email.
+3. [Diccionario de Esquema y Migraciones de Base de Datos](file:///home/justicary/proyectos/antigravity/datagol-backend/db/schema.md) (`db/schema.md`): Definición de tablas, relaciones, funciones RPC (`process_call_completed`, `resolve_contact_address`) y políticas RLS.
+4. [Guía de Tunelado y Pruebas Locales con Webhooks](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/tunneling.md) (`docs/tunneling.md`): Configuración de Cloudflare Tunnel y LocalTunnel para recibir eventos de proveedores durante el desarrollo.
+5. [Catálogo de Precios y Tarifas de Infraestructura](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/listaPrecios2024.md) (`docs/listaPrecios2024.md`): Desglose de costos unitarios de proveedores (ElevenLabs, Telnyx, Meta) para metering y conciliación.
+
 <!-- BEGIN:agent-rules -->
 # Verifica antes de asumir
 

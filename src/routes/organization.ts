@@ -6,7 +6,6 @@ interface UpdateOrganizationBody {
     name?: string;
     email?: string;
     phone_number?: string;
-    vapi_agent_id?: string;
     address?: string;
     city?: string;
     state?: string;
@@ -60,17 +59,34 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
         async (request, reply) => {
             const { id } = request.params;
 
-            const { data, error } = await supabaseAdmin
+            const { data: org, error: orgError } = await supabaseAdmin
                 .from('organizations')
-                .select('name, email, address, city, state')
+                .select('name, email')
                 .eq('id', id)
                 .maybeSingle();
 
-            if (error || !data) {
+            if (orgError || !org) {
                 return reply.status(404).send({ error: 'NotFound', message: 'Organización no encontrada.' });
             }
 
-            return reply.send({ data });
+            const { data: addr } = await supabaseAdmin
+                .from('contact_addresses')
+                .select('street, city, state, postal_code')
+                .eq('organization_id', id)
+                .is('contact_id', null)
+                .is('archived_at', null)
+                .eq('is_primary', true)
+                .maybeSingle();
+
+            return reply.send({
+                data: {
+                    name: org.name,
+                    email: org.email,
+                    address: addr?.street ?? null,
+                    city: addr?.city ?? null,
+                    state: addr?.state ?? null,
+                },
+            });
         }
     );
 
@@ -87,7 +103,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
                     name,
                     email,
                     phone_number,
-                    vapi_agent_id,
                     address,
                     city,
                     state,
@@ -110,13 +125,6 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
                 if (name !== undefined) updatePayload.name = name.trim();
                 if (email !== undefined) updatePayload.email = email;
                 if (phone_number !== undefined) updatePayload.phone_number = phone_number;
-                if (vapi_agent_id !== undefined) updatePayload.vapi_agent_id = vapi_agent_id;
-                if (address !== undefined) updatePayload.address = address;
-                if (city !== undefined) updatePayload.city = city;
-                if (state !== undefined) updatePayload.state = state;
-                if (postal_code !== undefined) updatePayload.postal_code = postal_code;
-                if (latitude !== undefined) updatePayload.latitude = latitude;
-                if (longitude !== undefined) updatePayload.longitude = longitude;
 
                 const { data, error } = await supabaseAdmin
                     .from('organizations')
@@ -131,6 +139,59 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
                         message: 'Error al actualizar la organización en Supabase',
                         details: error.message,
                     });
+                }
+
+                // Si se enviaron campos de dirección, se persisten en contact_addresses
+                const hasAddressFields =
+                    address !== undefined ||
+                    city !== undefined ||
+                    state !== undefined ||
+                    postal_code !== undefined ||
+                    latitude !== undefined ||
+                    longitude !== undefined;
+
+                if (hasAddressFields) {
+                    const { data: existingPrimary } = await supabaseAdmin
+                        .from('contact_addresses')
+                        .select('id')
+                        .eq('organization_id', id)
+                        .is('contact_id', null)
+                        .eq('is_primary', true)
+                        .is('archived_at', null)
+                        .maybeSingle();
+
+                    if (existingPrimary) {
+                        const addrUpdate: Record<string, unknown> = {};
+                        if (address !== undefined) addrUpdate.street = address;
+                        if (city !== undefined) addrUpdate.city = city;
+                        if (state !== undefined) addrUpdate.state = state;
+                        if (postal_code !== undefined) addrUpdate.postal_code = postal_code;
+                        if (latitude !== undefined) addrUpdate.latitude = latitude;
+                        if (longitude !== undefined) addrUpdate.longitude = longitude;
+
+                        if (Object.keys(addrUpdate).length > 0) {
+                            await supabaseAdmin
+                                .from('contact_addresses')
+                                .update(addrUpdate)
+                                .eq('id', existingPrimary.id);
+                        }
+                    } else {
+                        await supabaseAdmin
+                            .from('contact_addresses')
+                            .insert({
+                                organization_id: id,
+                                contact_id: null,
+                                label: 'Matriz',
+                                address_type: 'matriz',
+                                is_primary: true,
+                                street: address ?? 'Domicilio principal',
+                                city: city ?? null,
+                                state: state ?? null,
+                                postal_code: postal_code ?? null,
+                                latitude: latitude ?? null,
+                                longitude: longitude ?? null,
+                            });
+                    }
                 }
 
                 return reply.status(200).send({

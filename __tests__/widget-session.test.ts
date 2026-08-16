@@ -166,9 +166,10 @@ describe('POST /api/widget/session', () => {
     it('rechaza con 403 FEATURE_DISABLED cuando la organización no tiene el entitlement web_widget', async () => {
         await supabaseAdmin
             .from('organization_features')
-            .delete()
-            .eq('organization_id', REAL_ORG_ID)
-            .eq('feature_key', FEATURE_KEYS.WEB_WIDGET);
+            .upsert(
+                { organization_id: REAL_ORG_ID, feature_key: FEATURE_KEYS.WEB_WIDGET, enabled: false, reason: 'test disabled' },
+                { onConflict: 'organization_id,feature_key' }
+            );
         clearEntitlementsCache(REAL_ORG_ID);
 
         const app = await buildTestApp();

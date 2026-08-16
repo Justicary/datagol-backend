@@ -171,8 +171,13 @@ describe('routes/organization-onboarding.ts', () => {
                 });
                 expect(response.statusCode).toBe(403);
 
-                const { data: unchanged } = await supabaseAdmin.from('organizations').select('city').eq('id', orgId).single();
-                expect(unchanged?.city).toBeNull();
+                const { data: unchanged } = await supabaseAdmin
+                    .from('contact_addresses')
+                    .select('city')
+                    .eq('organization_id', orgId)
+                    .is('contact_id', null)
+                    .maybeSingle();
+                expect(unchanged?.city ?? null).toBeNull();
             } finally {
                 await app.close();
             }
@@ -191,10 +196,16 @@ describe('routes/organization-onboarding.ts', () => {
 
                 const { data: updated } = await supabaseAdmin
                     .from('organizations')
-                    .select('city, integration_settings')
+                    .select('integration_settings')
                     .eq('id', orgId)
                     .single();
-                expect(updated?.city).toBe('CDMX');
+                const { data: updatedAddr } = await supabaseAdmin
+                    .from('contact_addresses')
+                    .select('city')
+                    .eq('organization_id', orgId)
+                    .is('contact_id', null)
+                    .maybeSingle();
+                expect(updatedAddr?.city).toBe('CDMX');
                 expect(updated?.integration_settings?.theme).toEqual({ accentColor: '#06b6d4' });
                 expect(updated?.integration_settings?.business_hours).toEqual({ mon: '09:00-18:00' });
             } finally {
@@ -434,7 +445,7 @@ describe('routes/organization-onboarding.ts', () => {
             const planResult = await setOrganizationPlan(orgId, 'starter', 'Prueba readiness ready:true');
             expect(planResult.success).toBe(true);
 
-            const starterFeatures = ['voice_inbound', 'calendar_booking', 'email_summaries', 'lead_capture', 'call_recording'];
+            const starterFeatures = ['voice_inbound', 'calendar_booking', 'email_summaries', 'lead_capture', 'call_recording', 'web_widget'];
             for (const featureKey of starterFeatures) {
                 const overrideResult = await setFeatureOverride(orgId, featureKey, false, 'Prueba readiness ready:true');
                 expect(overrideResult.success).toBe(true);

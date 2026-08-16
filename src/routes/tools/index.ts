@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { availabilityToolRoute } from './availability.js';
 import { bookingToolRoute } from './booking.js';
 import { rescheduleToolRoute } from './reschedule.js';
+import { locationsToolRoute } from './locations.js';
 
 /**
  * Registro de `routes/tools/**` (Fase 5). Encapsulado en su propio contexto
@@ -29,6 +30,7 @@ export async function toolRoutes(fastify: FastifyInstance) {
     await fastify.register(availabilityToolRoute);
     await fastify.register(bookingToolRoute);
     await fastify.register(rescheduleToolRoute);
+    await fastify.register(locationsToolRoute);
 }
 
 export default toolRoutes;

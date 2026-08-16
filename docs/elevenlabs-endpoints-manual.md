@@ -58,6 +58,7 @@ Todas las rutas de herramientas comparten el prefijo `/tools/:webhookToken/`:
 | `checkAvailability` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/availability` | Consulta horarios libres en Cal.com para un rango de fechas. |
 | `bookAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/booking` | Agenda la cita en Cal.com y guarda el registro en `appointments`. |
 | `rescheduleAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/reschedule` | Reprograma una cita existente verificando identidad del cliente. |
+| `getLocations` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/locations` | Consulta la matriz, sucursales y direcciones físicas o de facturación del negocio. |
 
 > **Nota sobre `<WEBHOOK_TOKEN>`**: Es el identificador alfanumérico público de enrutamiento asignado a cada organización en la columna `organizations.webhook_token` (ej. `b05e8d6ec8801a7124c989330104579c9490b3e06bf02a2bdf404d879564a831`). Permite a la API saber a qué cliente pertenece la llamada **antes** de leer el payload.
 
@@ -117,6 +118,17 @@ ElevenLabs **no** envía firmas HMAC en las Tools; únicamente permite inyectar 
   * `customerEmail` (string, opcional)
   * `customerPhone` (string, opcional)
   * `newStartTime` (string)
+
+#### D) Configuración de `getLocations`:
+* **Name**: `getLocations`
+* **Description**: `Consulta la ubicación de la matriz, sucursales o dirección de facturación del negocio para informar al cliente cuando pregunte por direcciones, sedes o dónde estamos ubicados.`
+* **Method**: `POST`
+* **URL**: `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/locations` *(o `/branches`)*
+* **Headers**:
+  * `x-tool-secret`: `<TOOL_SECRET>`
+* **Request Body Parameters**:
+  * `addressType` (string, opcional: `matriz`, `sucursal`, `facturacion`, `domicilio`, `servicio`)
+  * `label` (string, opcional, ej. `Angelópolis`, `Centro`)
 
 ---
 

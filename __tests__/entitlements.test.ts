@@ -741,9 +741,10 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
             });
 
             it('el fallback JS: un override enabled:true SÍ agrega una feature que no viene del plan (rama "if" real, no solo la del plan)', async () => {
-                // 'voice_outbound' no está en plan_features de 'starter' — si
-                // apareciera en el resultado, solo puede ser por el override.
-                const targetFeature = 'voice_outbound';
+                // 'call_transfer' no está en plan_features de 'starter' y no está
+                // deshabilitado globalmente — si apareciera en el resultado,
+                // solo puede ser por el override.
+                const targetFeature = 'call_transfer';
                 const originalRpc = supabaseAdmin.rpc.bind(supabaseAdmin);
                 vi.spyOn(supabaseAdmin, 'rpc').mockImplementation((fnName: string, ...args: any[]) => {
                     if (fnName === 'organization_enabled_features') {

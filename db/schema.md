@@ -8,29 +8,14 @@
 | `name` | `varchar` |  |
 | `email` | `varchar` |  Unique |
 | `phone_number` | `varchar` |  Nullable |
-| `deprecated_vapi_agent_id` | `varchar` |  Nullable |
 | `created_at` | `timestamptz` |  Nullable |
 | `updated_at` | `timestamptz` |  Nullable |
-| `address` | `text` |  Nullable |
-| `city` | `varchar` |  Nullable |
-| `state` | `varchar` |  Nullable |
-| `postal_code` | `varchar` |  Nullable |
-| `latitude` | `numeric` |  Nullable |
-| `longitude` | `numeric` |  Nullable |
-| `deprecated_vapi_private_key` | `text` |  Nullable |
-| `deprecated_vapi_phone_number_id` | `varchar` |  Nullable |
-| `whatsapp_access_token` | `text` |  Nullable |
 | `whatsapp_business_account_id` | `varchar` |  Nullable |
 | `whatsapp_phone_number_id` | `varchar` |  Nullable |
-| `cal_api_key` | `text` |  Nullable |
 | `cal_event_type_id` | `int4` |  Nullable |
 | `integration_settings` | `jsonb` |  Nullable |
 | `active_voice_provider` | `varchar` |  Nullable |
-| `elevenlabs_api_key` | `text` |  Nullable |
 | `elevenlabs_agent_id` | `varchar` |  Nullable |
-| `telnyx_api_key` | `text` |  Nullable |
-| `telnyx_phone_number_id` | `varchar` |  Nullable |
-| `telnyx_sip_connection_id` | `varchar` |  Nullable |
 | `max_concurrent_calls` | `int4` |  Nullable |
 | `silence_timeout_seconds` | `int4` |  Nullable |
 | `max_call_duration_seconds` | `int4` |  Nullable |
@@ -359,13 +344,15 @@ Log de intentos de llamada saliente (exitosos o no) usado únicamente para aplic
 
 ## Table `contact_addresses`
 
+Direcciones físicas y fiscales. Cuando contact_id no es nulo, pertenece a ese contacto. Cuando contact_id es nulo, representa una sede/sucursal o matriz de la propia organización.
+
 ### Columns
 
 | Name | Type | Constraints |
 |------|------|-------------|
 | `id` | `uuid` | Primary |
 | `organization_id` | `uuid` |  |
-| `contact_id` | `uuid` |  |
+| `contact_id` | `uuid` |  Nullable |
 | `label` | `text` |  Nullable |
 | `address_type` | `text` |  |
 | `is_primary` | `bool` |  |

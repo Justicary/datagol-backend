@@ -112,12 +112,6 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
 
         const updatePayload: Record<string, unknown> = {};
         if (body.name !== undefined) updatePayload.name = body.name;
-        if (body.address !== undefined) updatePayload.address = body.address;
-        if (body.city !== undefined) updatePayload.city = body.city;
-        if (body.state !== undefined) updatePayload.state = body.state;
-        if (body.postal_code !== undefined) updatePayload.postal_code = body.postal_code;
-        if (body.latitude !== undefined) updatePayload.latitude = body.latitude;
-        if (body.longitude !== undefined) updatePayload.longitude = body.longitude;
 
         if (body.business_hours !== undefined) {
             // integration_settings ya contiene `theme` (escrito por el
@@ -132,25 +126,86 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
             updatePayload.integration_settings = { ...currentSettings, business_hours: body.business_hours };
         }
 
-        if (Object.keys(updatePayload).length === 0) {
-            return reply.status(200).send({ success: true, data: {} });
+        let updatedOrg: Record<string, unknown>;
+
+        if (Object.keys(updatePayload).length > 0) {
+            updatePayload.updated_at = new Date().toISOString();
+
+            const { data: updated, error } = await fastify.supabaseAdmin
+                .from('organizations')
+                .update(updatePayload)
+                .eq('id', ctx.organizationId)
+                .select()
+                .maybeSingle();
+
+            if (error || !updated) {
+                request.log.error({ organizationId: ctx.organizationId, err: error?.message, msg: 'Error actualizando business-info' });
+                return reply.status(500).send({ success: false, error: 'No se pudo actualizar la información del negocio.' });
+            }
+            updatedOrg = updated;
+        } else {
+            const { data: currentOrg } = await fastify.supabaseAdmin
+                .from('organizations')
+                .select()
+                .eq('id', ctx.organizationId)
+                .maybeSingle();
+            updatedOrg = currentOrg ?? {};
         }
 
-        updatePayload.updated_at = new Date().toISOString();
+        // Si se enviaron campos de dirección, se persisten en contact_addresses como dirección de la organización (contact_id = null)
+        const hasAddressFields =
+            body.address !== undefined ||
+            body.city !== undefined ||
+            body.state !== undefined ||
+            body.postal_code !== undefined ||
+            body.latitude !== undefined ||
+            body.longitude !== undefined;
 
-        const { data: updated, error } = await fastify.supabaseAdmin
-            .from('organizations')
-            .update(updatePayload)
-            .eq('id', ctx.organizationId)
-            .select()
-            .maybeSingle();
+        if (hasAddressFields) {
+            const { data: existingPrimary } = await fastify.supabaseAdmin
+                .from('contact_addresses')
+                .select('id')
+                .eq('organization_id', ctx.organizationId)
+                .is('contact_id', null)
+                .eq('is_primary', true)
+                .is('archived_at', null)
+                .maybeSingle();
 
-        if (error || !updated) {
-            request.log.error({ organizationId: ctx.organizationId, err: error?.message, msg: 'Error actualizando business-info' });
-            return reply.status(500).send({ success: false, error: 'No se pudo actualizar la información del negocio.' });
+            if (existingPrimary) {
+                const addrUpdate: Record<string, unknown> = {};
+                if (body.address !== undefined) addrUpdate.street = body.address;
+                if (body.city !== undefined) addrUpdate.city = body.city;
+                if (body.state !== undefined) addrUpdate.state = body.state;
+                if (body.postal_code !== undefined) addrUpdate.postal_code = body.postal_code;
+                if (body.latitude !== undefined) addrUpdate.latitude = body.latitude;
+                if (body.longitude !== undefined) addrUpdate.longitude = body.longitude;
+
+                if (Object.keys(addrUpdate).length > 0) {
+                    await fastify.supabaseAdmin
+                        .from('contact_addresses')
+                        .update(addrUpdate)
+                        .eq('id', existingPrimary.id);
+                }
+            } else {
+                await fastify.supabaseAdmin
+                    .from('contact_addresses')
+                    .insert({
+                        organization_id: ctx.organizationId,
+                        contact_id: null,
+                        label: 'Matriz',
+                        address_type: 'matriz',
+                        is_primary: true,
+                        street: body.address ?? 'Domicilio principal',
+                        city: body.city ?? null,
+                        state: body.state ?? null,
+                        postal_code: body.postal_code ?? null,
+                        latitude: body.latitude ?? null,
+                        longitude: body.longitude ?? null,
+                    });
+            }
         }
 
-        return reply.status(200).send({ success: true, data: updated });
+        return reply.status(200).send({ success: true, data: updatedOrg });
     });
 
     /**
