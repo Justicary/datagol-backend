@@ -54,6 +54,14 @@ describe('FASE C — Motor de renderizado de correos (email-renderer.ts)', () =>
             remainingPercentage: 10,
             threshold: 10,
         },
+        [EMAIL_TYPES.THANK_YOU]: {
+            prospectName: 'Fernando Torres',
+            businessName: 'Consultores Estratégicos MX',
+            customSubject: '¡Gracias por contactar a Consultores Estratégicos MX!',
+            customBody: 'Hemos recibido tus requerimientos de consultoría y un ejecutivo se pondrá en contacto contigo.',
+            attachmentDownloadUrl: 'https://cdn.datagol.net/attachments/brochure.pdf',
+            attachmentFileName: 'brochure_2026.pdf',
+        },
     };
 
     describe('Matriz de 5 plantillas × 5 tipos de correo', () => {

@@ -11,6 +11,7 @@ import {
     type AppointmentConfirmationEmailData,
     type ProspectSummaryEmailData,
     type CreditsAlertEmailData,
+    type ThankYouEmailData,
     type OrganizationEmailSettings,
 } from '../types/email-templates.js';
 import { deriveSafeEmailTheme, DEFAULT_DATAGOL_EMAIL_THEME } from './email-theme.js';
@@ -460,3 +461,93 @@ export async function sendElevenLabsCreditsAlertEmail(params: SendElevenLabsCred
         return null;
     }
 }
+
+export interface SendThankYouEmailParams extends BaseEmailSendParams {
+    prospectName?: string | null;
+    businessName?: string | null;
+    customSubject?: string | null;
+    customBody?: string | null;
+    attachmentBuffer?: Buffer | null;
+    attachmentFileName?: string | null;
+    attachmentDownloadUrl?: string | null;
+}
+
+/**
+ * Envía correo de agradecimiento automático al prospecto captado.
+ */
+export async function sendThankYouEmail(params: SendThankYouEmailParams) {
+    const resend = getResendClient();
+    if (!resend) {
+        logger.warn('[Email] Omitiendo agradecimiento por falta de RESEND_API_KEY.');
+        return null;
+    }
+
+    const {
+        to,
+        prospectName = 'Estimado cliente',
+        businessName = 'nuestro equipo',
+        customSubject = null,
+        customBody = null,
+        attachmentBuffer = null,
+        attachmentFileName = null,
+        attachmentDownloadUrl = null,
+        organizationId,
+        templateId,
+        customOptions,
+    } = params;
+
+    const baseOptions = await resolveOrganizationEmailOptions(organizationId);
+    const renderOptions: EmailRenderOptions = {
+        ...baseOptions,
+        ...(templateId ? { templateId } : {}),
+        ...(customOptions ?? {}),
+    };
+
+    const thankYouData: ThankYouEmailData = {
+        prospectName,
+        businessName,
+        customSubject,
+        customBody,
+        attachmentDownloadUrl,
+        attachmentFileName,
+    };
+
+    const rendered = renderEmail(EMAIL_TYPES.THANK_YOU, thankYouData, renderOptions);
+
+    // Si hay buffer de adjunto y su tamaño no excede 7MB, se adjunta directamente al correo
+    const emailAttachments =
+        attachmentBuffer && attachmentBuffer.length <= 7 * 1024 * 1024
+            ? [
+                  {
+                      filename: attachmentFileName || 'documento.pdf',
+                      content: attachmentBuffer,
+                  },
+              ]
+            : undefined;
+
+    try {
+        const fromEmail = getFromEmail();
+        const response = await resend.emails.send({
+            from: fromEmail,
+            to,
+            subject: rendered.subject,
+            html: rendered.html,
+            text: rendered.text,
+            ...(emailAttachments ? { attachments: emailAttachments } : {}),
+            ...(renderOptions.replyTo ? { replyTo: renderOptions.replyTo } : {}),
+        });
+
+        if (response.error) {
+            logger.error({ error: response.error, to }, '[Email] Resend respondió con error al enviar agradecimiento');
+            return null;
+        }
+
+        logger.info({ to, emailId: response.data?.id }, '[Email] Correo de agradecimiento automático enviado');
+        return response;
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, msg, to }, '[Email] Error al enviar agradecimiento con Resend');
+        return null;
+    }
+}
+

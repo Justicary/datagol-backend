@@ -8,6 +8,7 @@ import {
     type AppointmentConfirmationEmailData,
     type ProspectSummaryEmailData,
     type CreditsAlertEmailData,
+    type ThankYouEmailData,
 } from '../types/email-templates.js';
 import { type SafeEmailTheme, DEFAULT_DATAGOL_EMAIL_THEME } from './email-theme.js';
 
@@ -281,6 +282,41 @@ function buildContentBlock(
                         },
                     ],
                     footerNote: 'Alerta automática de infraestructura — Datagol Agentes IA',
+                },
+            };
+        }
+
+        case EMAIL_TYPES.THANK_YOU: {
+            const d = (data as ThankYouEmailData) || {};
+            const prospectName = d.prospectName || 'Estimado cliente';
+            const defaultSubject = `¡Gracias por contactar a ${businessName}!`;
+            const subject = d.customSubject || defaultSubject;
+            const bodyText = d.customBody || 'Gracias por ponerte en contacto con nosotros. Hemos recibido tus datos y un miembro de nuestro equipo se comunicará contigo a la brevedad para brindarte toda la información que necesitas.';
+
+            const sections: CommonContentBlock['sections'] = [
+                {
+                    title: 'Mensaje',
+                    contentHtml: `<div style="font-size: 14px; line-height: 1.6; color: ${theme.text};">${escapeHtml(bodyText).replace(/\n/g, '<br/>')}</div>`,
+                    contentText: bodyText,
+                    type: 'box',
+                },
+            ];
+
+            const primaryAction = d.attachmentDownloadUrl
+                ? {
+                      label: `📥 Descargar ${d.attachmentFileName || 'documento informativo'}`,
+                      url: d.attachmentDownloadUrl,
+                  }
+                : undefined;
+
+            return {
+                subject,
+                block: {
+                    title: '¡Gracias por contactarnos!',
+                    leadParagraph: `Hola ${escapeHtml(prospectName)},`,
+                    sections,
+                    primaryAction,
+                    footerNote: `Enviado por ${businessName} vía Datagol AI`,
                 },
             };
         }

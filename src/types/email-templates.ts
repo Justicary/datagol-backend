@@ -28,6 +28,7 @@ export const EMAIL_TYPES = {
     APPOINTMENT_CONFIRMATION: 'appointment_confirmation',
     PROSPECT_SUMMARY: 'prospect_summary',
     CREDITS_ALERT: 'credits_alert',
+    THANK_YOU: 'thank_you',
 } as const;
 
 export type EmailTypeId = (typeof EMAIL_TYPES)[keyof typeof EMAIL_TYPES];
@@ -105,9 +106,22 @@ export interface CreditsAlertEmailData {
     threshold: number;
 }
 
+/**
+ * Datos para el correo de agradecimiento automático enviado al prospecto.
+ */
+export interface ThankYouEmailData {
+    prospectName?: string | null;
+    businessName?: string | null;
+    customSubject?: string | null;
+    customBody?: string | null;
+    attachmentDownloadUrl?: string | null;
+    attachmentFileName?: string | null;
+}
+
 export type EmailDataPayload =
     | { type: typeof EMAIL_TYPES.CALL_SUMMARY; data: CallSummaryEmailData }
     | { type: typeof EMAIL_TYPES.HOT_LEAD; data: HotLeadEmailData }
     | { type: typeof EMAIL_TYPES.APPOINTMENT_CONFIRMATION; data: AppointmentConfirmationEmailData }
     | { type: typeof EMAIL_TYPES.PROSPECT_SUMMARY; data: ProspectSummaryEmailData }
-    | { type: typeof EMAIL_TYPES.CREDITS_ALERT; data: CreditsAlertEmailData };
+    | { type: typeof EMAIL_TYPES.CREDITS_ALERT; data: CreditsAlertEmailData }
+    | { type: typeof EMAIL_TYPES.THANK_YOU; data: ThankYouEmailData };

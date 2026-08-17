@@ -17,6 +17,8 @@ import contactsRoutes from './routes/contacts.js';
 import contactsCrmRoutes from './routes/contacts-crm.js';
 import organizationMetricsRoutes from './routes/organization-metrics.js';
 import organizationEmailRoutes from './routes/organization-email.js';
+import organizationThankYouRoutes from './routes/organization-thank-you.js';
+import organizationAttachmentsRoutes from './routes/organization-attachments.js';
 import vapiRoutes from './routes/vapi.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
@@ -197,6 +199,9 @@ export async function buildApp() {
     await app.register(organizationMetricsRoutes);
     // Plantillas de correo seleccionables (preview y test send)
     await app.register(organizationEmailRoutes);
+    // Agradecimiento automático omnicanal y gestión de adjuntos
+    await app.register(organizationThankYouRoutes);
+    await app.register(organizationAttachmentsRoutes);
     await app.register(vapiRoutes);
     await app.register(voiceRoutes);
     await app.register(elevenLabsWebhookRoutes);

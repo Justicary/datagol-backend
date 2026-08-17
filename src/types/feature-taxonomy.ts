@@ -51,6 +51,7 @@ export const FEATURE_KEYS = {
     // /api/widget/session (src/routes/widget.ts) antes de emitir un token
     // efímero de conversación de ElevenLabs.
     WEB_WIDGET: 'web_widget',
+    AUTOMATIC_THANK_YOU: 'automatic_thank_you',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

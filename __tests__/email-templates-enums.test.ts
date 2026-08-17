@@ -38,12 +38,14 @@ describe('email-templates constants and enums', () => {
         expect(ALL_EMAIL_TYPES).toContain(EMAIL_TYPES.APPOINTMENT_CONFIRMATION);
         expect(ALL_EMAIL_TYPES).toContain(EMAIL_TYPES.PROSPECT_SUMMARY);
         expect(ALL_EMAIL_TYPES).toContain(EMAIL_TYPES.CREDITS_ALERT);
+        expect(ALL_EMAIL_TYPES).toContain(EMAIL_TYPES.THANK_YOU);
 
         expect(isEmailTypeId('call_summary')).toBe(true);
         expect(isEmailTypeId('hot_lead')).toBe(true);
         expect(isEmailTypeId('appointment_confirmation')).toBe(true);
         expect(isEmailTypeId('prospect_summary')).toBe(true);
         expect(isEmailTypeId('credits_alert')).toBe(true);
+        expect(isEmailTypeId('thank_you')).toBe(true);
 
         expect(isEmailTypeId('unknown_type')).toBe(false);
         expect(isEmailTypeId('')).toBe(false);

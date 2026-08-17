@@ -19,6 +19,7 @@ import {
     type AppointmentConfirmationEmailData,
     type ProspectSummaryEmailData,
     type CreditsAlertEmailData,
+    type ThankYouEmailData,
     type OrganizationEmailSettings,
 } from '../types/email-templates.js';
 import { deriveSafeEmailTheme } from '../services/email-theme.js';
@@ -103,6 +104,16 @@ export function getMockEmailData(type: EmailTypeId, organizationName: string): u
                 remainingPercentage: 10,
                 threshold: 10,
             } satisfies CreditsAlertEmailData;
+
+        case EMAIL_TYPES.THANK_YOU:
+            return {
+                prospectName: 'Juan Pérez',
+                businessName: organizationName,
+                customSubject: `¡Gracias por contactar a ${organizationName}!`,
+                customBody: 'Hemos recibido tus datos de contacto exitosamente. Nuestro equipo se pondrá en comunicación contigo a la brevedad.',
+                attachmentDownloadUrl: 'https://example.com/mock-brochure.pdf',
+                attachmentFileName: 'catalogo_servicios.pdf',
+            } satisfies ThankYouEmailData;
 
         default:
             return { businessName: organizationName };

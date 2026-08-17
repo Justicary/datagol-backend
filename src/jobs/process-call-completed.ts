@@ -8,6 +8,7 @@ import { CONTACT_ADDRESS_TYPES } from '../types/contact-enums.js';
 import { NOTIFY_HOT_LEAD_QUEUE } from './notify-hot-lead.js';
 import { SEND_CALL_SUMMARY_QUEUE } from './send-call-summary.js';
 import { SEND_PROSPECT_SUMMARY_QUEUE } from './send-prospect-summary.js';
+import { SEND_THANK_YOU_QUEUE } from './send-thank-you.js';
 
 export const PROCESS_CALL_COMPLETED_QUEUE = 'process-call-completed';
 
@@ -221,6 +222,9 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
             // 4.3 — El worker resuelve el correo (COALESCE lead/contacto) y el opt-out.
             await fastify.pgBoss.send(SEND_PROSPECT_SUMMARY_QUEUE, { leadId: result.lead_id });
         }
+
+        // Agradecimiento automático omnicanal (docs/tasks/agradecimiento-automatico.md)
+        await fastify.pgBoss.send(SEND_THANK_YOU_QUEUE, { leadId: result.lead_id });
     }
 
     await fastify.supabaseAdmin
