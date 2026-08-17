@@ -135,6 +135,7 @@ export async function checkElevenLabsCreditsHandler(fastify: FastifyInstance, jo
         }
 
         const emailResponse = await sendElevenLabsCreditsAlertEmail({
+            organizationId,
             to: org.email,
             organizationName: org.name,
             remainingPercentage,

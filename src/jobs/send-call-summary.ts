@@ -69,6 +69,7 @@ export async function sendCallSummaryHandler(fastify: FastifyInstance, job: Job<
     }
 
     const response = await sendCallSummaryEmail({
+        organizationId: callLog.organization_id,
         to: org.email,
         callerPhone: callLog.caller_phone ?? undefined,
         summary: callLog.summary || 'Sin resumen disponible: el prospecto no dejó datos capturables en esta llamada.',

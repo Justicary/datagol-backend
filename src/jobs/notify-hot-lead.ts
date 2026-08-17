@@ -85,6 +85,7 @@ export async function notifyHotLeadHandler(fastify: FastifyInstance, job: Job<No
     }
 
     const response = await sendHotLeadAlertEmail({
+        organizationId: lead.organization_id,
         to: org.email,
         leadName: lead.full_name ?? lead.contacts?.full_name ?? null,
         leadPhone: lead.contact_phone ?? lead.contacts?.phone_e164 ?? null,

@@ -77,6 +77,7 @@ export async function sendProspectSummaryHandler(fastify: FastifyInstance, job: 
     }
 
     const response = await sendProspectSummaryEmail({
+        organizationId: lead.organization_id,
         to: prospectEmail,
         prospectName: lead.full_name,
         businessName: lead.business_name,

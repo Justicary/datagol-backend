@@ -16,6 +16,7 @@ import organizationWidgetRoutes from './routes/organization-widget.js';
 import contactsRoutes from './routes/contacts.js';
 import contactsCrmRoutes from './routes/contacts-crm.js';
 import organizationMetricsRoutes from './routes/organization-metrics.js';
+import organizationEmailRoutes from './routes/organization-email.js';
 import vapiRoutes from './routes/vapi.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
@@ -194,6 +195,8 @@ export async function buildApp() {
     await app.register(contactsCrmRoutes);
     // Métricas por canal (docs/tasks/opus.md) — GET /api/organizations/:id/metrics
     await app.register(organizationMetricsRoutes);
+    // Plantillas de correo seleccionables (preview y test send)
+    await app.register(organizationEmailRoutes);
     await app.register(vapiRoutes);
     await app.register(voiceRoutes);
     await app.register(elevenLabsWebhookRoutes);
