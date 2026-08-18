@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { validateEnv } from '../src/config/env.js';
 import supabasePlugin from '../src/plugins/supabase.js';
 import contactsRoutes from '../src/routes/contacts.js';
+import { APPOINTMENT_STATUSES } from '../src/types/appointment-status.js';
 
 const env = validateEnv();
 
@@ -114,7 +115,7 @@ describe('POST /api/organizations/:id/contacts/:contactId/erase — borrado ARCO
             customer_phone: phone,
             start_time: new Date(Date.now() + 86400000).toISOString(),
             end_time: new Date(Date.now() + 90000000).toISOString(),
-            status: 'confirmed',
+            status: APPOINTMENT_STATUSES.CONFIRMADA,
         });
 
         await supabaseAdmin.from('webhook_events').insert({

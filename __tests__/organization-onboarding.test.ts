@@ -212,6 +212,43 @@ describe('routes/organization-onboarding.ts', () => {
                 await app.close();
             }
         });
+
+        it('rechaza una zona horaria que no es un identificador IANA válido (400)', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/business-info`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { timezone: 'Not/A_Real_Zone' },
+                });
+                expect(response.statusCode).toBe(400);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('contraparte de éxito: el dueño puede fijar una zona horaria IANA válida (A.1)', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/business-info`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { timezone: 'America/Cancun' },
+                });
+                expect(response.statusCode).toBe(200);
+
+                const { data: updated } = await supabaseAdmin
+                    .from('organizations')
+                    .select('timezone')
+                    .eq('id', orgId)
+                    .single();
+                expect(updated?.timezone).toBe('America/Cancun');
+            } finally {
+                await app.close();
+            }
+        });
     });
 
     describe('POST /api/organizations/:id/credentials', () => {
@@ -281,6 +318,25 @@ describe('routes/organization-onboarding.ts', () => {
                 expect(response.statusCode).toBe(200);
 
                 const stored = await getSecret(orgId, SECRET_KEYS.GOOGLE_MAPS_KEY);
+                expect(stored).toBe(secretValue);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('provider "llm" (BYOK, docs/tasks/reportes-semanales.md Fase A) se guarda como SECRET_KEYS.LLM_API_KEY', async () => {
+            const secretValue = 'sk-or-v1-test-fake-key-1234567890';
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: `/api/organizations/${orgId}/credentials`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { provider: 'llm', value: secretValue },
+                });
+                expect(response.statusCode).toBe(200);
+
+                const stored = await getSecret(orgId, SECRET_KEYS.LLM_API_KEY);
                 expect(stored).toBe(secretValue);
             } finally {
                 await app.close();
@@ -445,7 +501,7 @@ describe('routes/organization-onboarding.ts', () => {
             const planResult = await setOrganizationPlan(orgId, 'starter', 'Prueba readiness ready:true');
             expect(planResult.success).toBe(true);
 
-            const starterFeatures = ['voice_inbound', 'calendar_booking', 'email_summaries', 'lead_capture', 'call_recording', 'web_widget'];
+            const starterFeatures = ['voice_inbound', 'calendar_booking', 'email_summaries', 'lead_capture', 'call_recording'];
             for (const featureKey of starterFeatures) {
                 const overrideResult = await setFeatureOverride(orgId, featureKey, false, 'Prueba readiness ready:true');
                 expect(overrideResult.success).toBe(true);

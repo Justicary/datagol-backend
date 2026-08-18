@@ -27,7 +27,7 @@
 | `suspended_reason` | `text` |  Nullable |
 | `suspended_at` | `timestamptz` |  Nullable |
 | `retention_days` | `int4` |  |
-| `widget_daily_session_limit` | `int4` |  |
+| `timezone` | `text` |  |
 
 ## Table `knowledge_base`
 
@@ -89,7 +89,7 @@
 | `start_time` | `timestamptz` |  |
 | `end_time` | `timestamptz` |  |
 | `cal_booking_id` | `varchar` |  Nullable |
-| `status` | `varchar` |  Nullable |
+| `status` | `varchar` |  |
 | `created_at` | `timestamptz` |  Nullable |
 | `service_address` | `text` |  Nullable |
 | `latitude` | `numeric` |  Nullable |
@@ -97,6 +97,9 @@
 | `contact_id` | `uuid` |  Nullable |
 | `conversation_id` | `text` |  Nullable |
 | `contact_address_id` | `uuid` |  Nullable |
+| `status_updated_at` | `timestamptz` |  Nullable |
+| `status_updated_by` | `uuid` |  Nullable |
+| `no_show_reason` | `text` |  Nullable |
 
 ## Table `organization_members`
 
@@ -136,6 +139,9 @@
 | `lost_reason` | `text` |  Nullable |
 | `archived_at` | `timestamptz` |  Nullable |
 | `last_activity_at` | `timestamptz` |  |
+| `deal_value` | `numeric` |  Nullable |
+| `deal_currency` | `text` |  |
+| `deal_notes` | `text` |  Nullable |
 
 ## Table `leads`
 
@@ -168,6 +174,8 @@
 | `hot_lead_notified_at` | `timestamptz` |  Nullable |
 | `prospect_summary_sent_at` | `timestamptz` |  Nullable |
 | `deprecated_pipeline_stage` | `text` |  Nullable |
+| `source` | `text` |  Nullable |
+| `source_detail` | `text` |  Nullable |
 
 ## Table `usage_events`
 
@@ -415,9 +423,9 @@ Registro de alertas de créditos de ElevenLabs (15%/10%/5% restante) ya enviadas
 | `status` | `text` |  |
 | `created_at` | `timestamptz` |  |
 
-## Table `widget_origins`
+## Table `organization_attachments`
 
-Orígenes (esquema+host) autorizados a usar el widget de chat web de una organización, cada uno con su propia public_key no secreta. POST /api/widget/session valida el par (public_key, header Origin) exacto contra esta tabla antes de emitir un token efímero de conversación de ElevenLabs.
+Documentos (PDF, DOCX, XLSX) cargados por la organización en bucket privado de Supabase Storage para adjuntar a agradecimientos automáticos. Solo uno activo por organización.
 
 ### Columns
 
@@ -425,22 +433,118 @@ Orígenes (esquema+host) autorizados a usar el widget de chat web de una organiz
 |------|------|-------------|
 | `id` | `uuid` | Primary |
 | `organization_id` | `uuid` |  |
-| `origin` | `text` |  |
-| `public_key` | `text` |  |
-| `enabled` | `bool` |  |
+| `file_name` | `text` |  |
+| `mime_type` | `text` |  |
+| `size_bytes` | `int8` |  |
+| `storage_path` | `text` |  |
+| `is_active` | `bool` |  |
+| `uploaded_by` | `uuid` |  Nullable |
 | `created_at` | `timestamptz` |  |
+| `archived_at` | `timestamptz` |  Nullable |
 
-## Table `widget_session_attempts`
+## Table `thank_you_sends`
 
-Log de sesiones de widget concedidas (no de intentos rechazados por origen/entitlement) usado únicamente para el cortafuegos de costo de POST /api/widget/session: límite por IP/hora y por organización/día. RLS habilitada sin políticas: solo service_role (backend) la lee/escribe.
+Historial de envíos y omisiones de agradecimiento automático. Permite la deduplicación por ventana móvil y diagnóstico de prospectos omitidos.
 
 ### Columns
 
 | Name | Type | Constraints |
 |------|------|-------------|
 | `id` | `uuid` | Primary |
-| `organization_id` | `uuid` |  Nullable |
-| `source_ip` | `text` |  Nullable |
+| `organization_id` | `uuid` |  |
+| `contact_id` | `uuid` |  |
+| `lead_id` | `uuid` |  Nullable |
+| `channel` | `text` |  |
+| `status` | `text` |  |
+| `skip_reason` | `text` |  Nullable |
+| `attachment_id` | `uuid` |  Nullable |
+| `sent_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `weekly_reports`
+
+Reportes semanales generados (planificación/ejecutivo). Fila de idempotencia (UNIQUE organization_id/report_type/week_start) y metadata de descarga (storage_path en el bucket organization-reports) a la vez.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `report_type` | `text` |  |
+| `week_start` | `date` |  |
+| `status` | `text` |  |
+| `data` | `jsonb` |  |
+| `narrative` | `text` |  Nullable |
+| `storage_path` | `text` |  Nullable |
+| `file_size_bytes` | `int4` |  Nullable |
+| `delivery_log` | `jsonb` |  |
+| `error` | `text` |  Nullable |
+| `generated_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `contact_pipeline_transitions`
+
+Historial de cambios de contacts.pipeline_stage, capturado por trigger. Alimenta "movimiento de pipeline" del reporte ejecutivo semanal.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `contact_id` | `uuid` |  |
+| `from_stage` | `text` |  Nullable |
+| `to_stage` | `text` |  |
+| `changed_at` | `timestamptz` |  |
+
+## Table `competitor_sites`
+
+Sitios de la competencia vigilados semanalmente por organización (máx. 3, aplicado en routes/organization-competitor-sites.ts). Fase C de docs/tasks/reportes-semanales.md.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `url` | `text` |  |
+| `label` | `text` |  Nullable |
+| `enabled` | `bool` |  |
+| `last_checked_at` | `timestamptz` |  Nullable |
+| `last_error` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `competitor_site_snapshots`
+
+Instantánea semanal de texto extraído por sitio (nunca HTML crudo). UNIQUE (competitor_site_id, week_start) es la idempotencia "un acceso por sitio por semana" de C.2. Solo service_role escribe.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `competitor_site_id` | `uuid` |  |
+| `organization_id` | `uuid` |  |
+| `week_start` | `date` |  |
+| `fetch_status` | `text` |  |
+| `extracted_text` | `text` |  Nullable |
+| `error` | `text` |  Nullable |
+| `checked_at` | `timestamptz` |  |
+
+## Table `unanswered_questions`
+
+Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo resolver, requirieron aclaración o produjeron error.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `question` | `text` |  |
+| `reason` | `text` |  |
+| `metadata` | `jsonb` |  |
 | `created_at` | `timestamptz` |  |
 
 ## RLS Policies
@@ -456,12 +560,6 @@ Log de sesiones de widget concedidas (no de intentos rechazados por origen/entit
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `platform_admins_self_select` | SELECT | authenticated | PERMISSIVE | `(user_id = auth.uid())` | — |
-
-### `leads`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 
 ### `features`
 
@@ -518,18 +616,18 @@ Log de sesiones de widget concedidas (no de intentos rechazados por origen/entit
 |--------|---------|-------|--------|-------|------------|
 | `audit_read` | SELECT | public | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
 
-### `usage_events`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `tenant_read_usage` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
-
 ### `organizations`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `admin_delete_organizations` | DELETE | authenticated | PERMISSIVE | `is_platform_admin()` | — |
 | `org_self_access` | ALL | authenticated | PERMISSIVE | `(id IN ( SELECT auth_organization_ids() AS auth_organization_ids))` | `(id IN ( SELECT auth_organization_ids() AS auth_organization_ids))` |
+
+### `usage_events`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_read_usage` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
 
 ### `contact_notes`
 
@@ -543,21 +641,64 @@ Log de sesiones de widget concedidas (no de intentos rechazados por origen/entit
 |--------|---------|-------|--------|-------|------------|
 | `tenant_isolation` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 
-### `contacts`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
-
 ### `whatsapp_messages`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
 
-### `widget_origins`
+### `organization_attachments`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `thank_you_sends`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `contact_pipeline_transitions`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_read` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
+### `contacts`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `leads`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `weekly_reports`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_read` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
+### `competitor_sites`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+
+### `competitor_site_snapshots`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `tenant_read` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
+### `unanswered_questions`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `unanswered_questions_admin_all` | ALL | authenticated | PERMISSIVE | `(EXISTS ( SELECT 1    FROM organization_members   WHERE ((organization_members.user_id = auth.uid()) AND (organization_members.role = 'platform_admin'::text))))` | — |
+| `unanswered_questions_org_access` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT om.organization_id    FROM organization_members om   WHERE (om.user_id = auth.uid())))` | `(organization_id IN ( SELECT om.organization_id    FROM organization_members om   WHERE (om.user_id = auth.uid())))` |
 

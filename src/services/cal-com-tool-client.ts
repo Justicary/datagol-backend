@@ -271,6 +271,51 @@ export async function cancelBooking(
     }
 }
 
+export interface CalBookingStatus {
+    calBookingId: string;
+    /** Valores documentados de Cal.com v2 (GET /v2/bookings/{uid}): accepted, pending, cancelled, rejected. */
+    status: string;
+}
+
+/**
+ * Consulta el estado actual de una reserva en Cal.com v2
+ * (docs/tasks/asistencia-valor de cierre.md, B.2) — permite detectar
+ * cancelaciones que el cliente hizo directamente en Cal.com, fuera del
+ * flujo del agente de voz. Cal.com también expone `attendees[].absent`,
+ * pero es una marca manual de su propio lado (vía un endpoint aparte de
+ * "mark no-show"), no un dato de asistencia real automático — no se usa
+ * aquí, la asistencia sigue siendo 100% manual en nuestro propio sistema
+ * (B.1).
+ */
+export async function getBooking(
+    fastify: FastifyInstance,
+    organizationId: string,
+    calBookingId: string,
+    signal: AbortSignal
+): Promise<CalBookingStatus> {
+    const apiKey = await resolveApiKey(organizationId);
+
+    const response = await fetch(`${CAL_API_V2_BASE_URL}/bookings/${calBookingId}`, {
+        method: 'GET',
+        headers: calHeaders(apiKey),
+        signal,
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        fastify.log.warn({ organizationId, calBookingId, status: response.status, msg: 'Cal.com respondió error en GET /bookings/:id' });
+        throw new CalProviderError(response.status, errText);
+    }
+
+    const json = (await response.json()) as any;
+    const booking = json?.data ?? json;
+
+    return {
+        calBookingId: String(booking?.uid ?? booking?.id ?? calBookingId),
+        status: String(booking?.status ?? ''),
+    };
+}
+
 /**
  * Invalida la caché de disponibilidad en memoria. Se expone para pruebas.
  */

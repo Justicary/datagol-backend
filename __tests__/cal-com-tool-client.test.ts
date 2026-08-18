@@ -7,6 +7,7 @@ import {
     getAvailableSlots,
     createBooking,
     rescheduleBooking,
+    getBooking,
     invalidateAvailabilityCache,
     CalCredentialsMissingError,
     CalProviderError,
@@ -181,5 +182,48 @@ describe('src/services/cal-com-tool-client.ts', () => {
         expect(result.startTime).toBe('2026-09-05T10:00:00Z');
         const calCall = fetchSpy.mock.calls.find(([input]) => (typeof input === 'string' ? input : input?.toString())?.startsWith('https://api.cal.com/'));
         expect(calCall?.[0]).toBe('https://api.cal.com/v2/bookings/cal_booking_123/reschedule');
+    });
+
+    // -------------------------------------------------------------------
+    // getBooking (B.2, docs/tasks/asistencia-valor de cierre.md)
+    // -------------------------------------------------------------------
+    describe('getBooking', () => {
+        it('consulta GET /v2/bookings/{uid} y devuelve el status normalizado', async () => {
+            const fetchSpy = mockCalFetchOnce(new Response(JSON.stringify({ data: { uid: 'cal_booking_999', status: 'cancelled' } }), { status: 200 }));
+
+            const result = await getBooking(buildFakeFastify(), testOrgId, 'cal_booking_999', new AbortController().signal);
+
+            expect(result).toEqual({ calBookingId: 'cal_booking_999', status: 'cancelled' });
+            const calCall = fetchSpy.mock.calls.find(([input]) => (typeof input === 'string' ? input : input?.toString())?.startsWith('https://api.cal.com/'));
+            expect(calCall?.[0]).toBe('https://api.cal.com/v2/bookings/cal_booking_999');
+            expect(calCall?.[1]?.method).toBe('GET');
+        });
+
+        it('contraparte de rechazo: Cal.com responde no-2xx → CalProviderError', async () => {
+            mockCalFetchOnce(new Response('Not found', { status: 404 }));
+
+            await expect(getBooking(buildFakeFastify(), testOrgId, 'cal_booking_inexistente', new AbortController().signal)).rejects.toThrow(
+                CalProviderError
+            );
+        });
+
+        it('sin cal_api_key en la organización → CalCredentialsMissingError, sin llamar a Cal.com', async () => {
+            const { data: orgSinCredencial } = await supabaseAdmin
+                .from('organizations')
+                .insert({ name: 'Org sin cal_api_key (getBooking)', email: `sin-cal-getbooking-${Date.now()}@example.invalid` })
+                .select('id')
+                .single();
+
+            try {
+                const fetchSpy = mockCalFetchOnce(new Response('no debería llamarse', { status: 200 }));
+                await expect(getBooking(buildFakeFastify(), orgSinCredencial!.id, 'cal_booking_x', new AbortController().signal)).rejects.toThrow(
+                    CalCredentialsMissingError
+                );
+                const calCalls = fetchSpy.mock.calls.filter(([input]) => (typeof input === 'string' ? input : input?.toString())?.startsWith('https://api.cal.com/'));
+                expect(calCalls).toHaveLength(0);
+            } finally {
+                await supabaseAdmin.from('organizations').delete().eq('id', orgSinCredencial!.id);
+            }
+        });
     });
 });

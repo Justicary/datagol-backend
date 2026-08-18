@@ -4,6 +4,7 @@ import { withToolTimeout, ToolTimeoutError } from '../../lib/tool-timeout.js';
 import { rescheduleBooking, CalCredentialsMissingError, CalProviderError } from '../../services/cal-com-tool-client.js';
 import { normalizePhoneE164 } from '../../services/phone-normalization.js';
 import { toolParamsSchema, rescheduleBodySchema, rescheduleResponseSchema, isValidDateString } from '../../schemas/tool-routes.js';
+import { APPOINTMENT_STATUSES } from '../../types/appointment-status.js';
 
 const DEGRADED_MESSAGE = 'No puedo reprogramar la cita en este momento, ¿te llamo de vuelta?';
 const NOT_FOUND_MESSAGE =
@@ -61,7 +62,7 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
             .select('id, cal_booking_id, start_time, end_time, customer_name, customer_email')
             .eq('organization_id', auth.organizationId)
             .ilike('customer_name', customerName.trim())
-            .neq('status', 'cancelled')
+            .neq('status', APPOINTMENT_STATUSES.CANCELADA)
             .gt('start_time', new Date().toISOString());
 
         if (customerEmail) {
@@ -109,7 +110,7 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
 
             const { error: updateError } = await fastify.supabaseAdmin
                 .from('appointments')
-                .update({ start_time: calResult.startTime, end_time: calResult.endTime ?? fallbackEndTime, status: 'rescheduled' })
+                .update({ start_time: calResult.startTime, end_time: calResult.endTime ?? fallbackEndTime, status: APPOINTMENT_STATUSES.REPROGRAMADA })
                 .eq('id', appointment.id);
 
             if (updateError) {

@@ -3,6 +3,7 @@ import { getSecret } from './secret-service.js';
 import { SECRET_KEYS, type SecretKey } from '../types/secret-keys.js';
 import { logger } from '../lib/logger.js';
 import { FEATURE_AUDIT_ACTIONS } from '../types/feature-audit-actions.js';
+import { FEATURE_KEYS } from '../types/feature-taxonomy.js';
 
 export interface EntitlementsCacheItem {
     enabledFeatures: Set<string>;
@@ -11,6 +12,18 @@ export interface EntitlementsCacheItem {
 
 const ENTITLEMENTS_CACHE_TTL_MS = 30 * 1000; // 30s TTL
 const entitlementsCache = new Map<string, EntitlementsCacheItem>();
+
+/**
+ * Features con `requires_provider = NULL` que igual dependen del LLM BYOK de
+ * la organización (Fases B y C de docs/tasks/reportes-semanales.md) — exigen
+ * `isLlmConfigValidated()` además del guard genérico de `requires_provider`.
+ */
+const LLM_BACKED_FEATURE_KEYS = new Set<string>([
+    FEATURE_KEYS.WEEKLY_PLANNING_REPORT,
+    FEATURE_KEYS.WEEKLY_EXECUTIVE_REPORT,
+    FEATURE_KEYS.COMPETITOR_ANALYSIS,
+    FEATURE_KEYS.NATURAL_LANGUAGE_REPORTS,
+]);
 
 /**
  * Resuelve las características (*features*) habilitadas para una organización.
@@ -215,6 +228,25 @@ export async function setFeatureOverride(
                 success: false,
                 error: `No se puede habilitar '${featureKey}': Faltan las credenciales del proveedor '${credCheck.requiredProvider}' (${credCheck.missingSecret}) en organization_secrets.`,
             };
+        }
+
+        // Guarda adicional de B.5/C.5 (docs/tasks/reportes-semanales.md): estas
+        // tres features tienen `requires_provider = NULL` (la llave es del
+        // cliente, no de un proveedor que Datagol administre), así que el
+        // guard genérico de arriba no aplica — exigen además que la llave
+        // BYOK de LLM esté presente Y validada, no solo presente.
+        if (LLM_BACKED_FEATURE_KEYS.has(featureKey)) {
+            const { isLlmConfigValidated } = await import('./llm-config-service.js');
+            // isLlmConfigValidated solo usa fastify.supabaseAdmin — se le pasa
+            // el mismo cliente service_role que este módulo ya importa (no hay
+            // una FastifyInstance disponible en este servicio puro).
+            const validated = await isLlmConfigValidated({ supabaseAdmin } as unknown as import('fastify').FastifyInstance, organizationId);
+            if (!validated) {
+                return {
+                    success: false,
+                    error: `No se puede habilitar '${featureKey}': la organización no tiene una llave de LLM (BYOK) presente y validada. Configúrala en /api/organizations/${organizationId}/llm-config y valídala con POST /llm/validate antes de habilitar esta feature.`,
+                };
+            }
         }
     }
 

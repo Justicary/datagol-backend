@@ -112,6 +112,7 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
 
         const updatePayload: Record<string, unknown> = {};
         if (body.name !== undefined) updatePayload.name = body.name;
+        if (body.timezone !== undefined) updatePayload.timezone = body.timezone;
 
         if (body.business_hours !== undefined) {
             // integration_settings ya contiene `theme` (escrito por el
@@ -247,6 +248,10 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
             // ella, services/geocoding.ts simplemente omite la geocodificación
             // — nunca bloquea el resto del onboarding ni ninguna feature.
             google_maps: SECRET_KEYS.GOOGLE_MAPS_KEY,
+            // BYOK de LLM (docs/tasks/reportes-semanales.md, Fase A) — la
+            // llave se guarda aquí igual que las demás; la validación en vivo
+            // vive aparte en POST /api/organizations/:id/llm/validate.
+            llm: SECRET_KEYS.LLM_API_KEY,
         };
         const { provider, value } = bodyResult.data;
         const secretKey = PROVIDER_TO_SECRET_KEY[provider];

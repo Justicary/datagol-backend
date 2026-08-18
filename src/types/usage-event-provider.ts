@@ -15,6 +15,7 @@ export const USAGE_EVENT_PROVIDERS = {
     ELEVENLABS: 'elevenlabs',
     TELNYX: 'telnyx',
     META: 'meta',
+    LLM: 'llm',
 } as const;
 
 export type UsageEventProvider = (typeof USAGE_EVENT_PROVIDERS)[keyof typeof USAGE_EVENT_PROVIDERS];

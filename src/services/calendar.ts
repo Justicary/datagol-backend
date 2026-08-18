@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { logger } from '../lib/logger.js';
 import { withToolTimeout } from '../lib/tool-timeout.js';
+import { APPOINTMENT_STATUSES } from '../types/appointment-status.js';
 import {
     getAvailableSlots as calGetAvailableSlots,
     createBooking as calCreateBooking,
@@ -110,7 +111,7 @@ export async function handleCalendarToolCall(
                     start_time: calResult.startTime,
                     end_time: calResult.endTime ?? new Date(new Date(calResult.startTime).getTime() + DEFAULT_APPOINTMENT_DURATION_MS).toISOString(),
                     cal_booking_id: calResult.calBookingId,
-                    status: 'confirmed',
+                    status: APPOINTMENT_STATUSES.CONFIRMADA,
                 });
 
             if (insertError) {
@@ -160,7 +161,7 @@ export async function handleCalendarToolCall(
 
             const { error: updateError } = await supabaseAdmin
                 .from('appointments')
-                .update({ start_time: calResult.startTime, end_time: calResult.endTime ?? fallbackEndTime, status: 'rescheduled' })
+                .update({ start_time: calResult.startTime, end_time: calResult.endTime ?? fallbackEndTime, status: APPOINTMENT_STATUSES.REPROGRAMADA })
                 .eq('id', appointment.id);
 
             if (updateError) {
@@ -183,7 +184,11 @@ export async function handleCalendarToolCall(
     ) {
         const { appointmentId, calBookingId, reason } = args || {};
         const isCancel = normalizedName === 'cancelAppointment' || normalizedName === 'cancel_appointment';
-        const targetStatus = isCancel ? 'cancelled' : String(args.status || 'confirmed');
+        // El nombre de la herramienta ya determina el estado destino — nunca
+        // se toma `args.status` (contenido generado por el LLM, sin
+        // whitelist) para evitar escribir un valor arbitrario que viole el
+        // CHECK constraint de appointments.status.
+        const targetStatus = isCancel ? APPOINTMENT_STATUSES.CANCELADA : APPOINTMENT_STATUSES.CONFIRMADA;
 
         if (!appointmentId && !calBookingId) {
             return 'Se requiere el ID de la cita para actualizar su estado.';

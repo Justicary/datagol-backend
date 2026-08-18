@@ -29,6 +29,9 @@ export const EMAIL_TYPES = {
     PROSPECT_SUMMARY: 'prospect_summary',
     CREDITS_ALERT: 'credits_alert',
     THANK_YOU: 'thank_you',
+    WEEKLY_PLANNING_REPORT: 'weekly_planning_report',
+    WEEKLY_EXECUTIVE_REPORT: 'weekly_executive_report',
+    PENDING_OUTCOME_REMINDER: 'pending_outcome_reminder',
 } as const;
 
 export type EmailTypeId = (typeof EMAIL_TYPES)[keyof typeof EMAIL_TYPES];
@@ -118,10 +121,54 @@ export interface ThankYouEmailData {
     attachmentFileName?: string | null;
 }
 
+/**
+ * Sección tabular genérica de un reporte semanal (p. ej. "Citas por día",
+ * "Prospectos calientes sin atender"). `rows` son pares clave/valor ya
+ * formateados como texto — el renderer solo pinta una tabla, no interpreta
+ * los valores (principio de la Fase B: el LLM/backend calculan, el HTML solo
+ * presenta).
+ */
+export interface WeeklyReportSection {
+    title: string;
+    rows: Array<Record<string, string>>;
+}
+
+/**
+ * Datos comunes a los dos correos de reporte semanal (planificación y
+ * ejecutivo, docs/tasks/reportes-semanales.md Fase B). `narrative` es la
+ * prosa redactada por el LLM BYOK de la organización, o `null` cuando la
+ * verificación anti-alucinación descartó dos generaciones seguidas (B.3) —
+ * en ese caso el correo se arma solo con `sections`, sin texto libre.
+ */
+export interface WeeklyReportEmailData {
+    businessName?: string | null;
+    weekStart: string;
+    weekEnd: string;
+    narrative?: string | null;
+    recommendations?: string[] | null;
+    sections: WeeklyReportSection[];
+    downloadUrl?: string | null;
+}
+
+/**
+ * Datos para el recordatorio diario de citas pasadas sin desenlace marcado
+ * (B.3, docs/tasks/asistencia-valor de cierre.md) — "este job decide si la
+ * feature funciona": la notificación debe ser accionable, no solo informativa.
+ */
+export interface PendingOutcomeReminderEmailData {
+    businessName?: string | null;
+    appointments: Array<{ customerName: string | null; startTime: string; daysOverdue: number }>;
+    /** `null` cuando `FRONTEND_APP_URL` no está configurada — el correo omite el enlace, no inventa un dominio. */
+    dashboardUrl?: string | null;
+}
+
 export type EmailDataPayload =
     | { type: typeof EMAIL_TYPES.CALL_SUMMARY; data: CallSummaryEmailData }
     | { type: typeof EMAIL_TYPES.HOT_LEAD; data: HotLeadEmailData }
     | { type: typeof EMAIL_TYPES.APPOINTMENT_CONFIRMATION; data: AppointmentConfirmationEmailData }
     | { type: typeof EMAIL_TYPES.PROSPECT_SUMMARY; data: ProspectSummaryEmailData }
     | { type: typeof EMAIL_TYPES.CREDITS_ALERT; data: CreditsAlertEmailData }
-    | { type: typeof EMAIL_TYPES.THANK_YOU; data: ThankYouEmailData };
+    | { type: typeof EMAIL_TYPES.THANK_YOU; data: ThankYouEmailData }
+    | { type: typeof EMAIL_TYPES.WEEKLY_PLANNING_REPORT; data: WeeklyReportEmailData }
+    | { type: typeof EMAIL_TYPES.WEEKLY_EXECUTIVE_REPORT; data: WeeklyReportEmailData }
+    | { type: typeof EMAIL_TYPES.PENDING_OUTCOME_REMINDER; data: PendingOutcomeReminderEmailData };

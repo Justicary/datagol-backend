@@ -15,6 +15,7 @@ vi.mock('../src/services/cal-com-tool-client.js', async (importOriginal) => {
 
 import { getAvailableSlots, createBooking, rescheduleBooking, cancelBooking } from '../src/services/cal-com-tool-client.js';
 import { handleCalendarToolCall } from '../src/services/calendar.js';
+import { APPOINTMENT_STATUSES } from '../src/types/appointment-status.js';
 
 // Organización real existente con cal_event_type_id configurado (ver __tests__/entitlements.test.ts).
 const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
@@ -113,7 +114,7 @@ describe('services/calendar.ts handleCalendarToolCall (tool-calling de Vapi)', (
                 start_time: '2026-09-10T10:00:00.000Z',
                 end_time: '2026-09-10T10:30:00.000Z',
                 cal_booking_id: 'cal_booking_foreign',
-                status: 'confirmed',
+                status: APPOINTMENT_STATUSES.CONFIRMADA,
             })
             .select('id')
             .single();
@@ -138,7 +139,7 @@ describe('services/calendar.ts handleCalendarToolCall (tool-calling de Vapi)', (
                 start_time: '2026-09-12T10:00:00.000Z',
                 end_time: '2026-09-12T10:30:00.000Z',
                 cal_booking_id: 'cal_booking_foreign_cancel',
-                status: 'confirmed',
+                status: APPOINTMENT_STATUSES.CONFIRMADA,
             })
             .select('id')
             .single();
@@ -152,6 +153,6 @@ describe('services/calendar.ts handleCalendarToolCall (tool-calling de Vapi)', (
         expect(vi.mocked(cancelBooking)).not.toHaveBeenCalled();
 
         const { data: unchanged } = await supabaseAdmin.from('appointments').select('status').eq('id', foreignAppointment!.id).single();
-        expect(unchanged?.status).toBe('confirmed');
+        expect(unchanged?.status).toBe(APPOINTMENT_STATUSES.CONFIRMADA);
     });
 });

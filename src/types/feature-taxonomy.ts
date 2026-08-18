@@ -46,12 +46,21 @@ export const FEATURE_KEYS = {
     HOT_LEAD_ALERTS: 'hot_lead_alerts',
     EMAIL_SUMMARIES: 'email_summaries',
     WHATSAPP: 'whatsapp',
-    // Widget de chat web embebido (db/migrations/32_widget_origins.sql
-    // siembra la fila real en `features`). Verificado en POST
-    // /api/widget/session (src/routes/widget.ts) antes de emitir un token
-    // efímero de conversación de ElevenLabs.
-    WEB_WIDGET: 'web_widget',
     AUTOMATIC_THANK_YOU: 'automatic_thank_you',
+    // Reportes semanales BYOK (docs/tasks/reportes-semanales.md, Fase B).
+    // requires_provider es NULL para ambas — la llave es del cliente, no de
+    // un proveedor que Datagol administre — así que la guarda de credencial
+    // vive aparte en llm-config-service.ts (isLlmConfigValidated), invocada
+    // desde entitlements.ts junto al guard genérico de checkProviderCredentials.
+    WEEKLY_PLANNING_REPORT: 'weekly_planning_report',
+    WEEKLY_EXECUTIVE_REPORT: 'weekly_executive_report',
+    // Análisis de competencia (Fase C, mismo doc de tarea) — sección extra
+    // del reporte ejecutivo. Mismo motivo que las dos anteriores:
+    // requires_provider NULL, guarda de isLlmConfigValidated en entitlements.ts.
+    COMPETITOR_ANALYSIS: 'competitor_analysis',
+    // Reportes en lenguaje natural (docs/tasks/reportes-lenguaje-natural.md).
+    // requires_provider es NULL (BYOK de LLM), exige isLlmConfigValidated.
+    NATURAL_LANGUAGE_REPORTS: 'natural_language_reports',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

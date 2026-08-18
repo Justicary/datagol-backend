@@ -4,6 +4,7 @@ import { withToolTimeout, ToolTimeoutError } from '../../lib/tool-timeout.js';
 import { createBooking, CalCredentialsMissingError, CalProviderError } from '../../services/cal-com-tool-client.js';
 import { normalizePhoneE164 } from '../../services/phone-normalization.js';
 import { CONTACT_ADDRESS_TYPES } from '../../types/contact-enums.js';
+import { APPOINTMENT_STATUSES } from '../../types/appointment-status.js';
 import {
     toolParamsSchema,
     bookingBodySchema,
@@ -156,7 +157,7 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
                     start_time: calResult.startTime,
                     end_time: calResult.endTime ?? new Date(new Date(calResult.startTime).getTime() + DEFAULT_APPOINTMENT_DURATION_MS).toISOString(),
                     cal_booking_id: calResult.calBookingId,
-                    status: 'confirmed',
+                    status: APPOINTMENT_STATUSES.CONFIRMADA,
                 })
                 .select('id, start_time')
                 .single();

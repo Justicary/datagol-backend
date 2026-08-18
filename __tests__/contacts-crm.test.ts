@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { validateEnv } from '../src/config/env.js';
 import supabasePlugin from '../src/plugins/supabase.js';
 import contactsCrmRoutes from '../src/routes/contacts-crm.js';
+import { APPOINTMENT_STATUSES } from '../src/types/appointment-status.js';
 
 const env = validateEnv();
 
@@ -253,6 +254,63 @@ describe('routes/contacts-crm.ts — CRM de contactos (Fase D/E)', () => {
                 await app.close();
             }
         });
+
+        it('C.1 — dealValue con pipelineStage distinto de "ganado" → 400', async () => {
+            const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: orgId, p_phone: randomMxPhone(), p_email: null });
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/contacts/${contactId}/pipeline`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { pipelineStage: 'contactado', dealValue: 1500 },
+                });
+                expect(res.statusCode).toBe(400);
+            } finally {
+                await supabaseAdmin.from('contacts').delete().eq('id', contactId);
+                await app.close();
+            }
+        });
+
+        it('C.1 — contraparte de éxito: pipelineStage="ganado" con dealValue/dealCurrency/dealNotes los persiste', async () => {
+            const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: orgId, p_phone: randomMxPhone(), p_email: null });
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/contacts/${contactId}/pipeline`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { pipelineStage: 'ganado', dealValue: 2500.5, dealCurrency: 'USD', dealNotes: 'Paquete anual' },
+                });
+                expect(res.statusCode).toBe(200);
+                const data = res.json().data;
+                expect(data.pipeline_stage).toBe('ganado');
+                expect(data.deal_value).toBe(2500.5);
+                expect(data.deal_currency).toBe('USD');
+                expect(data.deal_notes).toBe('Paquete anual');
+            } finally {
+                await supabaseAdmin.from('contacts').delete().eq('id', contactId);
+                await app.close();
+            }
+        });
+
+        it('C.1 — contraparte de éxito: pipelineStage="ganado" SIN dealValue sigue funcionando (el monto es opcional)', async () => {
+            const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: orgId, p_phone: randomMxPhone(), p_email: null });
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/contacts/${contactId}/pipeline`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { pipelineStage: 'ganado' },
+                });
+                expect(res.statusCode).toBe(200);
+                expect(res.json().data.pipeline_stage).toBe('ganado');
+            } finally {
+                await supabaseAdmin.from('contacts').delete().eq('id', contactId);
+                await app.close();
+            }
+        });
     });
 
     // -------------------------------------------------------------------
@@ -439,7 +497,7 @@ describe('routes/contacts-crm.ts — CRM de contactos (Fase D/E)', () => {
                     customer_phone: randomMxPhone(),
                     start_time: new Date(Date.now() + 86400000).toISOString(),
                     end_time: new Date(Date.now() + 90000000).toISOString(),
-                    status: 'confirmed',
+                    status: APPOINTMENT_STATUSES.CONFIRMADA,
                 })
                 .select('id')
                 .single();
@@ -447,7 +505,7 @@ describe('routes/contacts-crm.ts — CRM de contactos (Fase D/E)', () => {
             appointmentId = data.id;
         });
 
-        it('status inválido (fuera de confirmed/cancelled/rescheduled) → 400', async () => {
+        it('status inválido (fuera del vocabulario de appointments_status_check) → 400', async () => {
             const app = await buildTestApp();
             try {
                 const res = await app.inject({
@@ -469,7 +527,7 @@ describe('routes/contacts-crm.ts — CRM de contactos (Fase D/E)', () => {
                     method: 'PATCH',
                     url: `/api/organizations/${orgId}/appointments/00000000-0000-0000-0000-000000000000/status`,
                     headers: { authorization: `Bearer ${owner.jwt}` },
-                    payload: { status: 'cancelled' },
+                    payload: { status: APPOINTMENT_STATUSES.CANCELADA },
                 });
                 expect(res.statusCode).toBe(404);
             } finally {
@@ -477,18 +535,204 @@ describe('routes/contacts-crm.ts — CRM de contactos (Fase D/E)', () => {
             }
         });
 
-        it('contraparte de éxito: cambia el estado de la cita a "cancelled"', async () => {
+        it('contraparte de éxito: cambia el estado de la cita a "cancelada"', async () => {
             const app = await buildTestApp();
             try {
                 const res = await app.inject({
                     method: 'PATCH',
                     url: `/api/organizations/${orgId}/appointments/${appointmentId}/status`,
                     headers: { authorization: `Bearer ${owner.jwt}` },
-                    payload: { status: 'cancelled' },
+                    payload: { status: APPOINTMENT_STATUSES.CANCELADA },
                 });
                 expect(res.statusCode).toBe(200);
-                expect(res.json().data.status).toBe('cancelled');
+                expect(res.json().data.status).toBe(APPOINTMENT_STATUSES.CANCELADA);
             } finally {
+                await app.close();
+            }
+        });
+
+        it('B.1 — el cambio exitoso registra status_updated_at y status_updated_by (el usuario que hizo el PATCH)', async () => {
+            const { data: cita } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: normalContactId,
+                    customer_name: 'Cita Para Auditoría',
+                    customer_phone: randomMxPhone(),
+                    start_time: new Date(Date.now() + 86400000).toISOString(),
+                    end_time: new Date(Date.now() + 90000000).toISOString(),
+                    status: APPOINTMENT_STATUSES.PROGRAMADA,
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/appointments/${cita!.id}/status`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { status: APPOINTMENT_STATUSES.CONFIRMADA },
+                });
+                expect(res.statusCode).toBe(200);
+                expect(res.json().data.status_updated_by).toBe(owner.userId);
+                expect(res.json().data.status_updated_at).toBeTruthy();
+            } finally {
+                await supabaseAdmin.from('appointments').delete().eq('id', cita!.id);
+                await app.close();
+            }
+        });
+
+        it('B.1 — bloqueo de fecha futura: marcar "completada" en una cita que todavía no ocurre → 400', async () => {
+            const { data: citaFutura } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: normalContactId,
+                    customer_name: 'Cita Futura',
+                    customer_phone: randomMxPhone(),
+                    start_time: new Date(Date.now() + 86400000).toISOString(),
+                    end_time: new Date(Date.now() + 90000000).toISOString(),
+                    status: APPOINTMENT_STATUSES.CONFIRMADA,
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/appointments/${citaFutura!.id}/status`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { status: APPOINTMENT_STATUSES.COMPLETADA },
+                });
+                expect(res.statusCode).toBe(400);
+            } finally {
+                await supabaseAdmin.from('appointments').delete().eq('id', citaFutura!.id);
+                await app.close();
+            }
+        });
+
+        it('B.1 — contraparte de éxito: marcar "no_asistio" en una cita YA pasada sí funciona, con noShowReason', async () => {
+            const { data: citaPasada } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: normalContactId,
+                    customer_name: 'Cita Pasada',
+                    customer_phone: randomMxPhone(),
+                    start_time: new Date(Date.now() - 86400000).toISOString(),
+                    end_time: new Date(Date.now() - 82800000).toISOString(),
+                    status: APPOINTMENT_STATUSES.CONFIRMADA,
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/appointments/${citaPasada!.id}/status`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { status: APPOINTMENT_STATUSES.NO_ASISTIO, noShowReason: 'No contestó ni avisó' },
+                });
+                expect(res.statusCode).toBe(200);
+                expect(res.json().data.status).toBe(APPOINTMENT_STATUSES.NO_ASISTIO);
+                expect(res.json().data.no_show_reason).toBe('No contestó ni avisó');
+            } finally {
+                await supabaseAdmin.from('appointments').delete().eq('id', citaPasada!.id);
+                await app.close();
+            }
+        });
+
+        it('B.1 — matriz de transición: desde un estado FINAL (cancelada) solo se permite pasar a "reprogramada" → cualquier otro destino es 400', async () => {
+            const { data: citaCancelada } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: normalContactId,
+                    customer_name: 'Cita Ya Cancelada',
+                    customer_phone: randomMxPhone(),
+                    start_time: new Date(Date.now() + 86400000).toISOString(),
+                    end_time: new Date(Date.now() + 90000000).toISOString(),
+                    status: APPOINTMENT_STATUSES.CANCELADA,
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/appointments/${citaCancelada!.id}/status`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { status: APPOINTMENT_STATUSES.CONFIRMADA },
+                });
+                expect(res.statusCode).toBe(400);
+            } finally {
+                await supabaseAdmin.from('appointments').delete().eq('id', citaCancelada!.id);
+                await app.close();
+            }
+        });
+
+        it('B.1 — contraparte de éxito: desde un estado FINAL (cancelada) sí se permite pasar a "reprogramada"', async () => {
+            const { data: citaCancelada } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: normalContactId,
+                    customer_name: 'Cita Cancelada Para Reagendar',
+                    customer_phone: randomMxPhone(),
+                    start_time: new Date(Date.now() + 86400000).toISOString(),
+                    end_time: new Date(Date.now() + 90000000).toISOString(),
+                    status: APPOINTMENT_STATUSES.CANCELADA,
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/appointments/${citaCancelada!.id}/status`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { status: APPOINTMENT_STATUSES.REPROGRAMADA },
+                });
+                expect(res.statusCode).toBe(200);
+                expect(res.json().data.status).toBe(APPOINTMENT_STATUSES.REPROGRAMADA);
+            } finally {
+                await supabaseAdmin.from('appointments').delete().eq('id', citaCancelada!.id);
+                await app.close();
+            }
+        });
+
+        it('B.1 — contraparte de éxito: desde un estado NO final (programada) se permite pasar a cualquier destino', async () => {
+            const { data: citaProgramada } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: normalContactId,
+                    customer_name: 'Cita Programada Libre',
+                    customer_phone: randomMxPhone(),
+                    start_time: new Date(Date.now() + 86400000).toISOString(),
+                    end_time: new Date(Date.now() + 90000000).toISOString(),
+                    status: APPOINTMENT_STATUSES.PROGRAMADA,
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const res = await app.inject({
+                    method: 'PATCH',
+                    url: `/api/organizations/${orgId}/appointments/${citaProgramada!.id}/status`,
+                    headers: { authorization: `Bearer ${owner.jwt}` },
+                    payload: { status: APPOINTMENT_STATUSES.CANCELADA },
+                });
+                expect(res.statusCode).toBe(200);
+                expect(res.json().data.status).toBe(APPOINTMENT_STATUSES.CANCELADA);
+            } finally {
+                await supabaseAdmin.from('appointments').delete().eq('id', citaProgramada!.id);
                 await app.close();
             }
         });

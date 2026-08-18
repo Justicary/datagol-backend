@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import type { Job } from 'pg-boss';
 import { mapElevenLabsPayload } from '../services/call-payload-mapper.js';
+import { extractTimezoneFromElevenLabsPayload } from '../services/elevenlabs-timezone.js';
 import { geocodeAddress } from '../services/geocoding.js';
 import { resolveCallUsageEntries } from '../services/usage-registration.js';
 import { LEAD_TEMPERATURES, LEAD_CHANNELS } from '../types/lead-enums.js';
@@ -108,6 +109,8 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         p_contact_phone_raw: mapped.contactPhoneRaw,
         p_inquiry_reason: mapped.inquiryReason,
         p_temperature: mapped.temperature,
+        p_source: mapped.source,
+        p_source_detail: mapped.sourceDetail,
         p_booked_appointment: mapped.bookedAppointment,
         p_needs_followup: mapped.needsFollowup,
         p_followup_notes: mapped.followupNotes,
@@ -131,6 +134,28 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
             .update({ error: rpcError.message })
             .eq('id', webhookEventId);
         throw new Error(`process_call_completed falló para webhook_events.id=${webhookEventId}: ${rpcError.message}`);
+    }
+
+    // A.1 (docs/tasks/reportes-semanales.md) — siembra oportunista de
+    // organizations.timezone desde el payload crudo de ElevenLabs, si trae
+    // una zona horaria válida (ver services/elevenlabs-timezone.ts sobre por
+    // qué es puramente best-effort). Nunca bloquea el job: un error aquí solo
+    // se registra.
+    const seededTimezone = extractTimezoneFromElevenLabsPayload(event.raw_payload);
+    if (seededTimezone) {
+        const { error: timezoneError } = await fastify.supabaseAdmin
+            .from('organizations')
+            .update({ timezone: seededTimezone })
+            .eq('id', event.organization_id);
+
+        if (timezoneError) {
+            fastify.log.warn({
+                webhookEventId,
+                organizationId: event.organization_id,
+                err: timezoneError.message,
+                msg: 'No se pudo sembrar organizations.timezone desde el payload de ElevenLabs',
+            });
+        }
     }
 
     // Fase B (docs/tasks/opus.md) — consolidar la dirección capturada por el

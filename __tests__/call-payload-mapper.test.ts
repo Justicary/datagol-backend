@@ -634,4 +634,39 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
             expect(mapped!.callerPhoneE164).toBeNull();
         });
     });
+
+    // -----------------------------------------------------------------
+    // source / sourceDetail (D.1, docs/tasks/asistencia-valor de cierre.md)
+    // -----------------------------------------------------------------
+    describe('source / sourceDetail — atribución de origen (campo como_se_entero)', () => {
+        it('un valor exacto de LEAD_SOURCES se mapea tal cual y guarda el texto crudo en sourceDetail', () => {
+            const payload = buildPayload({ dataCollectionResults: { como_se_entero: { value: 'redes_sociales' } } });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.source).toBe('redes_sociales');
+            expect(mapped!.sourceDetail).toBe('redes_sociales');
+        });
+
+        it('el valor se normaliza a minúsculas antes de comparar contra el vocabulario', () => {
+            const payload = buildPayload({ dataCollectionResults: { como_se_entero: { value: 'Referido' } } });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.source).toBe('referido');
+        });
+
+        it('un texto que NO encaja en ninguna de las 9 categorías produce "desconocido", nunca la categoría más cercana', () => {
+            const payload = buildPayload({
+                dataCollectionResults: { como_se_entero: { value: 'me lo dijo un pajarito, no recuerdo bien' } },
+            });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.source).toBe('desconocido');
+            // sourceDetail conserva el texto crudo aunque source haya caído a desconocido.
+            expect(mapped!.sourceDetail).toBe('me lo dijo un pajarito, no recuerdo bien');
+        });
+
+        it('contraparte: campo ausente en data_collection_results → source y sourceDetail quedan null (no "desconocido")', () => {
+            const payload = buildPayload({ dataCollectionResults: { motivo_consulta: { value: 'Otra cosa' } } });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.source).toBeNull();
+            expect(mapped!.sourceDetail).toBeNull();
+        });
+    });
 });

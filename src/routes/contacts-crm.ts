@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireAuthenticatedUser, requireOrganizationMembership, requireOrganizationRole } from '../lib/organization-auth.js';
 import { CONTACT_LIFECYCLE_STAGES, CONTACT_PIPELINE_STAGES, isLifecyclePipelineCoherent } from '../types/contact-enums.js';
+import { APPOINTMENT_STATUSES, type AppointmentStatus } from '../types/appointment-status.js';
+import { isValidStatusTransition, isFutureCompletionAttempt } from '../services/appointment-lifecycle.js';
 import {
     orgContactParamsSchema,
     orgContactAddressParamsSchema,
@@ -119,7 +121,20 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         if (!bodyResult.success) {
             return reply.status(400).send({ success: false, error: 'Cuerpo de la petición inválido: se requiere "pipelineStage" válido.' });
         }
-        const { pipelineStage, wonAt, lostReason } = bodyResult.data;
+        const { pipelineStage, wonAt, lostReason, dealValue, dealCurrency, dealNotes } = bodyResult.data;
+
+        // Valor de cierre (C.1): solo tiene sentido junto con lifecycle_stage
+        // 'cliente', que este endpoint solo deriva cuando pipelineStage es
+        // 'ganado' — la restricción de base (contacts_deal_requires_won)
+        // rechazaría el UPDATE igual, pero un 400 explícito aquí es más
+        // accionable que dejar que llegue como 23514 desde Postgres.
+        const hasDealFields = dealValue !== undefined || dealCurrency !== undefined || dealNotes !== undefined;
+        if (hasDealFields && pipelineStage !== CONTACT_PIPELINE_STAGES.GANADO) {
+            return reply.status(400).send({
+                success: false,
+                error: '"dealValue"/"dealCurrency"/"dealNotes" solo aplican cuando "pipelineStage" es "ganado".',
+            });
+        }
 
         let lifecycleStage: string;
         const updatePayload: Record<string, unknown> = {
@@ -132,6 +147,11 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
             lifecycleStage = CONTACT_LIFECYCLE_STAGES.CLIENTE;
             updatePayload.won_at = wonAt ?? new Date().toISOString();
             updatePayload.lost_reason = null;
+            // El monto sigue siendo opcional (un cierre sin monto sigue
+            // siendo un cierre) — solo se escribe si vino en el body.
+            if (dealValue !== undefined) updatePayload.deal_value = dealValue;
+            if (dealCurrency !== undefined) updatePayload.deal_currency = dealCurrency;
+            if (dealNotes !== undefined) updatePayload.deal_notes = dealNotes;
         } else if (pipelineStage === CONTACT_PIPELINE_STAGES.PERDIDO) {
             if (!lostReason) {
                 return reply.status(400).send({ success: false, error: 'Se requiere "lostReason" para marcar la etapa como "perdido".' });
@@ -402,13 +422,57 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
 
         const bodyResult = appointmentStatusUpdateBodySchema.safeParse(request.body);
         if (!bodyResult.success) {
-            return reply.status(400).send({ success: false, error: 'Cuerpo de la petición inválido: "status" debe ser confirmed, cancelled o rescheduled.' });
+            return reply.status(400).send({
+                success: false,
+                error: 'Cuerpo de la petición inválido: "status" debe ser uno de programada, confirmada, completada, no_asistio, cancelada o reprogramada.',
+            });
         }
+        const { status: newStatus, noShowReason } = bodyResult.data;
 
         const scopedClient = fastify.supabaseUser(auth.jwt);
+
+        // Se lee el estado y la fecha actuales ANTES de escribir: la matriz
+        // de transición y el bloqueo de fecha futura (B.1) dependen de ellos.
+        const { data: current, error: currentError } = await scopedClient
+            .from('appointments')
+            .select('status, start_time')
+            .eq('id', appointmentId)
+            .eq('organization_id', organizationId)
+            .maybeSingle();
+
+        if (currentError) {
+            request.log.error({ organizationId, appointmentId, err: currentError.message, msg: 'Error consultando cita para cambio de estado' });
+            return reply.status(500).send({ success: false, error: 'No se pudo consultar la cita.' });
+        }
+        if (!current) {
+            return reply.status(404).send({ success: false, error: 'Cita no encontrada en esta organización.' });
+        }
+
+        const currentStatus = current.status as AppointmentStatus;
+        if (!isValidStatusTransition(currentStatus, newStatus)) {
+            return reply.status(400).send({
+                success: false,
+                error: `No se puede pasar de "${currentStatus}" a "${newStatus}". Desde un estado final (completada/no_asistio/cancelada) solo se permite pasar a "reprogramada".`,
+            });
+        }
+
+        if (isFutureCompletionAttempt(newStatus, new Date(current.start_time))) {
+            return reply.status(400).send({
+                success: false,
+                error: `No se puede marcar "${newStatus}" en una cita que todavía no ocurre — es un error de captura, no un caso de uso.`,
+            });
+        }
+
+        const updatePayload: Record<string, unknown> = {
+            status: newStatus,
+            status_updated_at: new Date().toISOString(),
+            status_updated_by: auth.userId,
+            no_show_reason: newStatus === APPOINTMENT_STATUSES.NO_ASISTIO ? (noShowReason ?? null) : null,
+        };
+
         const { data, error } = await scopedClient
             .from('appointments')
-            .update({ status: bodyResult.data.status })
+            .update(updatePayload)
             .eq('id', appointmentId)
             .eq('organization_id', organizationId)
             .select()

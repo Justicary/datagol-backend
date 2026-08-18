@@ -30,6 +30,11 @@ const envSchema = z.object({
     TELNYX_SIP_CONNECTION_ID: z.string().optional(),
     RESEND_API_KEY: z.string().optional(),
     RESEND_FROM_EMAIL: z.string().optional(),
+    // Sin precedente de URL de frontend en este backend antes de
+    // docs/tasks/asistencia-valor de cierre.md (B.3) — opcional a propósito:
+    // si no está configurada, el correo de recordatorio omite el enlace
+    // directo en vez de inventar un dominio.
+    FRONTEND_APP_URL: z.string().url('FRONTEND_APP_URL debe ser una URL válida.').optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

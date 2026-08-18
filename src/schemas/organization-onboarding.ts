@@ -27,6 +27,11 @@ export const createOrganizationResponseSchema = z.object({
     }),
 });
 
+// Set construido una sola vez a nivel de módulo — Intl.supportedValuesOf
+// recorre internamente la base de datos de zonas horarias de ICU en cada
+// llamada; no hay motivo para pagar ese costo en cada validación de body.
+const IANA_TIMEZONES = new Set(Intl.supportedValuesOf('timeZone'));
+
 export const businessInfoBodySchema = z.object({
     name: z.string().min(1).optional(),
     address: z.string().optional(),
@@ -36,6 +41,15 @@ export const businessInfoBodySchema = z.object({
     latitude: z.number().optional(),
     longitude: z.number().optional(),
     business_hours: z.record(z.string(), z.unknown()).optional(),
+    // A.1 de docs/tasks/reportes-semanales.md: el scheduler de reportes
+    // (Fase B) filtra organizaciones por hora local en SQL, así que necesita
+    // esta columna persistida aunque Cal.com también reporte timezone por su
+    // propia API — control manual del admin mientras no exista una
+    // sincronización automática confiable.
+    timezone: z
+        .string()
+        .refine((tz) => IANA_TIMEZONES.has(tz), { message: 'La zona horaria debe ser un identificador IANA válido (ej. "America/Mexico_City").' })
+        .optional(),
 });
 export type BusinessInfoBody = z.infer<typeof businessInfoBodySchema>;
 
@@ -45,7 +59,7 @@ export const planBodySchema = z.object({
 });
 export type PlanBody = z.infer<typeof planBodySchema>;
 
-export const CREDENTIAL_PROVIDERS = ['elevenlabs', 'telnyx', 'meta', 'cal', 'google_maps'] as const;
+export const CREDENTIAL_PROVIDERS = ['elevenlabs', 'telnyx', 'meta', 'cal', 'google_maps', 'llm'] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export const credentialsBodySchema = z.object({

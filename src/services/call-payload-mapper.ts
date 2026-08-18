@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { normalizePhoneE164 } from './phone-normalization.js';
 import { isLeadTemperature, type LeadTemperature, LEAD_CHANNELS, type LeadChannel } from '../types/lead-enums.js';
+import { isLeadSource, LEAD_SOURCES, type LeadSource } from '../types/lead-source.js';
 
 /**
  * Esquema mínimo del webhook `post_call_transcription` de ElevenLabs.
@@ -195,6 +196,16 @@ export interface MappedCallData {
     state: string | null;
     zip: string | null;
     temperature: LeadTemperature | null;
+    /**
+     * Cómo se enteró el prospecto del negocio (D.1, docs/tasks/asistencia-valor
+     * de cierre.md) — `null` si el campo `como_se_entero` no vino en absoluto
+     * (agente sin ese campo de Data Collection todavía); `'desconocido'` si
+     * vino pero el texto no encaja en ninguno de los 9 valores del
+     * constraint (nunca se fuerza a la categoría más cercana).
+     */
+    source: LeadSource | null;
+    /** Texto crudo tal como lo dijo el prospecto/lo capturó el LLM, sin normalizar. */
+    sourceDetail: string | null;
     bookedAppointment: boolean;
     needsFollowup: boolean;
     followupNotes: string | null;
@@ -284,6 +295,11 @@ const DATA_COLLECTION_KEYS = {
     needsFollowup: 'requiere_seguimiento',
     followupNotes: 'notas_seguimiento',
     callVolume: 'volumen_llamadas',
+    // Especulativo, igual que el resto de la lista de arriba — el agente
+    // todavía no tiene este campo configurado en Data Collection (D.1,
+    // docs/tasks/asistencia-valor de cierre.md; ver también Fase E del
+    // mismo doc para el criterio de extracción sugerido).
+    comoSeEntero: 'como_se_entero',
 } as const;
 
 type DataCollectionResults = Record<string, z.infer<typeof dataCollectionEntrySchema>>;
@@ -329,6 +345,21 @@ function extractTemperature(results: DataCollectionResults | undefined, key: str
     if (raw === null) return null;
     const normalized = raw.toLowerCase();
     return isLeadTemperature(normalized) ? normalized : null;
+}
+
+/**
+ * `leads.source` tiene un CHECK constraint de 9 valores
+ * (src/types/lead-source.ts). A diferencia de `extractTemperature` (que
+ * devuelve `null` si el texto no coincide), aquí un texto que SÍ vino pero
+ * no encaja en ninguno de los 9 valores se mapea a `'desconocido'` — nunca
+ * se fuerza a la categoría más cercana (instrucción explícita de D.1). Solo
+ * se devuelve `null` cuando el campo no vino en absoluto (nada que mapear).
+ */
+function extractLeadSource(results: DataCollectionResults | undefined, key: string): LeadSource | null {
+    const raw = extractString(results, key);
+    if (raw === null) return null;
+    const normalized = raw.toLowerCase();
+    return isLeadSource(normalized) ? normalized : LEAD_SOURCES.DESCONOCIDO;
 }
 
 /**
@@ -446,6 +477,8 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         state: extractString(results, DATA_COLLECTION_KEYS.state),
         zip: extractString(results, DATA_COLLECTION_KEYS.zip),
         temperature: extractTemperature(results, DATA_COLLECTION_KEYS.temperature),
+        source: extractLeadSource(results, DATA_COLLECTION_KEYS.comoSeEntero),
+        sourceDetail: extractString(results, DATA_COLLECTION_KEYS.comoSeEntero),
         bookedAppointment: extractBoolean(results, DATA_COLLECTION_KEYS.bookedAppointment),
         needsFollowup: extractBoolean(results, DATA_COLLECTION_KEYS.needsFollowup),
         followupNotes: extractString(results, DATA_COLLECTION_KEYS.followupNotes),

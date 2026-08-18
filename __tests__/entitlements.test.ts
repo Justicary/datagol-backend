@@ -15,6 +15,7 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { entitlementsPlugin, requireFeature } from '../src/plugins/entitlements.js';
 import supabasePlugin from '../src/plugins/supabase.js';
 import * as secretService from '../src/services/secret-service.js';
+import * as llmConfigService from '../src/services/llm-config-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
 import { logger } from '../src/lib/logger.js';
 
@@ -137,6 +138,58 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     .eq('feature_key', testFeature);
                 clearEntitlementsCache();
             }
+        });
+
+        // --- Guarda de LLM BYOK validado para features con requires_provider
+        // NULL (docs/tasks/reportes-semanales.md, B.5/C.5) ---
+        describe('Guarda de isLlmConfigValidated (weekly_planning_report / weekly_executive_report / competitor_analysis)', () => {
+            it.each(['weekly_planning_report', 'weekly_executive_report', 'competitor_analysis'])(
+                'habilitar "%s" sin llave de LLM validada es rechazado, sin importar checkProviderCredentials (requires_provider es NULL)',
+                async (featureKey) => {
+                    vi.spyOn(llmConfigService, 'isLlmConfigValidated').mockResolvedValue(false);
+
+                    const result = await setFeatureOverride(REAL_ORG_ID, featureKey, true, 'Prueba de guarda de LLM sin validar');
+
+                    expect(result.success).toBe(false);
+                    expect(result.error).toContain('llave de LLM');
+                }
+            );
+
+            it.each(['weekly_planning_report', 'weekly_executive_report', 'competitor_analysis'])(
+                'contraparte de éxito: habilitar "%s" con llave de LLM validada tiene éxito',
+                async (featureKey) => {
+                    vi.spyOn(llmConfigService, 'isLlmConfigValidated').mockResolvedValue(true);
+
+                    try {
+                        const result = await setFeatureOverride(REAL_ORG_ID, featureKey, true, 'Prueba de guarda de LLM validada');
+                        expect(result.success).toBe(true);
+                    } finally {
+                        await supabaseAdmin
+                            .from('organization_features')
+                            .delete()
+                            .eq('organization_id', REAL_ORG_ID)
+                            .eq('feature_key', featureKey);
+                        clearEntitlementsCache();
+                    }
+                }
+            );
+
+            it('no aplica la guarda de LLM a una feature que no está en la lista especial (ej. "whatsapp")', async () => {
+                const isLlmConfigValidatedSpy = vi.spyOn(llmConfigService, 'isLlmConfigValidated');
+                vi.spyOn(secretService, 'getSecret').mockImplementation(async (_orgId, secretKey) => {
+                    if (secretKey === SECRET_KEYS.WHATSAPP_ACCESS_TOKEN) return 'test-token';
+                    return null;
+                });
+
+                try {
+                    const result = await setFeatureOverride(REAL_ORG_ID, 'whatsapp', true, 'Prueba de no-aplicación de guarda de LLM');
+                    expect(result.success).toBe(true);
+                    expect(isLlmConfigValidatedSpy).not.toHaveBeenCalled();
+                } finally {
+                    await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', 'whatsapp');
+                    clearEntitlementsCache();
+                }
+            });
         });
 
         // --- [F] Exclusión de herramientas ---

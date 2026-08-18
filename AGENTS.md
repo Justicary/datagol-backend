@@ -132,6 +132,8 @@ Sin esto no se puede facturar ni detectar al cliente que quema margen. **Se impl
 * Cada registro guarda la tarifa aplicada al momento del consumo. Las tarifas de los proveedores cambian trimestralmente; un cálculo retroactivo con tarifa actual produce cifras falsas.
 * Debe existir un endpoint de conciliación que compare el metering interno contra la factura real del proveedor.
 
+**Limitación conocida — valor de cierre (`contacts.deal_value`):** un contacto tiene un solo valor de cierre, capturado a mano al marcarlo `ganado` (`PATCH .../contacts/:contactId/pipeline`, docs/tasks/asistencia-valor de cierre.md, Fase C). Para un negocio con compras recurrentes (una clínica con varios tratamientos por paciente, por ejemplo) esto subestima el valor real del cliente — solo se cuenta el último cierre capturado. La evolución natural es una tabla `deals` con una fila por transacción en vez de un campo único en `contacts`; no se construye ahora porque haría falta primero validar con datos reales de uso si el patrón de negocio lo justifica, en vez de anticiparlo sobre una suposición.
+
 ### 🔐 7. Gestión de Secretos por Cliente
 
 Cada PyME aporta sus propias credenciales de ElevenLabs, Telnyx y Meta.
@@ -277,6 +279,17 @@ A continuación se indexan los documentos técnicos y manuales operativos que no
 3. [Diccionario de Esquema y Migraciones de Base de Datos](file:///home/justicary/proyectos/antigravity/datagol-backend/db/schema.md) (`db/schema.md`): Definición de tablas, relaciones, funciones RPC (`process_call_completed`, `resolve_contact_address`) y políticas RLS.
 4. [Guía de Tunelado y Pruebas Locales con Webhooks](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/tunneling.md) (`docs/tunneling.md`): Configuración de Cloudflare Tunnel y LocalTunnel para recibir eventos de proveedores durante el desarrollo.
 5. [Catálogo de Precios y Tarifas de Infraestructura](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/listaPrecios2024.md) (`docs/listaPrecios2024.md`): Desglose de costos unitarios de proveedores (ElevenLabs, Telnyx, Meta) para metering y conciliación.
+6. [Manual de Reportes en Lenguaje Natural](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/natural-language-reports.md) (`docs/natural-language-reports.md`): Principio rector ("el LLM traduce, no consulta"), catálogo de 18 intenciones v1, resolución de periodos en zona horaria local y verificación anti-alucinación.
+
+---
+
+### 📊 18. Reportes en Lenguaje Natural (NL Reports)
+
+* **Principio Rector:** *"El LLM traduce, no consulta"*. Queda estrictamente prohibido que un modelo genere SQL en runtime, acceda a conexiones directas de base de datos o ejecute operaciones matemáticas.
+* **Flujo Obligatorio:** El LLM traduce la pregunta a una intención estructurada del catálogo oficial de 18 intenciones (`src/services/reports/intents/`). La intención se valida con Zod y se ejecuta mediante una consulta parametrizada con `organization_id` inyectado desde el contexto del tenant.
+* **Resolución de Periodos:** Los límites temporales (`hoy`, `esta_semana`, `mes_pasado`, etc.) se calculan obligatoriamente en la zona horaria de la organización (`organizations.timezone`), nunca en UTC del servidor.
+* **Verificación Anti-Alucinación:** Toda redacción contextual generada por el LLM se somete a verificación determinista de cifras. Si la redacción incluye un número que no esté presente en los datos exactos, se descarta y se entrega solo la estructura de datos pura.
+* **Bitácora de Preguntas No Resueltas:** Las consultas no resueltas o ambiguas se persisten en `unanswered_questions` para guiar la ampliación del catálogo en la v2.
 
 <!-- BEGIN:agent-rules -->
 # Verifica antes de asumir

@@ -13,7 +13,11 @@ import {
     type CreditsAlertEmailData,
     type ThankYouEmailData,
     type OrganizationEmailSettings,
+    type WeeklyReportEmailData,
+    type PendingOutcomeReminderEmailData,
 } from '../types/email-templates.js';
+import type { ReportType } from '../types/reports.js';
+import { REPORT_TYPES } from '../types/reports.js';
 import { deriveSafeEmailTheme, DEFAULT_DATAGOL_EMAIL_THEME } from './email-theme.js';
 import { renderEmail, type EmailRenderOptions } from './email-renderer.js';
 
@@ -547,6 +551,111 @@ export async function sendThankYouEmail(params: SendThankYouEmailParams) {
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error({ err, msg, to }, '[Email] Error al enviar agradecimiento con Resend');
+        return null;
+    }
+}
+
+export interface SendWeeklyReportEmailParams extends BaseEmailSendParams {
+    reportType: ReportType;
+    data: WeeklyReportEmailData;
+}
+
+/**
+ * Envía el reporte semanal (planificación o ejecutivo) — mismo motor de
+ * plantillas que el resto de los correos, funciona en las 5 plantillas
+ * seleccionables (docs/tasks/reportes-semanales.md B.4).
+ */
+export async function sendWeeklyReportEmail(params: SendWeeklyReportEmailParams) {
+    const resend = getResendClient();
+    if (!resend) {
+        logger.warn('[Email] Omitiendo envío de reporte semanal por falta de RESEND_API_KEY.');
+        return null;
+    }
+
+    const { to, reportType, data, organizationId, templateId, customOptions } = params;
+
+    const baseOptions = await resolveOrganizationEmailOptions(organizationId);
+    const renderOptions: EmailRenderOptions = {
+        ...baseOptions,
+        ...(templateId ? { templateId } : {}),
+        ...(customOptions ?? {}),
+    };
+
+    const emailType = reportType === REPORT_TYPES.PLANNING ? EMAIL_TYPES.WEEKLY_PLANNING_REPORT : EMAIL_TYPES.WEEKLY_EXECUTIVE_REPORT;
+    const rendered = renderEmail(emailType, data, renderOptions);
+
+    try {
+        const fromEmail = getFromEmail();
+        const response = await resend.emails.send({
+            from: fromEmail,
+            to,
+            subject: rendered.subject,
+            html: rendered.html,
+            text: rendered.text,
+            ...(renderOptions.replyTo ? { replyTo: renderOptions.replyTo } : {}),
+        });
+
+        if (response.error) {
+            logger.error({ error: response.error, to, reportType }, '[Email] Resend respondió con error al enviar reporte semanal');
+            return null;
+        }
+
+        logger.info({ to, reportType, emailId: response.data?.id }, '[Email] Reporte semanal enviado');
+        return response;
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, msg, reportType }, '[Email] Error al enviar el reporte semanal con Resend');
+        return null;
+    }
+}
+
+export interface SendPendingOutcomeReminderEmailParams extends BaseEmailSendParams {
+    data: PendingOutcomeReminderEmailData;
+}
+
+/**
+ * Recordatorio diario de citas sin desenlace marcado (B.3, docs/tasks/asistencia-valor
+ * de cierre.md) — "este job decide si la feature funciona".
+ */
+export async function sendPendingOutcomeReminderEmail(params: SendPendingOutcomeReminderEmailParams) {
+    const resend = getResendClient();
+    if (!resend) {
+        logger.warn('[Email] Omitiendo recordatorio de desenlace por falta de RESEND_API_KEY.');
+        return null;
+    }
+
+    const { to, data, organizationId, templateId, customOptions } = params;
+
+    const baseOptions = await resolveOrganizationEmailOptions(organizationId);
+    const renderOptions: EmailRenderOptions = {
+        ...baseOptions,
+        ...(templateId ? { templateId } : {}),
+        ...(customOptions ?? {}),
+    };
+
+    const rendered = renderEmail(EMAIL_TYPES.PENDING_OUTCOME_REMINDER, data, renderOptions);
+
+    try {
+        const fromEmail = getFromEmail();
+        const response = await resend.emails.send({
+            from: fromEmail,
+            to,
+            subject: rendered.subject,
+            html: rendered.html,
+            text: rendered.text,
+            ...(renderOptions.replyTo ? { replyTo: renderOptions.replyTo } : {}),
+        });
+
+        if (response.error) {
+            logger.error({ error: response.error, to }, '[Email] Resend respondió con error al enviar recordatorio de desenlace');
+            return null;
+        }
+
+        logger.info({ to, emailId: response.data?.id }, '[Email] Recordatorio de desenlace enviado');
+        return response;
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, msg }, '[Email] Error al enviar el recordatorio de desenlace con Resend');
         return null;
     }
 }

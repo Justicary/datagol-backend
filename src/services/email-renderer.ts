@@ -9,6 +9,8 @@ import {
     type ProspectSummaryEmailData,
     type CreditsAlertEmailData,
     type ThankYouEmailData,
+    type WeeklyReportEmailData,
+    type PendingOutcomeReminderEmailData,
 } from '../types/email-templates.js';
 import { type SafeEmailTheme, DEFAULT_DATAGOL_EMAIL_THEME } from './email-theme.js';
 
@@ -317,6 +319,106 @@ function buildContentBlock(
                     sections,
                     primaryAction,
                     footerNote: `Enviado por ${businessName} vía Datagol AI`,
+                },
+            };
+        }
+
+        case EMAIL_TYPES.WEEKLY_PLANNING_REPORT:
+        case EMAIL_TYPES.WEEKLY_EXECUTIVE_REPORT: {
+            const d = (data as WeeklyReportEmailData) || { weekStart: '', weekEnd: '', sections: [] };
+            const isExecutive = type === EMAIL_TYPES.WEEKLY_EXECUTIVE_REPORT;
+            const reportLabel = isExecutive ? 'Reporte Ejecutivo Semanal' : 'Reporte de Planificación Semanal';
+
+            const sections: CommonContentBlock['sections'] = [];
+
+            if (d.narrative) {
+                sections.push({
+                    title: 'Resumen',
+                    contentHtml: `<div style="font-size: 14px; line-height: 1.6; color: ${theme.text};">${escapeHtml(d.narrative).replace(/\n/g, '<br/>')}</div>`,
+                    contentText: d.narrative,
+                    type: 'box',
+                });
+            }
+
+            if (d.recommendations && d.recommendations.length > 0) {
+                sections.push({
+                    title: 'Recomendaciones',
+                    contentHtml: `<ul style="margin: 0; padding-left: 20px; font-size: 14px; color: ${theme.text}; line-height: 1.6;">${d.recommendations.map((r) => `<li style="margin-bottom: 6px;">${escapeHtml(r)}</li>`).join('')}</ul>`,
+                    contentText: d.recommendations.map((r) => `* ${r}`).join('\n'),
+                    type: 'list',
+                });
+            }
+
+            // Cada sección tabular ya viene calculada (report-data-service.ts /
+            // migración 36) — este bloque solo pinta filas, no interpreta cifras.
+            // Topado a 10 filas por sección para no acercarse al límite de 90KB
+            // (MAX_EMAIL_HTML_BYTES) — el detalle completo vive en el HTML
+            // descargable de Storage, enlazado vía `downloadUrl`.
+            const MAX_ROWS_PER_SECTION = 10;
+            for (const tableSection of d.sections || []) {
+                if (!tableSection.rows || tableSection.rows.length === 0) continue;
+                const rows = tableSection.rows.slice(0, MAX_ROWS_PER_SECTION);
+                const columns = Object.keys(rows[0]);
+                const truncatedNote =
+                    tableSection.rows.length > MAX_ROWS_PER_SECTION
+                        ? `<div style="font-size: 12px; color: ${theme.textMuted}; margin-top: 4px;">+${tableSection.rows.length - MAX_ROWS_PER_SECTION} más — ver reporte completo</div>`
+                        : '';
+
+                const tableHtml = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; font-size: 13px;">
+                        <thead><tr>${columns.map((c) => `<th style="text-align: left; padding: 6px 8px; border-bottom: 2px solid ${theme.border}; color: ${theme.textMuted};">${escapeHtml(c)}</th>`).join('')}</tr></thead>
+                        <tbody>${rows.map((row) => `<tr>${columns.map((c) => `<td style="padding: 6px 8px; border-bottom: 1px solid ${theme.border}; color: ${theme.text};">${escapeHtml(row[c] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody>
+                    </table>${truncatedNote}`;
+                const tableText = [columns.join(' | '), ...rows.map((row) => columns.map((c) => row[c] ?? '').join(' | '))].join('\n');
+
+                sections.push({
+                    title: tableSection.title,
+                    contentHtml: tableHtml,
+                    contentText: tableText,
+                    type: 'box',
+                });
+            }
+
+            const primaryAction = d.downloadUrl ? { label: 'Descargar reporte completo', url: d.downloadUrl } : undefined;
+
+            return {
+                subject: `${reportLabel} — ${d.weekStart} a ${d.weekEnd}`,
+                block: {
+                    title: reportLabel,
+                    leadParagraph: d.businessName ? `Reporte para ${escapeHtml(d.businessName)}` : undefined,
+                    sections,
+                    primaryAction,
+                    footerNote: 'Generado automáticamente por Datagol AI',
+                },
+            };
+        }
+
+        case EMAIL_TYPES.PENDING_OUTCOME_REMINDER: {
+            const d = (data as PendingOutcomeReminderEmailData) || { appointments: [] };
+            const count = d.appointments.length;
+
+            const rowsHtml = d.appointments
+                .map(
+                    (a) =>
+                        `<tr><td style="padding: 6px 8px; border-bottom: 1px solid ${theme.border}; color: ${theme.text};">${escapeHtml(a.customerName ?? 'Sin nombre')}</td><td style="padding: 6px 8px; border-bottom: 1px solid ${theme.border}; color: ${theme.text};">${escapeHtml(a.startTime)}</td><td style="padding: 6px 8px; border-bottom: 1px solid ${theme.border}; color: ${theme.text};">${a.daysOverdue} día(s)</td></tr>`
+                )
+                .join('');
+            const tableHtml = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse; font-size: 13px;">
+                    <thead><tr><th style="text-align: left; padding: 6px 8px; border-bottom: 2px solid ${theme.border}; color: ${theme.textMuted};">Cliente</th><th style="text-align: left; padding: 6px 8px; border-bottom: 2px solid ${theme.border}; color: ${theme.textMuted};">Fecha</th><th style="text-align: left; padding: 6px 8px; border-bottom: 2px solid ${theme.border}; color: ${theme.textMuted};">Vencida hace</th></tr></thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>`;
+            const tableText = d.appointments.map((a) => `${a.customerName ?? 'Sin nombre'} — ${a.startTime} — vencida hace ${a.daysOverdue} día(s)`).join('\n');
+
+            return {
+                subject: `${count} cita${count === 1 ? '' : 's'} pasada${count === 1 ? '' : 's'} sin marcar qué pasó`,
+                block: {
+                    title: 'Citas pendientes de marcar',
+                    bannerAlert: {
+                        message: `Tienes ${count} cita${count === 1 ? '' : 's'} pasada${count === 1 ? '' : 's'} sin confirmar si el cliente asistió — sin esto, las métricas de cumplimiento y valor de cierre quedan incompletas.`,
+                        isUrgent: false,
+                    },
+                    sections: [{ title: 'Citas sin desenlace', contentHtml: tableHtml, contentText: tableText, type: 'box' }],
+                    primaryAction: d.dashboardUrl ? { label: 'Marcar desenlace ahora', url: d.dashboardUrl } : undefined,
+                    footerNote: 'Generado automáticamente por Datagol AI',
                 },
             };
         }

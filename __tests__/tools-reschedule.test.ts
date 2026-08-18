@@ -5,6 +5,7 @@ import { rescheduleToolRoute } from '../src/routes/tools/reschedule.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
 import { setSecret, getSecret, clearSecretCache } from '../src/services/secret-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
+import { APPOINTMENT_STATUSES } from '../src/types/appointment-status.js';
 
 vi.mock('../src/services/cal-com-tool-client.js', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../src/services/cal-com-tool-client.js')>();
@@ -38,7 +39,7 @@ async function createAppointment(overrides: Record<string, unknown> = {}) {
             start_time: startTime,
             end_time: endTime,
             cal_booking_id: 'cal_booking_reschedule_base',
-            status: 'confirmed',
+            status: APPOINTMENT_STATUSES.CONFIRMADA,
             ...overrides,
         })
         .select('id, start_time, end_time')
@@ -163,7 +164,7 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             expect(body.newStartTime).toBe(newStartIso);
 
             const { data: updated } = await supabaseAdmin.from('appointments').select('start_time, status, end_time').eq('id', appointment.id).single();
-            expect(updated?.status).toBe('rescheduled');
+            expect(updated?.status).toBe(APPOINTMENT_STATUSES.REPROGRAMADA);
             expect(new Date(updated!.start_time).toISOString()).toBe(newStartIso);
             // end_time NOT NULL preservado con la duración original (30 min) ya que Cal.com no devolvió `end`.
             expect(updated?.end_time).not.toBeNull();
@@ -276,7 +277,7 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             expect(body.rescheduled).toBe(true);
 
             const { data: updated } = await supabaseAdmin.from('appointments').select('status').eq('id', appointment.id).single();
-            expect(updated?.status).toBe('rescheduled');
+            expect(updated?.status).toBe(APPOINTMENT_STATUSES.REPROGRAMADA);
         } finally {
             await app.close();
         }
@@ -300,7 +301,7 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             expect(response.json().rescheduled).toBe(false);
 
             const { data: unchanged } = await supabaseAdmin.from('appointments').select('status, start_time').eq('id', appointment.id).single();
-            expect(unchanged?.status).toBe('confirmed');
+            expect(unchanged?.status).toBe(APPOINTMENT_STATUSES.CONFIRMADA);
             expect(new Date(unchanged!.start_time).toISOString()).toBe(new Date(appointment.start_time).toISOString());
         } finally {
             await app.close();

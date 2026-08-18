@@ -22,7 +22,7 @@ flowchart TD
     subgraph DatagolAPI["Datagol Backend (Cloud Run)"]
         ToolsAPI["1. Tool Calls en Vivo\n/tools/:webhookToken/*"]
         WebhookAPI["2. Post-Call Webhook\n/webhooks/elevenlabs/:webhookToken"]
-        SignedUrlAPI["3. Sesiones y Signed URLs\n/api/elevenlabs/signed-url\n/api/widget/session"]
+        SignedUrlAPI["3. Sesiones y Signed URLs\n/api/elevenlabs/signed-url"]
     end
 
     subgraph External["Servicios Externos / BD"]
@@ -182,7 +182,6 @@ Son endpoints consumidos por nuestro propio frontend (`datagol-frontend` o widge
 |---|---|---|
 | `GET` | `/api/elevenlabs/signed-url` | Genera una URL firmada de conexión WebRTC usando `ELEVENLABS_API_KEY` y `ELEVENLABS_AGENT_ID`. |
 | `GET` | `/api/elevenlabs/inbound` | Alias de inicialización para clientes legacy / webhooks de entrada. |
-| `POST` | `/api/widget/session` | Inicializa una sesión de chat/voz para el Widget web embebido (valida orígenes autorizados en `widget_origins` y aplica rate-limiting). |
 
 ---
 
