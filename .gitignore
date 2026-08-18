@@ -13,8 +13,8 @@ env-vars.yaml
 dist/
 
 # Cobertura y reportes
-coverage/
-reports/
+/coverage/
+/reports/
 
 # Stryker Mutator
 .stryker-tmp/
