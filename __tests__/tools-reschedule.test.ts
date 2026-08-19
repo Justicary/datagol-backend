@@ -42,7 +42,7 @@ async function createAppointment(overrides: Record<string, unknown> = {}) {
             status: APPOINTMENT_STATUSES.CONFIRMADA,
             ...overrides,
         })
-        .select('id, start_time, end_time')
+        .select('id, start_time, end_time, customer_name, customer_email, customer_phone, cal_booking_id')
         .single();
     if (error || !data) throw new Error(`No se pudo crear la cita de prueba: ${error?.message}`);
     return data;
@@ -142,11 +142,16 @@ describe('POST /tools/:webhookToken/reschedule', () => {
     });
 
     it('contraparte de éxito: nombre y correo coinciden con una cita futura y la reprograma', async () => {
-        const appointment = await createAppointment({ customer_name: 'María Pérez Reschedule', customer_email: 'maria-reschedule@example.invalid' });
+        const appointment = await createAppointment({
+            customer_name: 'María Pérez Reschedule',
+            customer_email: 'maria-reschedule@example.invalid',
+            cal_booking_id: 'cal_booking_old_email_1',
+        });
         createdAppointmentIds.push(appointment.id);
 
         const newStartIso = '2026-09-15T15:00:00.000Z';
-        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: 'cal_booking_reschedule_base', startTime: newStartIso, endTime: null });
+        const newCalBookingId = 'cal_booking_new_email_1';
+        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: newCalBookingId, startTime: newStartIso, endTime: null });
 
         const app = await buildTestApp();
         try {
@@ -163,11 +168,25 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             expect(body.rescheduled).toBe(true);
             expect(body.newStartTime).toBe(newStartIso);
 
-            const { data: updated } = await supabaseAdmin.from('appointments').select('start_time, status, end_time').eq('id', appointment.id).single();
-            expect(updated?.status).toBe(APPOINTMENT_STATUSES.REPROGRAMADA);
-            expect(new Date(updated!.start_time).toISOString()).toBe(newStartIso);
-            // end_time NOT NULL preservado con la duración original (30 min) ya que Cal.com no devolvió `end`.
-            expect(updated?.end_time).not.toBeNull();
+            // 1. La cita original debe quedar marcada como CANCELADA (historial)
+            const { data: original } = await supabaseAdmin.from('appointments').select('status').eq('id', appointment.id).single();
+            expect(original?.status).toBe(APPOINTMENT_STATUSES.CANCELADA);
+
+            // 2. Debe existir la nueva cita con el nuevo cal_booking_id y estado REPROGRAMADA
+            const { data: newApp } = await supabaseAdmin
+                .from('appointments')
+                .select('id, start_time, status, end_time, cal_booking_id, customer_name, customer_email')
+                .eq('organization_id', REAL_ORG_ID)
+                .eq('cal_booking_id', newCalBookingId)
+                .eq('status', APPOINTMENT_STATUSES.REPROGRAMADA)
+                .single();
+
+            expect(newApp).not.toBeNull();
+            createdAppointmentIds.push(newApp!.id);
+            expect(newApp?.customer_name).toBe(appointment.customer_name);
+            expect(newApp?.customer_email).toBe(appointment.customer_email);
+            expect(new Date(newApp!.start_time).toISOString()).toBe(newStartIso);
+            expect(newApp?.end_time).not.toBeNull();
         } finally {
             await app.close();
         }
@@ -256,11 +275,13 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             customer_name: 'Cliente Solo Teléfono',
             customer_email: null,
             customer_phone: '+525588877766',
+            cal_booking_id: 'cal_booking_old_phone_2',
         });
         createdAppointmentIds.push(appointment.id);
 
         const newStartIso = '2026-09-16T15:00:00.000Z';
-        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: 'cal_booking_reschedule_base', startTime: newStartIso, endTime: null });
+        const newCalBookingId = 'cal_booking_new_phone_2';
+        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: newCalBookingId, startTime: newStartIso, endTime: null });
 
         const app = await buildTestApp();
         try {
@@ -276,8 +297,20 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             const body = response.json();
             expect(body.rescheduled).toBe(true);
 
-            const { data: updated } = await supabaseAdmin.from('appointments').select('status').eq('id', appointment.id).single();
-            expect(updated?.status).toBe(APPOINTMENT_STATUSES.REPROGRAMADA);
+            const { data: original } = await supabaseAdmin.from('appointments').select('status').eq('id', appointment.id).single();
+            expect(original?.status).toBe(APPOINTMENT_STATUSES.CANCELADA);
+
+            const { data: newApp } = await supabaseAdmin
+                .from('appointments')
+                .select('id, status, customer_phone')
+                .eq('organization_id', REAL_ORG_ID)
+                .eq('cal_booking_id', newCalBookingId)
+                .eq('status', APPOINTMENT_STATUSES.REPROGRAMADA)
+                .single();
+
+            expect(newApp).not.toBeNull();
+            createdAppointmentIds.push(newApp!.id);
+            expect(newApp?.customer_phone).toBe(appointment.customer_phone);
         } finally {
             await app.close();
         }

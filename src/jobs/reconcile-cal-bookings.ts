@@ -24,7 +24,7 @@ export async function reconcileCalBookingsHandler(fastify: FastifyInstance): Pro
         .from('appointments')
         .select('id, organization_id, cal_booking_id, status')
         .not('cal_booking_id', 'is', null)
-        .in('status', [APPOINTMENT_STATUSES.PROGRAMADA, APPOINTMENT_STATUSES.CONFIRMADA])
+        .in('status', [APPOINTMENT_STATUSES.PROGRAMADA, APPOINTMENT_STATUSES.CONFIRMADA, APPOINTMENT_STATUSES.REPROGRAMADA])
         .gt('start_time', new Date().toISOString());
 
     if (error) {

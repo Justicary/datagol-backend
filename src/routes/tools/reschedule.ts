@@ -59,7 +59,7 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
         // si se dan ambos, deben coincidir los dos.
         let appointmentQuery = fastify.supabaseAdmin
             .from('appointments')
-            .select('id, cal_booking_id, start_time, end_time, customer_name, customer_email')
+            .select('id, organization_id, contact_id, contact_address_id, customer_name, customer_email, customer_phone, service_address, latitude, longitude, call_log_id, cal_booking_id, start_time, end_time')
             .eq('organization_id', auth.organizationId)
             .ilike('customer_name', customerName.trim())
             .neq('status', APPOINTMENT_STATUSES.CANCELADA)
@@ -108,18 +108,43 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
             const originalDurationMs = new Date(appointment.end_time).getTime() - new Date(appointment.start_time).getTime();
             const fallbackEndTime = new Date(new Date(calResult.startTime).getTime() + originalDurationMs).toISOString();
 
-            const { error: updateError } = await fastify.supabaseAdmin
+            // 1. Marcar la cita original como cancelada para conservar el historial
+            // de la fecha y UID previo en Cal.com.
+            const { error: cancelError } = await fastify.supabaseAdmin
                 .from('appointments')
                 .update({
-                    start_time: calResult.startTime,
-                    end_time: calResult.endTime ?? fallbackEndTime,
-                    status: APPOINTMENT_STATUSES.REPROGRAMADA,
-                    cal_booking_id: calResult.calBookingId,
+                    status: APPOINTMENT_STATUSES.CANCELADA,
+                    status_updated_at: new Date().toISOString(),
                 })
                 .eq('id', appointment.id);
 
-            if (updateError) {
-                request.log.error({ organizationId: auth.organizationId, appointmentId: appointment.id, err: updateError.message, msg: 'Cal.com reprogramó pero falló la actualización en appointments' });
+            if (cancelError) {
+                request.log.warn({ organizationId: auth.organizationId, appointmentId: appointment.id, err: cancelError.message, msg: 'Error actualizando cita original a cancelada durante reprogramación' });
+            }
+
+            // 2. Insertar nuevo registro con el nuevo UID de Cal.com y estado 'reprogramada'
+            const { error: insertError } = await fastify.supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: auth.organizationId,
+                    contact_id: appointment.contact_id ?? null,
+                    contact_address_id: appointment.contact_address_id ?? null,
+                    customer_name: appointment.customer_name,
+                    customer_email: appointment.customer_email ?? null,
+                    customer_phone: appointment.customer_phone ?? null,
+                    service_address: appointment.service_address ?? null,
+                    latitude: appointment.latitude ?? null,
+                    longitude: appointment.longitude ?? null,
+                    call_log_id: appointment.call_log_id ?? null,
+                    conversation_id: null,
+                    start_time: calResult.startTime,
+                    end_time: calResult.endTime ?? fallbackEndTime,
+                    cal_booking_id: calResult.calBookingId,
+                    status: APPOINTMENT_STATUSES.REPROGRAMADA,
+                });
+
+            if (insertError) {
+                request.log.error({ organizationId: auth.organizationId, appointmentId: appointment.id, err: insertError.message, msg: 'Cal.com reprogramó pero falló la inserción de la nueva cita en appointments' });
                 return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: DEGRADED_MESSAGE }));
             }
 
