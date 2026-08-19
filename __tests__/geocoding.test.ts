@@ -71,7 +71,7 @@ describe('src/services/geocoding.ts', () => {
         expect(result).toBeNull();
     });
 
-    it('con google_maps_key configurada y respuesta OK de Google, devuelve lat/lng', async () => {
+    it('con google_maps_key configurada y respuesta OK de Google, devuelve lat/lng y componentes estructurados', async () => {
         const saved = await setSecret(testOrgId, SECRET_KEYS.GOOGLE_MAPS_KEY, GOOGLE_MAPS_KEY_VALUE);
         expect(saved).toBe(true);
 
@@ -79,7 +79,21 @@ describe('src/services/geocoding.ts', () => {
             new Response(
                 JSON.stringify({
                     status: 'OK',
-                    results: [{ geometry: { location: { lat: 19.0433, lng: -98.1982 } } }],
+                    results: [
+                        {
+                            formatted_address: 'Calle Benito Juárez 123, Centro, 72000 Puebla, Pue., México',
+                            geometry: { location: { lat: 19.0433, lng: -98.1982 } },
+                            address_components: [
+                                { long_name: '123', short_name: '123', types: ['street_number'] },
+                                { long_name: 'Calle Benito Juárez', short_name: 'Calle Benito Juárez', types: ['route'] },
+                                { long_name: 'Centro', short_name: 'Centro', types: ['neighborhood', 'political'] },
+                                { long_name: 'Puebla', short_name: 'Puebla', types: ['locality', 'political'] },
+                                { long_name: 'Puebla', short_name: 'Pue.', types: ['administrative_area_level_1', 'political'] },
+                                { long_name: '72000', short_name: '72000', types: ['postal_code'] },
+                                { long_name: 'México', short_name: 'MX', types: ['country', 'political'] },
+                            ],
+                        },
+                    ],
                 }),
                 { status: 200 }
             )
@@ -92,7 +106,50 @@ describe('src/services/geocoding.ts', () => {
             zip: '72000',
         });
 
-        expect(result).toEqual({ lat: 19.0433, lng: -98.1982 });
+        expect(result).toMatchObject({
+            lat: 19.0433,
+            lng: -98.1982,
+            formattedAddress: 'Calle Benito Juárez 123, Centro, 72000 Puebla, Pue., México',
+            street: 'Calle Benito Juárez 123',
+            neighborhood: 'Centro',
+            city: 'Puebla',
+            state: 'Puebla',
+            postalCode: '72000',
+            country: 'MX',
+        });
+        mock.mockRestore();
+    });
+
+    it('reverseGeocode resuelve coordenadas a dirección estructurada', async () => {
+        const { reverseGeocode } = await import('../src/services/geocoding.js');
+        const mock = mockGeocodingFetchOnce(
+            new Response(
+                JSON.stringify({
+                    status: 'OK',
+                    results: [
+                        {
+                            formatted_address: 'Av. Juárez 100, Puebla, México',
+                            geometry: { location: { lat: 19.0433, lng: -98.1982 } },
+                            address_components: [
+                                { long_name: '100', short_name: '100', types: ['street_number'] },
+                                { long_name: 'Avenida Juárez', short_name: 'Av. Juárez', types: ['route'] },
+                                { long_name: 'Puebla', short_name: 'Puebla', types: ['locality'] },
+                            ],
+                        },
+                    ],
+                }),
+                { status: 200 }
+            )
+        );
+
+        const result = await reverseGeocode(buildFakeFastify(), testOrgId, 19.0433, -98.1982);
+        expect(result).toMatchObject({
+            lat: 19.0433,
+            lng: -98.1982,
+            formattedAddress: 'Av. Juárez 100, Puebla, México',
+            street: 'Avenida Juárez 100',
+            city: 'Puebla',
+        });
         mock.mockRestore();
     });
 

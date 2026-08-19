@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { requireAuthenticatedUser, requireOrganizationRole } from '../lib/organization-auth.js';
 import { getPermissionsForUser, omitProtectedTranscriptFields } from '../services/permission-service.js';
 import { PERMISSION_KEYS } from '../types/permission-keys.js';
-import { CONTACT_LIFECYCLE_STAGES, CONTACT_PIPELINE_STAGES, isLifecyclePipelineCoherent } from '../types/contact-enums.js';
+import { CONTACT_LIFECYCLE_STAGES, CONTACT_PIPELINE_STAGES, CONTACT_ADDRESS_TYPES, isLifecyclePipelineCoherent } from '../types/contact-enums.js';
 import { APPOINTMENT_STATUSES, type AppointmentStatus } from '../types/appointment-status.js';
 import { isValidStatusTransition, isFutureCompletionAttempt } from '../services/appointment-lifecycle.js';
 import {
@@ -323,7 +323,7 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
             p_postal_code: body.postalCode ?? null,
             p_lat: body.latitude ?? null,
             p_lng: body.longitude ?? null,
-            p_type: body.addressType ?? undefined,
+            p_type: body.addressType ?? CONTACT_ADDRESS_TYPES.DOMICILIO,
         });
 
         if (rpcError || !addressId) {

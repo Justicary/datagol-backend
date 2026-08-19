@@ -276,7 +276,7 @@ async function resolveContactAddress(
             p_org_id: organizationId,
             p_contact_id: contactId,
             p_street: street,
-            p_type: CONTACT_ADDRESS_TYPES.SERVICIO,
+            p_type: CONTACT_ADDRESS_TYPES.DOMICILIO,
         })
         .abortSignal(signal);
     if (error) throw new Error(error.message);

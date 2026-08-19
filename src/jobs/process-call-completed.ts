@@ -120,10 +120,10 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         p_duration_seconds: mapped.durationSeconds,
         p_usage_entries: usageEntries,
         p_channel: mapped.channel,
-        p_customer_address: mapped.address,
-        p_customer_city: mapped.city,
-        p_customer_state: mapped.state,
-        p_customer_zip: mapped.zip,
+        p_customer_address: mapped.address || geocoded?.formattedAddress || null,
+        p_customer_city: mapped.city || geocoded?.city || null,
+        p_customer_state: mapped.state || geocoded?.state || null,
+        p_customer_zip: mapped.zip || geocoded?.postalCode || null,
         p_customer_lat: geocoded?.lat ?? null,
         p_customer_lng: geocoded?.lng ?? null,
     });
@@ -163,21 +163,23 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
     // y DESPUÉS del RPC (que ya persistió contacto/call_log/lead/usage_events
     // con éxito): un fallo aquí no debe reintentar todo el job vía pg-boss,
     // solo perderse esta consolidación puntual — se registra para poder
-    // investigarla. `mapped.address` es hoy siempre null en producción
-    // (verificado contra los últimos webhook_events reales: el agente de
-    // ElevenLabs no tiene esos campos en su Data Collection todavía), así
-    // que esta rama queda lista pero inactiva hasta que se configuren.
-    if (result?.contact_id && mapped.address) {
+    // investigarla.
+    if (result?.contact_id && (mapped.address || geocoded?.formattedAddress)) {
+        const street = mapped.address || geocoded?.street || geocoded?.formattedAddress;
+        const city = mapped.city || geocoded?.city || null;
+        const state = mapped.state || geocoded?.state || null;
+        const postalCode = mapped.zip || geocoded?.postalCode || null;
+
         const { error: addressError } = await fastify.supabaseAdmin.rpc('resolve_contact_address', {
             p_org_id: event.organization_id,
             p_contact_id: result.contact_id,
-            p_street: mapped.address,
-            p_city: mapped.city,
-            p_state: mapped.state,
-            p_postal_code: mapped.zip,
+            p_street: street,
+            p_city: city,
+            p_state: state,
+            p_postal_code: postalCode,
             p_lat: geocoded?.lat ?? null,
             p_lng: geocoded?.lng ?? null,
-            p_type: CONTACT_ADDRESS_TYPES.SERVICIO,
+            p_type: CONTACT_ADDRESS_TYPES.DOMICILIO,
         });
 
         if (addressError) {

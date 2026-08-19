@@ -420,7 +420,7 @@ describe('POST /tools/:webhookToken/booking', () => {
 
             const { data: addressRow } = await supabaseAdmin.from('contact_addresses').select('street, address_type').eq('id', appointment!.contact_address_id).single();
             expect(addressRow?.street).toBe('Calle Nueva Dictada 300');
-            expect(addressRow?.address_type).toBe('servicio');
+            expect(addressRow?.address_type).toBe('domicilio');
         } finally {
             await app.close();
         }

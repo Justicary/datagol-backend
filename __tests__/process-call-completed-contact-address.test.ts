@@ -110,7 +110,7 @@ describe('process-call-completed: consolidación de dirección en contact_addres
         expect(address?.street).toBe('Av. Reforma 500');
         expect(address?.city).toBe('CDMX');
         expect(address?.postal_code).toBe('06600');
-        expect(address?.address_type).toBe('servicio');
+        expect(address?.address_type).toBe('domicilio');
         expect(address?.is_primary).toBe(true);
 
         await supabaseAdmin.from('contacts').delete().eq('id', contact!.id);
