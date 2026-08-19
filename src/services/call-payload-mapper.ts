@@ -196,9 +196,13 @@ export interface MappedCallData {
     state: string | null;
     zip: string | null;
     temperature: LeadTemperature | null;
+    /** Plan o paquete por el que mostró interés el prospecto. */
+    planOfInterest: string | null;
+    /** Volumen estimado de mensajes mencionado por el prospecto. */
+    messageVolume: string | null;
     /**
      * Cómo se enteró el prospecto del negocio (D.1, docs/tasks/asistencia-valor
-     * de cierre.md) — `null` si el campo `como_se_entero` no vino en absoluto
+     * de cierre.md) — `null` si el campo `origen_prospecto` (o `como_se_entero`) no vino en absoluto
      * (agente sin ese campo de Data Collection todavía); `'desconocido'` si
      * vino pero el texto no encaja en ninguno de los 9 valores del
      * constraint (nunca se fuerza a la categoría más cercana).
@@ -262,22 +266,8 @@ export interface MappedCallData {
 
 /**
  * Claves de `analysis.data_collection_results` configuradas en el agente de
- * ElevenLabs (Dashboard → Agent → Analysis → Data Collection). No son fijas
- * por la API de ElevenLabs: son específicas de este agente. La fuente de
- * verdad es el agente configurado en el dashboard de ElevenLabs, no este
- * archivo — si alguien renombra un campo de Data Collection allá, este
- * diccionario se desincroniza en silencio (los 4 campos afectados se
- * descartan sin error, ver docs/tasks/elevenlabs-data-collection-key-mismatch.md)
- * y hay que volver a sincronizarlo aquí, nunca al revés.
- *
- * `fullName`/`contactPhone`/`email`/`bookedAppointment` verificados contra
- * una conversación real (captura de Analysis → Data Collection).
- * `address`/`city`/`state`/`zip` igual, agregados por el usuario en el
- * dashboard de ElevenLabs para capturar la dirección de servicio del
- * prospecto (ver services/geocoding.ts para la resolución a lat/lng). El
- * resto (`businessName`, `businessSector`, `temperature`, `needsFollowup`,
- * `followupNotes`, `callVolume`) son especulativos: el agente aún no los
- * captura, no hay evidencia de qué nombre tendrían si se configuraran.
+ * ElevenLabs (Dashboard → Agent → Analysis → Data Collection).
+ * Sincronizadas con los 18 campos reales del agente en producción.
  */
 const DATA_COLLECTION_KEYS = {
     fullName: 'nombre_completo_prospecto',
@@ -285,20 +275,20 @@ const DATA_COLLECTION_KEYS = {
     email: 'correo_electronico_prospecto',
     inquiryReason: 'motivo_consulta',
     bookedAppointment: 'cita_programada',
+    temperature: 'temperatura',
+    needsFollowup: 'requiere_seguimiento',
+    planOfInterest: 'plan_de_interes',
+    businessName: 'nombre_negocio',
+    businessSector: 'giro_negocio',
+    callVolume: 'volumen_llamadas',
+    followupNotes: 'notas_seguimiento',
     address: 'direccion_prospecto',
     city: 'ciudad_prospecto',
     state: 'estado_prospecto',
     zip: 'cp_prospecto',
-    businessName: 'nombre_negocio',
-    businessSector: 'giro_negocio',
-    temperature: 'temperatura',
-    needsFollowup: 'requiere_seguimiento',
-    followupNotes: 'notas_seguimiento',
-    callVolume: 'volumen_llamadas',
-    // Especulativo, igual que el resto de la lista de arriba — el agente
-    // todavía no tiene este campo configurado en Data Collection (D.1,
-    // docs/tasks/asistencia-valor de cierre.md; ver también Fase E del
-    // mismo doc para el criterio de extracción sugerido).
+    messageVolume: 'volumen_mensajes',
+    origenProspecto: 'origen_prospecto',
+    // Compatibilidad retroactiva con nombre previo
     comoSeEntero: 'como_se_entero',
 } as const;
 
@@ -348,18 +338,54 @@ function extractTemperature(results: DataCollectionResults | undefined, key: str
 }
 
 /**
- * `leads.source` tiene un CHECK constraint de 9 valores
- * (src/types/lead-source.ts). A diferencia de `extractTemperature` (que
- * devuelve `null` si el texto no coincide), aquí un texto que SÍ vino pero
- * no encaja en ninguno de los 9 valores se mapea a `'desconocido'` — nunca
- * se fuerza a la categoría más cercana (instrucción explícita de D.1). Solo
- * se devuelve `null` cuando el campo no vino en absoluto (nada que mapear).
+ * Mapeo de los valores del enum de `origen_prospecto` de ElevenLabs
+ * ('referido', 'web', 'facebook', 'instagram', 'llamada', 'tiktok', 'otro')
+ * hacia las categorías autorizadas por el CHECK constraint de `leads.source`.
  */
-function extractLeadSource(results: DataCollectionResults | undefined, key: string): LeadSource | null {
-    const raw = extractString(results, key);
-    if (raw === null) return null;
-    const normalized = raw.toLowerCase();
-    return isLeadSource(normalized) ? normalized : LEAD_SOURCES.DESCONOCIDO;
+const SOURCE_ENUM_MAP: Record<string, LeadSource> = {
+    referido: LEAD_SOURCES.REFERIDO,
+    web: LEAD_SOURCES.SITIO_WEB,
+    facebook: LEAD_SOURCES.REDES_SOCIALES,
+    instagram: LEAD_SOURCES.REDES_SOCIALES,
+    tiktok: LEAD_SOURCES.REDES_SOCIALES,
+    llamada: LEAD_SOURCES.OTRO,
+    otro: LEAD_SOURCES.OTRO,
+    // Coincidencias exactas con los 9 valores del constraint de BD
+    anuncio_pagado: LEAD_SOURCES.ANUNCIO_PAGADO,
+    busqueda_google: LEAD_SOURCES.BUSQUEDA_GOOGLE,
+    redes_sociales: LEAD_SOURCES.REDES_SOCIALES,
+    sitio_web: LEAD_SOURCES.SITIO_WEB,
+    letrero_fisico: LEAD_SOURCES.LETRERO_FISICO,
+    directorio: LEAD_SOURCES.DIRECTORIO,
+    desconocido: LEAD_SOURCES.DESCONOCIDO,
+};
+
+/**
+ * `leads.source` tiene un CHECK constraint de 9 valores
+ * (src/types/lead-source.ts). Mapea el valor de ElevenLabs (enum o texto libre)
+ * al valor canónico. Si vino un texto pero no encaja, se mapea a 'desconocido'.
+ * Si ninguna de las claves candidatas vino, devuelve null.
+ */
+function extractLeadSource(results: DataCollectionResults | undefined, keys: readonly string[]): LeadSource | null {
+    for (const key of keys) {
+        const raw = extractString(results, key);
+        if (raw !== null) {
+            const normalized = raw.toLowerCase().trim();
+            if (SOURCE_ENUM_MAP[normalized]) {
+                return SOURCE_ENUM_MAP[normalized];
+            }
+            return isLeadSource(normalized) ? normalized : LEAD_SOURCES.DESCONOCIDO;
+        }
+    }
+    return null;
+}
+
+function extractLeadSourceDetail(results: DataCollectionResults | undefined, keys: readonly string[]): string | null {
+    for (const key of keys) {
+        const raw = extractString(results, key);
+        if (raw !== null) return raw;
+    }
+    return null;
 }
 
 /**
@@ -477,8 +503,10 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         state: extractString(results, DATA_COLLECTION_KEYS.state),
         zip: extractString(results, DATA_COLLECTION_KEYS.zip),
         temperature: extractTemperature(results, DATA_COLLECTION_KEYS.temperature),
-        source: extractLeadSource(results, DATA_COLLECTION_KEYS.comoSeEntero),
-        sourceDetail: extractString(results, DATA_COLLECTION_KEYS.comoSeEntero),
+        planOfInterest: extractString(results, DATA_COLLECTION_KEYS.planOfInterest),
+        messageVolume: extractString(results, DATA_COLLECTION_KEYS.messageVolume),
+        source: extractLeadSource(results, [DATA_COLLECTION_KEYS.origenProspecto, DATA_COLLECTION_KEYS.comoSeEntero]),
+        sourceDetail: extractLeadSourceDetail(results, [DATA_COLLECTION_KEYS.origenProspecto, DATA_COLLECTION_KEYS.comoSeEntero]),
         bookedAppointment: extractBoolean(results, DATA_COLLECTION_KEYS.bookedAppointment),
         needsFollowup: extractBoolean(results, DATA_COLLECTION_KEYS.needsFollowup),
         followupNotes: extractString(results, DATA_COLLECTION_KEYS.followupNotes),

@@ -636,29 +636,72 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
     });
 
     // -----------------------------------------------------------------
-    // source / sourceDetail (D.1, docs/tasks/asistencia-valor de cierre.md)
+    // plan_de_interes y volumen_mensajes
     // -----------------------------------------------------------------
-    describe('source / sourceDetail — atribución de origen (campo como_se_entero)', () => {
-        it('un valor exacto de LEAD_SOURCES se mapea tal cual y guarda el texto crudo en sourceDetail', () => {
-            const payload = buildPayload({ dataCollectionResults: { como_se_entero: { value: 'redes_sociales' } } });
+    describe('plan_de_interes y volumen_mensajes', () => {
+        it('extrae plan_de_interes y volumen_mensajes cuando vienen en data_collection_results', () => {
+            const payload = buildPayload({
+                dataCollectionResults: {
+                    plan_de_interes: { value: 'Plan Escala Ilimitado' },
+                    volumen_mensajes: { value: '5000 al mes' },
+                },
+            });
             const mapped = mapElevenLabsPayload(payload);
-            expect(mapped!.source).toBe('redes_sociales');
-            expect(mapped!.sourceDetail).toBe('redes_sociales');
+            expect(mapped!.planOfInterest).toBe('Plan Escala Ilimitado');
+            expect(mapped!.messageVolume).toBe('5000 al mes');
         });
 
-        it('el valor se normaliza a minúsculas antes de comparar contra el vocabulario', () => {
+        it('devuelve null si plan_de_interes y volumen_mensajes no vienen en data_collection_results', () => {
+            const payload = buildPayload({ dataCollectionResults: {} });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.planOfInterest).toBeNull();
+            expect(mapped!.messageVolume).toBeNull();
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // source / sourceDetail (origen_prospecto y como_se_entero)
+    // -----------------------------------------------------------------
+    describe('source / sourceDetail — atribución de origen (origen_prospecto)', () => {
+        it('mapea correctamente los valores del enum configurado en ElevenLabs a los valores del CHECK constraint', () => {
+            const mappings: Array<[string, string]> = [
+                ['referido', 'referido'],
+                ['web', 'sitio_web'],
+                ['facebook', 'redes_sociales'],
+                ['instagram', 'redes_sociales'],
+                ['tiktok', 'redes_sociales'],
+                ['llamada', 'otro'],
+                ['otro', 'otro'],
+            ];
+
+            for (const [inputEnum, expectedSource] of mappings) {
+                const payload = buildPayload({ dataCollectionResults: { origen_prospecto: { value: inputEnum } } });
+                const mapped = mapElevenLabsPayload(payload);
+                expect(mapped!.source).toBe(expectedSource);
+                expect(mapped!.sourceDetail).toBe(inputEnum);
+            }
+        });
+
+        it('un valor exacto de LEAD_SOURCES se mapea tal cual desde origen_prospecto', () => {
+            const payload = buildPayload({ dataCollectionResults: { origen_prospecto: { value: 'anuncio_pagado' } } });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.source).toBe('anuncio_pagado');
+            expect(mapped!.sourceDetail).toBe('anuncio_pagado');
+        });
+
+        it('soporta compatibilidad retroactiva con como_se_entero si origen_prospecto no viene', () => {
             const payload = buildPayload({ dataCollectionResults: { como_se_entero: { value: 'Referido' } } });
             const mapped = mapElevenLabsPayload(payload);
             expect(mapped!.source).toBe('referido');
+            expect(mapped!.sourceDetail).toBe('Referido');
         });
 
-        it('un texto que NO encaja en ninguna de las 9 categorías produce "desconocido", nunca la categoría más cercana', () => {
+        it('un texto que NO encaja en ninguna categoría produce "desconocido", conservando el texto crudo en sourceDetail', () => {
             const payload = buildPayload({
-                dataCollectionResults: { como_se_entero: { value: 'me lo dijo un pajarito, no recuerdo bien' } },
+                dataCollectionResults: { origen_prospecto: { value: 'me lo dijo un pajarito, no recuerdo bien' } },
             });
             const mapped = mapElevenLabsPayload(payload);
             expect(mapped!.source).toBe('desconocido');
-            // sourceDetail conserva el texto crudo aunque source haya caído a desconocido.
             expect(mapped!.sourceDetail).toBe('me lo dijo un pajarito, no recuerdo bien');
         });
 
