@@ -12,5 +12,8 @@ declare module 'fastify' {
         tenantId?: string;
         features?: Set<string>;
         rawBody?: string;
+        permissions?: Set<string>;
+        authUser?: { userId: string; jwt: string };
+        platformAdminUserId?: string;
     }
 }

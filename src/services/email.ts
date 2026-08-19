@@ -660,3 +660,83 @@ export async function sendPendingOutcomeReminderEmail(params: SendPendingOutcome
     }
 }
 
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+export interface SendOrganizationInvitationEmailParams {
+    to: string;
+    organizationName: string;
+    role: string;
+    acceptUrl: string | null;
+}
+
+/**
+ * Correo de invitación a una organización (RBAC, docs/tasks/RBAC-permisos.md
+ * FASE C). A diferencia del resto de este archivo, NO usa el sistema de
+ * theming de marca blanca (email-theme.ts/email-renderer.ts) — ese sistema
+ * es para que la PyME se comunique con SU cliente final; esta es
+ * correspondencia operativa de la plataforma Datagol hacia un miembro de
+ * equipo, así que usa el remitente/plantilla fijos de la plataforma
+ * (getFromEmail()), plantilla HTML simple propia.
+ *
+ * El token NUNCA se pasa a esta función — solo `acceptUrl`, ya construido
+ * por el llamador con el token en claro (nunca persistido en claro en
+ * ningún otro lugar). `acceptUrl` es `null` cuando `FRONTEND_APP_URL` no
+ * está configurada — el correo lo indica en vez de inventar un dominio.
+ */
+export async function sendOrganizationInvitationEmail(params: SendOrganizationInvitationEmailParams) {
+    const resend = getResendClient();
+    if (!resend) {
+        logger.warn('[Email] Omitiendo correo de invitación por falta de RESEND_API_KEY.');
+        return null;
+    }
+
+    const { to, organizationName, role, acceptUrl } = params;
+    const safeOrgName = escapeHtml(organizationName);
+    const safeRole = escapeHtml(role);
+
+    const html = `
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+            <h2>Te invitaron a ${safeOrgName}</h2>
+            <p>Te invitaron a unirte a <strong>${safeOrgName}</strong> en Datagol con el rol <strong>${safeRole}</strong>.</p>
+            ${
+                acceptUrl
+                    ? `<p><a href="${acceptUrl}" style="display:inline-block;padding:10px 20px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Aceptar invitación</a></p>`
+                    : '<p>Pide a quien te invitó el enlace de aceptación — no se pudo generar automáticamente.</p>'
+            }
+            <p style="color:#6b7280;font-size:12px;">Este enlace vence en 7 días y solo puede usarse una vez. Si no esperabas esta invitación, puedes ignorar este correo.</p>
+        </div>
+    `.trim();
+    const text = acceptUrl
+        ? `Te invitaron a unirte a ${organizationName} en Datagol con el rol ${role}. Acepta aquí: ${acceptUrl} (vence en 7 días).`
+        : `Te invitaron a unirte a ${organizationName} en Datagol con el rol ${role}. Pide a quien te invitó el enlace de aceptación.`;
+
+    try {
+        const response = await resend.emails.send({
+            from: getFromEmail(),
+            to,
+            subject: `Te invitaron a ${organizationName} en Datagol`,
+            html,
+            text,
+        });
+
+        if (response.error) {
+            logger.error({ error: response.error, to }, '[Email] Resend respondió con error al enviar invitación');
+            return null;
+        }
+
+        logger.info({ to, emailId: response.data?.id }, '[Email] Correo de invitación enviado');
+        return response;
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, msg }, '[Email] Error al enviar el correo de invitación con Resend');
+        return null;
+    }
+}
+

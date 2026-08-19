@@ -1,6 +1,10 @@
-import { FastifyPluginAsync } from 'fastify';
+import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { insertKnowledgeChunk, searchKnowledgeBase } from '../services/rag.js';
+import { requireAuthenticatedUser } from '../lib/organization-auth.js';
+import { isPlatformAdmin } from '../lib/platform-admin.js';
+import { getPermissionsForUser } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 
 interface UpdateOrganizationBody {
     name?: string;
@@ -37,6 +41,41 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     // eliminado aquí — colisionaba con el POST /api/organizations nuevo de
     // routes/organization-onboarding.ts (mismo método+ruta, Fastify no
     // permite duplicados). Ver docs/tasks/onboarding-endpoints.md.
+
+    /**
+     * RBAC B.3 (docs/tasks/RBAC-permisos.md): este archivo era el único de
+     * todo el repo sin NINGÚN chequeo de autenticación — cualquier visitante
+     * sin sesión podía leer/escribir el prompt, la base de conocimiento y el
+     * perfil de cualquier organización. `configure_agent` es el permiso
+     * B.5 explícito para "ajustes de agente, prompt, base de conocimiento".
+     */
+    async function authorizeConfigureAgent(
+        request: FastifyRequest<{ Params: OrganizationParams }>,
+        reply: FastifyReply
+    ): Promise<{ userId: string; jwt: string; organizationId: string } | null> {
+        const { id: organizationId } = request.params;
+        if (!organizationId || typeof organizationId !== 'string' || organizationId.trim() === '') {
+            reply.status(400).send({ status: 'error', message: 'El parámetro de ruta "id" es obligatorio.' });
+            return null;
+        }
+
+        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        if (!auth) return null;
+
+        const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.CONFIGURE_AGENT)) {
+            reply.status(403).send({
+                status: 'error',
+                error: 'Forbidden',
+                code: 'PERMISSION_DENIED',
+                message: `No tiene el permiso "${PERMISSION_KEYS.CONFIGURE_AGENT}" en esta organización, o no pertenece a ella.`,
+                requiredPermission: PERMISSION_KEYS.CONFIGURE_AGENT,
+            });
+            return null;
+        }
+
+        return { userId: auth.userId, jwt: auth.jwt, organizationId };
+    }
 
     /**
      * GET /api/organizations/:id/public-profile
@@ -97,6 +136,8 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.put<{ Params: OrganizationParams; Body: UpdateOrganizationBody }>(
         '/api/organizations/:id',
         async (request, reply) => {
+            const ctx = await authorizeConfigureAgent(request, reply);
+            if (!ctx) return;
             try {
                 const { id } = request.params;
                 const {
@@ -210,9 +251,12 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
 
     /**
      * GET /api/organizations
-     * Obtiene la lista de organizaciones registradas.
+     * Obtiene la lista de organizaciones registradas. Lista TODAS las
+     * organizaciones del sistema — no hay "permiso por organización" que
+     * tenga sentido aquí, así que se reserva a isPlatformAdmin (mismo
+     * criterio que routes/admin/**), no a requirePermission.
      */
-    fastify.get('/api/organizations', async (request, reply) => {
+    fastify.get('/api/organizations', { preHandler: isPlatformAdmin }, async (request, reply) => {
         try {
             const { data, error } = await supabaseAdmin
                 .from('organizations')
@@ -245,6 +289,8 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post<{ Params: OrganizationParams; Body: AddKnowledgeBody }>(
         '/api/organizations/:id/knowledge',
         async (request, reply) => {
+            const ctx = await authorizeConfigureAgent(request, reply);
+            if (!ctx) return;
             try {
                 const { id } = request.params;
                 const { title, content, metadata } = request.body || {};
@@ -293,6 +339,8 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post<{ Params: OrganizationParams; Body: SearchKnowledgeBody }>(
         '/api/organizations/:id/knowledge/search',
         async (request, reply) => {
+            const ctx = await authorizeConfigureAgent(request, reply);
+            if (!ctx) return;
             try {
                 const { id } = request.params;
                 const { query, limit = 5 } = request.body || {};
@@ -346,6 +394,8 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.patch<{ Params: OrganizationParams; Body: any }>(
         '/api/organizations/:id/agent',
         async (request, reply) => {
+            const ctx = await authorizeConfigureAgent(request, reply);
+            if (!ctx) return;
             try {
                 const { id } = request.params;
                 const body = (request.body || {}) as any;
@@ -434,6 +484,8 @@ export const organizationRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.get<{ Params: OrganizationParams }>(
         '/api/organizations/:id/agent',
         async (request, reply) => {
+            const ctx = await authorizeConfigureAgent(request, reply);
+            if (!ctx) return;
             try {
                 const { id } = request.params;
 

@@ -5,6 +5,7 @@ import supabasePlugin from './plugins/supabase.js';
 import pgBossPlugin from './plugins/pg-boss.js';
 import entitlementsPlugin from './plugins/entitlements.js';
 import adminFeaturesRoutes from './routes/admin/features.js';
+import adminPermissionsRoutes from './routes/admin/permissions.js';
 import adminMeteringRoutes from './routes/admin/metering.js';
 import adminOrganizationsRoutes from './routes/admin/organizations.js';
 import adminPlansRoutes from './routes/admin/plans.js';
@@ -13,6 +14,7 @@ import adminReportsRoutes from './routes/admin/reports.js';
 import plansRoutes from './routes/plans.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
+import organizationMembersRoutes from './routes/organization-members.js';
 import contactsRoutes from './routes/contacts.js';
 import contactsCrmRoutes from './routes/contacts-crm.js';
 import organizationMetricsRoutes from './routes/organization-metrics.js';
@@ -168,6 +170,8 @@ export async function buildApp() {
 
     // 1.6 Ruta de administración de features/entitlements
     await app.register(adminFeaturesRoutes);
+    // Consola de permisos configurables (RBAC, docs/tasks/RBAC-permisos.md FASE D)
+    await app.register(adminPermissionsRoutes);
     // Fase 3.3 — Conciliación de metering
     await app.register(adminMeteringRoutes);
     // Suspensión de organización completa y kill switch global
@@ -185,6 +189,8 @@ export async function buildApp() {
     // Onboarding de organización (self-service DFY) — reemplaza el legacy
     // POST /api/organizations/onboard eliminado de organizationRoutes.
     await app.register(organizationOnboardingRoutes);
+    // Invitaciones y gestión de miembros (RBAC, docs/tasks/RBAC-permisos.md FASE C)
+    await app.register(organizationMembersRoutes);
     // Borrado ARCO por contacto (derecho de cancelación/oposición LFPDPPP).
     await app.register(contactsRoutes);
     // CRM de contactos: pipeline, direcciones, notas, merge, kanban (docs/tasks/opus.md Fase D)

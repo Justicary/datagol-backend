@@ -4,6 +4,8 @@ import supabasePlugin from '../src/plugins/supabase.js';
 import organizationReportsRoutes from '../src/routes/organization-reports.js';
 import adminReportsRoutes from '../src/routes/admin/reports.js';
 import * as orgAuth from '../src/lib/organization-auth.js';
+import * as permissionService from '../src/services/permission-service.js';
+import { PERMISSION_KEYS } from '../src/types/permission-keys.js';
 import * as nlReportsService from '../src/services/reports/nl-reports-service.js';
 import * as unansweredService from '../src/services/reports/unanswered-questions-service.js';
 
@@ -50,9 +52,23 @@ describe('Rutas HTTP de Reportes en Lenguaje Natural', () => {
             expect(res.statusCode).toBe(401);
         });
 
+        it('rechaza con 403 si el usuario no tiene el permiso use_nl_reports (ej. un member)', async () => {
+            vi.spyOn(orgAuth, 'requireAuthenticatedUser').mockResolvedValue({ userId, jwt: 'mock-jwt' });
+            vi.spyOn(permissionService, 'getPermissionsForUser').mockResolvedValue(new Set(['view_contacts']));
+
+            const res = await app.inject({
+                method: 'POST',
+                url: `/api/organizations/${orgId}/reports/ask`,
+                payload: { question: '¿cuántas citas hay?' },
+                headers: { authorization: 'Bearer mock-jwt' },
+            });
+            expect(res.statusCode).toBe(403);
+            expect(res.json().requiredPermission).toBe(PERMISSION_KEYS.USE_NL_REPORTS);
+        });
+
         it('rechaza con 400 si la pregunta está vacía', async () => {
             vi.spyOn(orgAuth, 'requireAuthenticatedUser').mockResolvedValue({ userId, jwt: 'mock-jwt' });
-            vi.spyOn(orgAuth, 'requireOrganizationMembership').mockResolvedValue(true);
+            vi.spyOn(permissionService, 'getPermissionsForUser').mockResolvedValue(new Set([PERMISSION_KEYS.USE_NL_REPORTS]));
 
             const res = await app.inject({
                 method: 'POST',
@@ -66,7 +82,7 @@ describe('Rutas HTTP de Reportes en Lenguaje Natural', () => {
 
         it('responde 200 con el resultado estructurado de askReport', async () => {
             vi.spyOn(orgAuth, 'requireAuthenticatedUser').mockResolvedValue({ userId, jwt: 'mock-jwt' });
-            vi.spyOn(orgAuth, 'requireOrganizationMembership').mockResolvedValue(true);
+            vi.spyOn(permissionService, 'getPermissionsForUser').mockResolvedValue(new Set([PERMISSION_KEYS.USE_NL_REPORTS]));
 
             vi.spyOn(nlReportsService, 'askReport').mockResolvedValue({
                 success: true,
@@ -107,7 +123,7 @@ describe('Rutas HTTP de Reportes en Lenguaje Natural', () => {
 
         it('maneja NaturalReportsError con el código de estado adecuado (ej. 403 o 429)', async () => {
             vi.spyOn(orgAuth, 'requireAuthenticatedUser').mockResolvedValue({ userId, jwt: 'mock-jwt' });
-            vi.spyOn(orgAuth, 'requireOrganizationMembership').mockResolvedValue(true);
+            vi.spyOn(permissionService, 'getPermissionsForUser').mockResolvedValue(new Set([PERMISSION_KEYS.USE_NL_REPORTS]));
 
             vi.spyOn(nlReportsService, 'askReport').mockRejectedValue(
                 new nlReportsService.NaturalReportsError('Límite de tasa excedido.', 429)

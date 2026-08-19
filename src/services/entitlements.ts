@@ -342,6 +342,21 @@ export async function setOrganizationPlan(
         return { success: false, error: `El plan '${planKey}' no existe.` };
     }
 
+    // RBAC FASE C (docs/tasks/RBAC-permisos.md): "bloquear el downgrade de
+    // plan si la organización excede el límite del plan destino. Nunca
+    // expulsar usuarios automáticamente: que el admin decida a quién
+    // quitar." organization_seats_used() (migración 45) cuenta miembros
+    // activos + invitaciones vigentes — el mismo criterio que enforce_seat_limit.
+    const { data: seatsUsed, error: seatsErr } = await supabaseAdmin.rpc('organization_seats_used', {
+        p_org_id: organizationId,
+    });
+    if (!seatsErr && typeof seatsUsed === 'number' && typeof plan.max_users === 'number' && seatsUsed > plan.max_users) {
+        return {
+            success: false,
+            error: `No se puede cambiar al plan '${planKey}': la organización tiene ${seatsUsed} usuarios (incluye invitaciones pendientes) y ese plan solo permite ${plan.max_users}. Desactive usuarios o revoque invitaciones antes de cambiar de plan.`,
+        };
+    }
+
     // Actualizar organización
     const { error: updateErr } = await supabaseAdmin
         .from('organizations')

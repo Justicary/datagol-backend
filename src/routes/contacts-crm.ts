@@ -1,5 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { requireAuthenticatedUser, requireOrganizationMembership, requireOrganizationRole } from '../lib/organization-auth.js';
+import { requireAuthenticatedUser, requireOrganizationRole } from '../lib/organization-auth.js';
+import { getPermissionsForUser, omitProtectedTranscriptFields } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { CONTACT_LIFECYCLE_STAGES, CONTACT_PIPELINE_STAGES, isLifecyclePipelineCoherent } from '../types/contact-enums.js';
 import { APPOINTMENT_STATUSES, type AppointmentStatus } from '../types/appointment-status.js';
 import { isValidStatusTransition, isFutureCompletionAttempt } from '../services/appointment-lifecycle.js';
@@ -19,24 +21,37 @@ import {
 
 const OPTED_OUT_MESSAGE = 'Este contacto se dio de baja (opted_out) — no se pueden realizar acciones sobre él.';
 
+function forbiddenPermission(reply: FastifyReply, key: string) {
+    return reply.status(403).send({
+        success: false,
+        error: 'Forbidden',
+        code: 'PERMISSION_DENIED',
+        message: `No tiene el permiso "${key}" en esta organización, o no pertenece a ella.`,
+        requiredPermission: key,
+    });
+}
+
 /**
- * Endpoints de escritura del CRM de contactos (Fase D, docs/tasks/opus.md).
- * Mismo patrón de auth que routes/contacts.ts: requireAuthenticatedUser +
- * requireOrganizationMembership, `fastify.supabaseUser(jwt)` para las
- * operaciones (respeta RLS) salvo donde se documenta lo contrario.
+ * Endpoints de escritura del CRM de contactos (Fase D, docs/tasks/opus.md;
+ * permisos por RBAC, docs/tasks/RBAC-permisos.md FASE B). Autenticación vía
+ * `requireAuthenticatedUser` + `getPermissionsForUser()`
+ * (services/permission-service.ts), `fastify.supabaseUser(jwt)` para las
+ * operaciones (respeta además la RLS por permiso de la migración 45) salvo
+ * donde se documenta lo contrario.
  */
 export async function contactsCrmRoutes(fastify: FastifyInstance) {
     /**
-     * Helper interno: autentica, verifica pertenencia, valida que el
-     * contactId de la URL pertenezca a la organización, y bloquea si el
-     * contacto está opted_out (Fase E: "opted_out bloquea toda acción de
+     * Helper interno: autentica, verifica el permiso `edit_contacts`, valida
+     * que el contactId de la URL pertenezca a la organización, y bloquea si
+     * el contacto está opted_out (Fase E: "opted_out bloquea toda acción de
      * contacto, verificado en servidor"). Devuelve `null` y ya respondió el
-     * error en ese caso.
+     * error en ese caso. Expone `permissions` para chequeos adicionales
+     * dentro del handler (p. ej. `close_deals` en el cambio de pipeline).
      */
     async function authorizeContactWrite(
         request: FastifyRequest,
         reply: FastifyReply
-    ): Promise<{ userId: string; jwt: string; organizationId: string; contactId: string } | null> {
+    ): Promise<{ userId: string; jwt: string; organizationId: string; contactId: string; permissions: Set<string> } | null> {
         const paramsResult = orgContactParamsSchema.safeParse(request.params);
         if (!paramsResult.success) {
             reply.status(400).send({ success: false, error: 'Los parámetros de ruta "id" y "contactId" deben ser UUID válidos.' });
@@ -47,9 +62,9 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         const auth = await requireAuthenticatedUser(fastify, request, reply);
         if (!auth) return null;
 
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+        const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.EDIT_CONTACTS)) {
+            forbiddenPermission(reply, PERMISSION_KEYS.EDIT_CONTACTS);
             return null;
         }
 
@@ -70,7 +85,29 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
             return null;
         }
 
-        return { userId: auth.userId, jwt: auth.jwt, organizationId, contactId };
+        return { userId: auth.userId, jwt: auth.jwt, organizationId, contactId, permissions };
+    }
+
+    /**
+     * Helper interno para endpoints de solo lectura del CRM: autentica y
+     * exige `view_contacts`. Reemplaza a `requireOrganizationMembership` —
+     * un no-miembro obtiene conjunto de permisos vacío, mismo 403.
+     */
+    async function authorizeContactRead(
+        request: FastifyRequest,
+        reply: FastifyReply,
+        organizationId: string
+    ): Promise<{ userId: string; jwt: string; permissions: Set<string> } | null> {
+        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        if (!auth) return null;
+
+        const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.VIEW_CONTACTS)) {
+            forbiddenPermission(reply, PERMISSION_KEYS.VIEW_CONTACTS);
+            return null;
+        }
+
+        return { userId: auth.userId, jwt: auth.jwt, permissions };
     }
 
     /**
@@ -122,6 +159,15 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
             return reply.status(400).send({ success: false, error: 'Cuerpo de la petición inválido: se requiere "pipelineStage" válido.' });
         }
         const { pipelineStage, wonAt, lostReason, dealValue, dealCurrency, dealNotes } = bodyResult.data;
+
+        // RBAC B.5: marcar "ganado" es la acción de negocio `close_deals`,
+        // distinta de `edit_contacts` (que ya exigió authorizeContactWrite
+        // arriba, y es lo único que la RLS de `contacts_write` verifica —
+        // RLS protege la tabla, no esta acción específica). Un member tiene
+        // edit_contacts pero no close_deals por defecto (role_permissions).
+        if (pipelineStage === CONTACT_PIPELINE_STAGES.GANADO && !ctx.permissions.has(PERMISSION_KEYS.CLOSE_DEALS)) {
+            return forbiddenPermission(reply, PERMISSION_KEYS.CLOSE_DEALS);
+        }
 
         // Valor de cierre (C.1): solo tiene sentido junto con lifecycle_stage
         // 'cliente', que este endpoint solo deriva cuando pipelineStage es
@@ -223,12 +269,8 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         }
         const { id: organizationId, contactId } = paramsResult.data;
 
-        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        const auth = await authorizeContactRead(request, reply, organizationId);
         if (!auth) return;
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
-        }
 
         const scopedClient = fastify.supabaseUser(auth.jwt);
         const { data, error } = await scopedClient
@@ -264,6 +306,14 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         }
         const body = bodyResult.data;
 
+        // RBAC B.3: resolve_contact_address hace UPSERT + dedupe con lógica
+        // que necesita bypass de RLS (compara contra direcciones de otros
+        // contactos para dedupe_key) — por eso usa supabaseAdmin y no
+        // supabaseUser. Es seguro porque authorizeContactWrite() YA exigió
+        // `edit_contacts` explícitamente arriba; el bypass de RLS aquí no es
+        // un agujero, es una decisión consciente con el permiso ya resuelto
+        // en código (AGENTS.md §16: "toda ruta que dependa de una feature/
+        // permiso la verifica del lado del servidor").
         const { data: addressId, error: rpcError } = await fastify.supabaseAdmin.rpc('resolve_contact_address', {
             p_org_id: ctx.organizationId,
             p_contact_id: ctx.contactId,
@@ -415,9 +465,9 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
 
         const auth = await requireAuthenticatedUser(fastify, request, reply);
         if (!auth) return;
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+        const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.MANAGE_PIPELINE)) {
+            return forbiddenPermission(reply, PERMISSION_KEYS.MANAGE_PIPELINE);
         }
 
         const bodyResult = appointmentStatusUpdateBodySchema.safeParse(request.body);
@@ -501,12 +551,8 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         }
         const { id: organizationId } = paramsResult.data;
 
-        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        const auth = await authorizeContactRead(request, reply, organizationId);
         if (!auth) return;
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
-        }
 
         const scopedClient = fastify.supabaseUser(auth.jwt);
         const { data, error } = await scopedClient.from('v_duplicate_contact_candidates').select('*').eq('organization_id', organizationId);
@@ -593,12 +639,8 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         }
         const { id: organizationId } = paramsResult.data;
 
-        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        const auth = await authorizeContactRead(request, reply, organizationId);
         if (!auth) return;
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
-        }
 
         const scopedClient = fastify.supabaseUser(auth.jwt);
         const { data, error } = await scopedClient
@@ -619,6 +661,13 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
      * GET /api/organizations/:id/contacts/:contactId
      * Detalle con timeline unificado: leads (conversaciones), citas, notas y
      * direcciones, ordenado por fecha descendente.
+     *
+     * RBAC B.4 (docs/tasks/RBAC-permisos.md): RLS protege filas, no
+     * columnas — `transcript`/`summary` de `call_logs` se unen aquí por
+     * `conversation_id` y se OMITEN (no se anulan) de cada entrada
+     * `type: 'conversation'` cuando el usuario no tiene `view_transcripts`.
+     * Es la prueba central de la tarea: un viewer que consulta esta ruta no
+     * debe recibir la clave `transcript` en absoluto.
      */
     fastify.get('/api/organizations/:id/contacts/:contactId', async (request, reply) => {
         const paramsResult = orgContactParamsSchema.safeParse(request.params);
@@ -627,12 +676,8 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         }
         const { id: organizationId, contactId } = paramsResult.data;
 
-        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        const auth = await authorizeContactRead(request, reply, organizationId);
         if (!auth) return;
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
-        }
 
         const scopedClient = fastify.supabaseUser(auth.jwt);
         const { data: contact, error: contactError } = await scopedClient
@@ -649,7 +694,7 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         const [leadsResult, appointmentsResult, notesResult, addressesResult] = await Promise.all([
             scopedClient
                 .from('leads')
-                .select('id, channel, conversation_id, inquiry_reason, temperature, booked_appointment, created_at')
+                .select('id, channel, conversation_id, call_log_id, inquiry_reason, temperature, booked_appointment, created_at')
                 .eq('organization_id', organizationId)
                 .eq('contact_id', contactId)
                 .order('created_at', { ascending: false }),
@@ -674,8 +719,33 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
                 .order('is_primary', { ascending: false }),
         ]);
 
+        // leads.call_log_id (FK) es el vínculo real hacia call_logs — a
+        // diferencia de leads.conversation_id (text libre, del proveedor de
+        // voz), call_log_id sí referencia call_logs.id directamente.
+        const callLogIds = (leadsResult.data ?? [])
+            .map((lead) => lead.call_log_id)
+            .filter((id): id is string => !!id);
+
+        let callLogsById = new Map<string, { transcript: string | null; summary: string | null }>();
+        if (callLogIds.length > 0) {
+            const { data: callLogs } = await scopedClient
+                .from('call_logs')
+                .select('id, transcript, summary')
+                .eq('organization_id', organizationId)
+                .in('id', callLogIds);
+
+            callLogsById = new Map((callLogs ?? []).map((log) => [log.id as string, { transcript: log.transcript, summary: log.summary }]));
+        }
+
+        const canViewTranscripts = auth.permissions.has(PERMISSION_KEYS.VIEW_TRANSCRIPTS);
+        const leadsWithCallData = (leadsResult.data ?? []).map((lead) => {
+            const callLog = lead.call_log_id ? callLogsById.get(lead.call_log_id) : undefined;
+            const merged = { ...lead, transcript: callLog?.transcript ?? null, summary: callLog?.summary ?? null };
+            return omitProtectedTranscriptFields(merged, canViewTranscripts);
+        });
+
         const timeline = [
-            ...(leadsResult.data ?? []).map((lead) => ({ type: 'conversation' as const, occurredAt: lead.created_at, data: lead })),
+            ...leadsWithCallData.map((lead) => ({ type: 'conversation' as const, occurredAt: lead.created_at, data: lead })),
             ...(appointmentsResult.data ?? []).map((appt) => ({ type: 'appointment' as const, occurredAt: appt.created_at, data: appt })),
             ...(notesResult.data ?? []).map((note) => ({ type: 'note' as const, occurredAt: note.created_at, data: note })),
         ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());

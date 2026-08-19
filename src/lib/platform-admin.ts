@@ -51,4 +51,39 @@ export async function isPlatformAdmin(request: FastifyRequest, reply: FastifyRep
             message: 'Acceso denegado. Se requieren privilegios de Administrador de Plataforma.',
         });
     }
+
+    // Expuesto para que rutas admin/** que distinguen nivel (ej.
+    // routes/admin/permissions.ts, RBAC FASE D: "el nivel support es de
+    // solo lectura") puedan consultar platform_admins.level sin volver a
+    // autenticar. No se resuelve el nivel aquí mismo para no acoplar este
+    // guard genérico a una tabla que la mayoría de rutas admin/** no usa.
+    request.platformAdminUserId = user.id;
+}
+
+/**
+ * Restringe una ruta admin/** de escritura al nivel `admin` de
+ * `platform_admins.level` — RBAC FASE D (docs/tasks/RBAC-permisos.md):
+ * "Solo is_platform_admin(). El nivel support es de solo lectura."
+ * Se usa DESPUÉS de `isPlatformAdmin` (necesita `request.platformAdminUserId`).
+ *
+ * Sin fila en `platform_admins` para el usuario (ej. un superadmin marcado
+ * solo por `app_metadata.is_platform_admin`, o el bypass local
+ * `x-platform-admin: true` sin `platformAdminUserId`) se trata como acceso
+ * completo por defecto — la tabla `platform_admins.level` es
+ * específicamente para RESTRINGIR a quienes se marcan `support`, no un
+ * requisito para todo superadmin existente.
+ */
+export async function requireFullPlatformAdmin(request: FastifyRequest, reply: FastifyReply) {
+    const userId = request.platformAdminUserId;
+    if (!userId) return;
+
+    const { data } = await supabaseAdmin.from('platform_admins').select('level').eq('user_id', userId).maybeSingle();
+
+    if (data?.level === 'support') {
+        return reply.status(403).send({
+            statusCode: 403,
+            error: 'Forbidden',
+            message: 'Los administradores de nivel "support" tienen acceso de solo lectura en esta consola. Esta acción requiere nivel "admin".',
+        });
+    }
 }

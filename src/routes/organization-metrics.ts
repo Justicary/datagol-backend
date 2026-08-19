@@ -1,10 +1,22 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { requireAuthenticatedUser, requireOrganizationMembership } from '../lib/organization-auth.js';
+import { requireAuthenticatedUser } from '../lib/organization-auth.js';
+import { getPermissionsForUser } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import {
     organizationMetricsParamsSchema,
     organizationMetricsQuerySchema,
     organizationMetricsResponseSchema,
 } from '../schemas/organization-metrics.js';
+
+function forbiddenPermission(reply: FastifyReply, key: string) {
+    return reply.status(403).send({
+        success: false,
+        error: 'Forbidden',
+        code: 'PERMISSION_DENIED',
+        message: `No tiene el permiso "${key}" en esta organización, o no pertenece a ella.`,
+        requiredPermission: key,
+    });
+}
 
 /**
  * GET /api/organizations/:id/metrics?from=&to=
@@ -17,7 +29,8 @@ import {
 async function authorizeForOrganization(
     fastify: FastifyInstance,
     request: FastifyRequest,
-    reply: FastifyReply
+    reply: FastifyReply,
+    requiredPermission: string = PERMISSION_KEYS.VIEW_CONTACTS
 ): Promise<{ jwt: string; organizationId: string } | null> {
     const paramsResult = organizationMetricsParamsSchema.safeParse(request.params);
     if (!paramsResult.success) {
@@ -29,9 +42,9 @@ async function authorizeForOrganization(
     const auth = await requireAuthenticatedUser(fastify, request, reply);
     if (!auth) return null;
 
-    const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-    if (!isMember) {
-        reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+    const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+    if (!permissions.has(requiredPermission)) {
+        forbiddenPermission(reply, requiredPermission);
         return null;
     }
 
@@ -67,11 +80,15 @@ export async function organizationMetricsRoutes(fastify: FastifyInstance) {
         const auth = await requireAuthenticatedUser(fastify, request, reply);
         if (!auth) return;
 
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+        const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.VIEW_CONTACTS)) {
+            return forbiddenPermission(reply, PERMISSION_KEYS.VIEW_CONTACTS);
         }
 
+        // RBAC B.3: get_organization_channel_metrics se llama con
+        // supabaseAdmin (bypass de RLS) porque agrega sobre leads sin pasar
+        // por PostgREST fila por fila — el permiso ya se verificó
+        // explícitamente arriba, antes de este bypass.
         const { data, error } = await fastify.supabaseAdmin.rpc('get_organization_channel_metrics', {
             p_organization_id: organizationId,
             p_from: periodFrom.toISOString(),
@@ -96,7 +113,7 @@ export async function organizationMetricsRoutes(fastify: FastifyInstance) {
      * esconder ese contexto.
      */
     fastify.get('/api/organizations/:id/business-results', async (request, reply) => {
-        const ctx = await authorizeForOrganization(fastify, request, reply);
+        const ctx = await authorizeForOrganization(fastify, request, reply, PERMISSION_KEYS.VIEW_REVENUE);
         if (!ctx) return;
 
         const scopedClient = fastify.supabaseUser(ctx.jwt);

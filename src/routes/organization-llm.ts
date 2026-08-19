@@ -1,5 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { requireAuthenticatedUser, requireOrganizationMembership } from '../lib/organization-auth.js';
+import { requireAuthenticatedUser } from '../lib/organization-auth.js';
+import { getPermissionsForUser } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { llmConfigBodySchema, llmConfigResponseSchema } from '../schemas/llm.js';
 import { organizationIdParamsSchema } from '../schemas/organization-onboarding.js';
 import { getLlmConfig, updateLlmConfig, validateLlmCredentials } from '../services/llm-config-service.js';
@@ -10,6 +12,10 @@ import { getLlmConfig, updateLlmConfig, validateLlmCredentials } from '../servic
  * `POST /api/organizations/:id/credentials` (provider: 'llm') — aquí solo
  * vive lo específico de LLM: qué proveedor/modelo usar, y la validación en
  * vivo contra el proveedor.
+ *
+ * RBAC B.5 (docs/tasks/RBAC-permisos.md): `manage_credentials` cubre todo
+ * `/llm` — incluido el GET, porque revela qué proveedor/modelo BYOK usa la
+ * organización.
  */
 export async function organizationLlmRoutes(fastify: FastifyInstance) {
     async function authorizeForOrganization(
@@ -25,9 +31,15 @@ export async function organizationLlmRoutes(fastify: FastifyInstance) {
         const auth = await requireAuthenticatedUser(fastify, request, reply);
         if (!auth) return null;
 
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, paramsResult.data.id);
-        if (!isMember) {
-            reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+        const permissions = await getPermissionsForUser(paramsResult.data.id, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.MANAGE_CREDENTIALS)) {
+            reply.status(403).send({
+                success: false,
+                error: 'Forbidden',
+                code: 'PERMISSION_DENIED',
+                message: `No tiene el permiso "${PERMISSION_KEYS.MANAGE_CREDENTIALS}" en esta organización, o no pertenece a ella.`,
+                requiredPermission: PERMISSION_KEYS.MANAGE_CREDENTIALS,
+            });
             return null;
         }
 

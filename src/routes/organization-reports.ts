@@ -1,5 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireAuthenticatedUser, requireOrganizationMembership, requireOrganizationRole } from '../lib/organization-auth.js';
+import { getPermissionsForUser } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { organizationIdParamsSchema } from '../schemas/organization-onboarding.js';
 import {
     reportsListQuerySchema,
@@ -53,6 +55,39 @@ export async function organizationReportsRoutes(fastify: FastifyInstance) {
         }
 
         return ctx;
+    }
+
+    /**
+     * RBAC B.5 (docs/tasks/RBAC-permisos.md): `use_nl_reports` — /reports/ask
+     * consume la llave de IA de la organización, distinto de la membresía
+     * simple que basta para listar los reportes semanales ya generados.
+     */
+    async function authorizeNlReports(
+        request: FastifyRequest,
+        reply: FastifyReply
+    ): Promise<{ userId: string; jwt: string; organizationId: string } | null> {
+        const paramsResult = organizationIdParamsSchema.safeParse(request.params);
+        if (!paramsResult.success) {
+            reply.status(400).send({ success: false, error: 'El parámetro de ruta "id" debe ser un UUID válido.' });
+            return null;
+        }
+
+        const auth = await requireAuthenticatedUser(fastify, request, reply);
+        if (!auth) return null;
+
+        const permissions = await getPermissionsForUser(paramsResult.data.id, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.USE_NL_REPORTS)) {
+            reply.status(403).send({
+                success: false,
+                error: 'Forbidden',
+                code: 'PERMISSION_DENIED',
+                message: `No tiene el permiso "${PERMISSION_KEYS.USE_NL_REPORTS}" en esta organización, o no pertenece a ella.`,
+                requiredPermission: PERMISSION_KEYS.USE_NL_REPORTS,
+            });
+            return null;
+        }
+
+        return { userId: auth.userId, jwt: auth.jwt, organizationId: paramsResult.data.id };
     }
 
     /**
@@ -196,7 +231,7 @@ export async function organizationReportsRoutes(fastify: FastifyInstance) {
      * Consulta de reportes en lenguaje natural (docs/tasks/reportes-lenguaje-natural.md)
      */
     fastify.post('/api/organizations/:id/reports/ask', async (request, reply) => {
-        const ctx = await authorizeMember(request, reply);
+        const ctx = await authorizeNlReports(request, reply);
         if (!ctx) return;
 
         const { askReportBodySchema } = await import('../schemas/natural-reports.js');

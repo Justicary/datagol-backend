@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { requireAuthenticatedUser, requireOrganizationMembership } from '../lib/organization-auth.js';
+import { requireAuthenticatedUser } from '../lib/organization-auth.js';
+import { getPermissionsForUser } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { setSecret, listSecretStatus } from '../services/secret-service.js';
 import { SECRET_KEYS, type SecretKey } from '../types/secret-keys.js';
 import { setOrganizationPlan, checkProviderCredentials, getOrganizationFeatures } from '../services/entitlements.js';
@@ -31,13 +33,17 @@ import {
  */
 export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
     /**
-     * Helper interno: valida params `{ id }`, autentica, y verifica
-     * pertenencia. Devuelve `null` y ya envió la respuesta de error si algo
-     * falla — el handler debe hacer `return` inmediatamente en ese caso.
+     * Helper interno: valida params `{ id }`, autentica, y verifica el
+     * permiso pedido (RBAC B.5, docs/tasks/RBAC-permisos.md — por defecto
+     * `configure_agent`, el permiso de menor alcance entre los endpoints de
+     * este archivo que sigue excluyendo member/viewer). Devuelve `null` y ya
+     * envió la respuesta de error si algo falla — el handler debe hacer
+     * `return` inmediatamente en ese caso.
      */
     async function authorizeForOrganization(
         request: FastifyRequest,
-        reply: FastifyReply
+        reply: FastifyReply,
+        requiredPermission: string = PERMISSION_KEYS.CONFIGURE_AGENT
     ): Promise<{ userId: string; jwt: string; organizationId: string } | null> {
         const paramsResult = organizationIdParamsSchema.safeParse(request.params);
         if (!paramsResult.success) {
@@ -48,9 +54,15 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
         const auth = await requireAuthenticatedUser(fastify, request, reply);
         if (!auth) return null;
 
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, paramsResult.data.id);
-        if (!isMember) {
-            reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+        const permissions = await getPermissionsForUser(paramsResult.data.id, auth.userId, auth.jwt);
+        if (!permissions.has(requiredPermission)) {
+            reply.status(403).send({
+                success: false,
+                error: 'Forbidden',
+                code: 'PERMISSION_DENIED',
+                message: `No tiene el permiso "${requiredPermission}" en esta organización, o no pertenece a ella.`,
+                requiredPermission,
+            });
             return null;
         }
 
@@ -213,7 +225,7 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
      * PATCH /api/organizations/:id/plan
      */
     fastify.patch('/api/organizations/:id/plan', async (request, reply) => {
-        const ctx = await authorizeForOrganization(request, reply);
+        const ctx = await authorizeForOrganization(request, reply, PERMISSION_KEYS.CHANGE_PLAN);
         if (!ctx) return;
 
         const bodyResult = planBodySchema.safeParse(request.body);
@@ -231,7 +243,7 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
      * El valor de la credencial NUNCA se registra en logs ni se devuelve.
      */
     fastify.post('/api/organizations/:id/credentials', async (request, reply) => {
-        const ctx = await authorizeForOrganization(request, reply);
+        const ctx = await authorizeForOrganization(request, reply, PERMISSION_KEYS.MANAGE_CREDENTIALS);
         if (!ctx) return;
 
         const bodyResult = credentialsBodySchema.safeParse(request.body);
@@ -270,7 +282,7 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
      * GET /api/organizations/:id/credentials/status
      */
     fastify.get('/api/organizations/:id/credentials/status', async (request, reply) => {
-        const ctx = await authorizeForOrganization(request, reply);
+        const ctx = await authorizeForOrganization(request, reply, PERMISSION_KEYS.MANAGE_CREDENTIALS);
         if (!ctx) return;
 
         const status = await listSecretStatus(ctx.organizationId);
@@ -284,7 +296,7 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
      * ningún otro endpoint tras esta respuesta.
      */
     fastify.post('/api/organizations/:id/tokens', async (request, reply) => {
-        const ctx = await authorizeForOrganization(request, reply);
+        const ctx = await authorizeForOrganization(request, reply, PERMISSION_KEYS.MANAGE_CREDENTIALS);
         if (!ctx) return;
 
         const { data: org, error: readErr } = await fastify.supabaseAdmin

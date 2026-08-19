@@ -10,7 +10,12 @@
     "src/services/secret-service.ts",
     "src/services/entitlements.ts",
     "src/plugins/entitlements.ts",
-    "src/services/webhook-verification.ts"
+    "src/services/webhook-verification.ts",
+    "src/services/permission-service.ts",
+    "src/plugins/permissions.ts",
+    "src/services/invitation-service.ts",
+    "src/routes/organization-members.ts",
+    "src/routes/admin/permissions.ts"
   ],
   "thresholds": {
     "high": 90,

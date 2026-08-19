@@ -1,5 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { requireAuthenticatedUser, requireOrganizationMembership } from '../lib/organization-auth.js';
+import { requireAuthenticatedUser } from '../lib/organization-auth.js';
+import { getPermissionsForUser } from '../services/permission-service.js';
+import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { contactErasureParamsSchema, contactErasureResponseSchema } from '../schemas/contacts.js';
 
 /**
@@ -30,9 +32,15 @@ export async function contactsRoutes(fastify: FastifyInstance) {
         const auth = await requireAuthenticatedUser(fastify, request, reply);
         if (!auth) return;
 
-        const isMember = await requireOrganizationMembership(fastify, auth.jwt, organizationId);
-        if (!isMember) {
-            return reply.status(403).send({ success: false, error: 'No pertenece a esta organización, o no existe.' });
+        const permissions = await getPermissionsForUser(organizationId, auth.userId, auth.jwt);
+        if (!permissions.has(PERMISSION_KEYS.ERASE_CONTACT_DATA)) {
+            return reply.status(403).send({
+                success: false,
+                error: 'Forbidden',
+                code: 'PERMISSION_DENIED',
+                message: `No tiene el permiso "${PERMISSION_KEYS.ERASE_CONTACT_DATA}" en esta organización, o no pertenece a ella.`,
+                requiredPermission: PERMISSION_KEYS.ERASE_CONTACT_DATA,
+            });
         }
 
         const scopedClient = fastify.supabaseUser(auth.jwt);
