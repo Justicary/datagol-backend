@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { availabilityToolRoute } from './availability.js';
 import { bookingToolRoute } from './booking.js';
 import { rescheduleToolRoute } from './reschedule.js';
+import { cancelToolRoute } from './cancel.js';
 import { locationsToolRoute } from './locations.js';
 
 /**
@@ -30,6 +31,7 @@ export async function toolRoutes(fastify: FastifyInstance) {
     await fastify.register(availabilityToolRoute);
     await fastify.register(bookingToolRoute);
     await fastify.register(rescheduleToolRoute);
+    await fastify.register(cancelToolRoute);
     await fastify.register(locationsToolRoute);
 }
 

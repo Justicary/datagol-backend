@@ -58,6 +58,7 @@ Todas las rutas de herramientas comparten el prefijo `/tools/:webhookToken/`:
 | `checkAvailability` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/availability` | Consulta horarios libres en Cal.com para un rango de fechas. |
 | `bookAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/booking` | Agenda la cita en Cal.com y guarda el registro en `appointments`. |
 | `rescheduleAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/reschedule` | Reprograma una cita existente verificando identidad del cliente. |
+| `cancelAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/cancel` | Cancela una cita existente a solicitud del cliente, verificando su identidad. |
 | `getLocations` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/locations` | Consulta la matriz, sucursales y direcciones físicas o de facturación del negocio. |
 
 > **Nota sobre `<WEBHOOK_TOKEN>`**: Es el identificador alfanumérico público de enrutamiento asignado a cada organización en la columna `organizations.webhook_token` (ej. `b05e8d6ec8801a7124c989330104579c9490b3e06bf02a2bdf404d879564a831`). Permite a la API saber a qué cliente pertenece la llamada **antes** de leer el payload.
@@ -119,7 +120,20 @@ ElevenLabs **no** envía firmas HMAC en las Tools; únicamente permite inyectar 
   * `customerPhone` (string, opcional)
   * `newStartTime` (string)
 
-#### D) Configuración de `getLocations`:
+#### D) Configuración de `cancelAppointment`:
+* **Name**: `cancelAppointment`
+* **Description**: `Cancela una cita previamente agendada a solicitud del cliente. Requiere el nombre completo y al menos el correo o teléfono con los que se agendó.`
+* **Method**: `POST`
+* **URL**: `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/cancel`
+* **Headers**:
+  * `x-tool-secret`: `<TOOL_SECRET>`
+* **Request Body Parameters**:
+  * `customerName` (string)
+  * `customerEmail` (string, opcional)
+  * `customerPhone` (string, opcional)
+  * `reason` (string, opcional — motivo de la cancelación)
+
+#### E) Configuración de `getLocations`:
 * **Name**: `getLocations`
 * **Description**: `Consulta la ubicación de la matriz, sucursales o dirección de facturación del negocio para informar al cliente cuando pregunte por direcciones, sedes o dónde estamos ubicados.`
 * **Method**: `POST`

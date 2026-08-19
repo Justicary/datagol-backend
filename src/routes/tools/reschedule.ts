@@ -110,7 +110,12 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
 
             const { error: updateError } = await fastify.supabaseAdmin
                 .from('appointments')
-                .update({ start_time: calResult.startTime, end_time: calResult.endTime ?? fallbackEndTime, status: APPOINTMENT_STATUSES.REPROGRAMADA })
+                .update({
+                    start_time: calResult.startTime,
+                    end_time: calResult.endTime ?? fallbackEndTime,
+                    status: APPOINTMENT_STATUSES.REPROGRAMADA,
+                    cal_booking_id: calResult.calBookingId,
+                })
                 .eq('id', appointment.id);
 
             if (updateError) {

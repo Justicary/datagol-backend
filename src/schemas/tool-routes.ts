@@ -97,6 +97,24 @@ export const rescheduleResponseSchema = z.object({
 });
 export type RescheduleResponse = z.infer<typeof rescheduleResponseSchema>;
 
+export const cancelBodySchema = z.object({
+    customerName: z.string().min(1),
+    // Mismo criterio que rescheduleBodySchema: la cita original pudo haberse
+    // creado solo con teléfono o solo con correo. La ruta exige al menos uno
+    // de los dos para poder ubicarla con seguridad.
+    customerEmail: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
+    customerPhone: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    // Motivo de cancelación proporcionado por el cliente durante la llamada.
+    reason: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+});
+export type CancelBody = z.infer<typeof cancelBodySchema>;
+
+export const cancelResponseSchema = z.object({
+    cancelled: z.boolean(),
+    message: z.string(),
+});
+export type CancelResponse = z.infer<typeof cancelResponseSchema>;
+
 export const locationItemSchema = z.object({
     id: z.string().uuid(),
     label: z.string().nullable(),

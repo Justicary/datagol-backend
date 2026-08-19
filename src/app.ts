@@ -24,7 +24,6 @@ import organizationLlmRoutes from './routes/organization-llm.js';
 import organizationReportsRoutes from './routes/organization-reports.js';
 import organizationCompetitorSitesRoutes from './routes/organization-competitor-sites.js';
 import organizationAttachmentsRoutes from './routes/organization-attachments.js';
-import vapiRoutes from './routes/vapi.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
 import { elevenLabsPostCallWebhookRoutes } from './routes/webhooks/elevenlabs.js';
@@ -205,7 +204,6 @@ export async function buildApp() {
     await app.register(organizationReportsRoutes);
     await app.register(organizationCompetitorSitesRoutes);
     await app.register(organizationAttachmentsRoutes);
-    await app.register(vapiRoutes);
     await app.register(voiceRoutes);
     await app.register(elevenLabsWebhookRoutes);
     await app.register(elevenLabsPostCallWebhookRoutes);
