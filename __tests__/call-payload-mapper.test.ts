@@ -712,4 +712,59 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
             expect(mapped!.sourceDetail).toBeNull();
         });
     });
+
+    // -----------------------------------------------------------------
+    // sentiment (extracción robusta de sentimiento polimórfico)
+    // -----------------------------------------------------------------
+    describe('sentiment (análisis de sentimiento de llamada)', () => {
+        it('mapea call_successful: true a sentiment: "Positivo"', () => {
+            const payload: any = buildPayload({});
+            payload.data.analysis.call_successful = true;
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.sentiment).toBe('Positivo');
+        });
+
+        it('mapea call_successful: "success" a sentiment: "Positivo"', () => {
+            const payload: any = buildPayload({});
+            payload.data.analysis.call_successful = 'success';
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.sentiment).toBe('Positivo');
+        });
+
+        it('mapea call_successful: false a sentiment: "Negativo"', () => {
+            const payload: any = buildPayload({});
+            payload.data.analysis.call_successful = false;
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.sentiment).toBe('Negativo');
+        });
+
+        it('mapea call_successful: "failure" a sentiment: "Negativo"', () => {
+            const payload: any = buildPayload({});
+            payload.data.analysis.call_successful = 'failure';
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.sentiment).toBe('Negativo');
+        });
+
+        it('cuando call_successful es unknown, usa evaluation_criteria_results', () => {
+            const payload: any = buildPayload({});
+            payload.data.analysis.call_successful = 'unknown';
+            payload.data.analysis.evaluation_criteria_results = {
+                criterio: { result: 'success' },
+            };
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.sentiment).toBe('Positivo');
+        });
+
+        it('fallback inteligente: sin call_successful pero con duración >20s y >=2 turnos → "Positivo"', () => {
+            const payload = buildPayload({
+                transcript: [
+                    { role: 'agent', message: 'Hola' },
+                    { role: 'user', message: 'Cotización' },
+                ],
+            });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.sentiment).toBe('Positivo');
+        });
+    });
 });
+

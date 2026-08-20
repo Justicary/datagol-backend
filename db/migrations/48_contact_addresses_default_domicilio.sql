@@ -46,13 +46,13 @@ BEGIN
   LIMIT 1;
 
   IF v_id IS NOT NULL THEN
-    -- Completa solo lo que faltaba. Nunca pisa un dato bueno con uno vacío.
+    -- Completa lo que faltaba y actualiza con las coordenadas geocodificadas más recientes
     UPDATE public.contact_addresses SET
-      city        = coalesce(city, p_city),
-      state       = coalesce(state, p_state),
-      postal_code = coalesce(postal_code, p_postal_code),
-      latitude    = coalesce(latitude, p_lat),
-      longitude   = coalesce(longitude, p_lng),
+      city        = coalesce(p_city, city),
+      state       = coalesce(p_state, state),
+      postal_code = coalesce(p_postal_code, postal_code),
+      latitude    = coalesce(p_lat, latitude),
+      longitude   = coalesce(p_lng, longitude),
       updated_at  = now()
     WHERE id = v_id;
     RETURN v_id;

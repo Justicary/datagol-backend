@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { normalizePhoneE164 } from './phone-normalization.js';
 import { isLeadTemperature, type LeadTemperature, LEAD_CHANNELS, type LeadChannel } from '../types/lead-enums.js';
 import { isLeadSource, LEAD_SOURCES, type LeadSource } from '../types/lead-source.js';
+import { extractCallSentiment, type CallSentiment } from './call-sentiment.js';
 
 /**
  * Esquema mínimo del webhook `post_call_transcription` de ElevenLabs.
@@ -33,8 +34,22 @@ const elevenLabsWebhookSchema = z.object({
         analysis: z
             .object({
                 transcript_summary: z.string().optional(),
+                call_successful: z.union([z.boolean(), z.string()]).nullable().optional(),
+                evaluation_criteria_results: z
+                    .record(
+                        z.string(),
+                        z.union([
+                            z.object({ result: z.union([z.string(), z.boolean()]).nullable().optional() }).passthrough(),
+                            z.string(),
+                            z.boolean(),
+                            z.null(),
+                        ])
+                    )
+                    .nullable()
+                    .optional(),
                 data_collection_results: z.record(z.string(), dataCollectionEntrySchema).optional(),
             })
+            .passthrough()
             .optional(),
         metadata: z
             .object({
@@ -174,6 +189,7 @@ export interface MappedCallData {
      */
     transcriptTurns: TranscriptTurn[];
     summary: string | null;
+    sentiment: CallSentiment;
     durationSeconds: number;
     callerPhoneE164: string | null;
     contactPhoneRaw: string | null;
@@ -482,6 +498,11 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
     const whatsappMessageQuantity = data.metadata?.platform_usage?.category_usage?.text_message?.quantity ?? null;
     const channel = deriveChannel(data.metadata?.conversation_initiation_source, isTextChannel);
     const llmTokenUsage = extractLlmTokenUsage(data.metadata?.charging?.llm_usage?.irreversible_generation?.model_usage);
+    const sentiment = extractCallSentiment({
+        analysis: data.analysis,
+        transcript: data.transcript,
+        durationSeconds: data.metadata?.call_duration_secs,
+    });
 
     return {
         conversationId: data.conversation_id,
@@ -490,6 +511,7 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         transcript,
         transcriptTurns,
         summary: data.analysis?.transcript_summary || null,
+        sentiment,
         durationSeconds: data.metadata?.call_duration_secs ?? 0,
         callerPhoneE164: normalizedPhone?.success ? normalizedPhone.phoneE164 : null,
         contactPhoneRaw,
@@ -519,3 +541,5 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         llmTokenUsage,
     };
 }
+
+export { extractCallSentiment, type CallSentiment };

@@ -111,6 +111,7 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         p_temperature: mapped.temperature,
         p_source: mapped.source,
         p_source_detail: mapped.sourceDetail,
+        p_sentiment: mapped.sentiment,
         p_booked_appointment: mapped.bookedAppointment,
         p_needs_followup: mapped.needsFollowup,
         p_followup_notes: mapped.followupNotes,

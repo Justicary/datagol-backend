@@ -789,3 +789,88 @@ describe('Migración 21 — call_logs.channel y deduplicación de contacto por c
         expect(contact?.email).toBe(sharedEmail); // el correo capturado primero no se sobreescribe
     });
 });
+
+describe('49 — Persistencia de sentiment en call_logs vía process_call_completed', () => {
+    const sentimentConvId = `rpc-sentiment-test:${Date.now()}`;
+    const sentimentPhone = `+521650009${Math.floor(Math.random() * 9000 + 1000)}`;
+
+    afterAll(async () => {
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', sentimentConvId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', sentimentConvId);
+        await supabaseAdmin.from('contacts').delete().eq('phone_e164', sentimentPhone);
+    });
+
+    function callRpc49(overrides: Record<string, unknown> = {}) {
+        return supabaseAdmin.rpc('process_call_completed', {
+            p_organization_id: REAL_ORG_ID,
+            p_conversation_id: sentimentConvId,
+            p_provider_call_id: sentimentConvId,
+            p_caller_phone_e164: sentimentPhone,
+            p_full_name: null,
+            p_email: null,
+            p_business_name: null,
+            p_business_sector: null,
+            p_contact_phone_raw: null,
+            p_inquiry_reason: null,
+            p_temperature: null,
+            p_booked_appointment: false,
+            p_needs_followup: false,
+            p_followup_notes: null,
+            p_call_volume: null,
+            p_transcript: 'Cliente: Hola.\nAgente: ¿En qué te ayudo?',
+            p_summary: 'Llamada de prueba.',
+            p_duration_seconds: 42,
+            ...overrides,
+        });
+    }
+
+    it('persiste sentiment = "Positivo" en call_logs al pasar p_sentiment', async () => {
+        const { data, error } = await callRpc49({
+            p_sentiment: 'Positivo',
+            p_full_name: 'Prospecto Sentimiento',
+        });
+
+        expect(error).toBeNull();
+        expect(data.call_log_id).toBeTruthy();
+
+        const { data: callLog } = await supabaseAdmin
+            .from('call_logs')
+            .select('sentiment')
+            .eq('id', data.call_log_id)
+            .single();
+
+        expect(callLog?.sentiment).toBe('Positivo');
+    });
+
+    it('actualiza sentiment en ON CONFLICT si una llamada se sembró sin sentimiento y luego llega con sentimiento', async () => {
+        const conflictConvId = `rpc-sentiment-conflict:${Date.now()}`;
+
+        // 1. Siembra inicial sin sentimiento
+        await callRpc49({
+            p_conversation_id: conflictConvId,
+            p_provider_call_id: conflictConvId,
+            p_sentiment: null,
+        });
+
+        // 2. Webhook post-call llega con sentimiento "Negativo"
+        const { data: second, error } = await callRpc49({
+            p_conversation_id: conflictConvId,
+            p_provider_call_id: conflictConvId,
+            p_sentiment: 'Negativo',
+        });
+
+        expect(error).toBeNull();
+        const { data: callLog } = await supabaseAdmin
+            .from('call_logs')
+            .select('sentiment')
+            .eq('id', second.call_log_id)
+            .single();
+
+        expect(callLog?.sentiment).toBe('Negativo');
+
+        await supabaseAdmin.from('leads').delete().eq('conversation_id', conflictConvId);
+        await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', conflictConvId);
+    });
+});
+
+
