@@ -6,14 +6,16 @@ import {
 } from '../lib/organization-auth.js';
 import {
     orgIdParamSchema,
+    orgSendParamSchema,
     organizationThankYouUpdateSchema,
     thankYouTestBodySchema,
     thankYouLogQuerySchema,
+    thankYouResendBodySchema,
 } from '../schemas/thank-you.js';
 import { getActiveOrganizationAttachment, generateAttachmentSignedUrl, downloadAttachmentBuffer } from '../services/attachment-service.js';
 import { sendThankYouEmail } from '../services/email.js';
 import { sendThankYouWhatsApp } from '../services/thank-you-whatsapp.js';
-import { THANK_YOU_CHANNELS, type OrganizationThankYouSettings } from '../types/thank-you.js';
+import { THANK_YOU_CHANNELS, THANK_YOU_STATUSES, type OrganizationThankYouSettings } from '../types/thank-you.js';
 
 // Control de tasa en memoria para envíos de prueba de agradecimiento: 5 envíos por cada 15 min
 const TEST_THANK_YOU_RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -394,6 +396,270 @@ export async function organizationThankYouRoutes(fastify: FastifyInstance) {
                 totalPages,
             },
         });
+    });
+
+    /**
+     * DELETE /api/organizations/:id/thank-you/log/:sendId
+     * Elimina discrecionalmente un registro de omisión o fallo del historial.
+     * REGLA ESTRICTA: Únicamente registros con estado 'omitido' o 'fallido' pueden eliminarse.
+     */
+    fastify.delete('/api/organizations/:id/thank-you/log/:sendId', async (request: FastifyRequest<{ Params: { id: string; sendId: string } }>, reply) => {
+        const paramsResult = orgSendParamSchema.safeParse(request.params);
+        if (!paramsResult.success) {
+            return reply.status(400).send({
+                success: false,
+                error: 'Parámetros de ruta inválidos.',
+                details: paramsResult.error.format(),
+            });
+        }
+
+        const ctx = await authorizeAdmin(request as any, reply);
+        if (!ctx) return;
+
+        const { sendId } = paramsResult.data;
+
+        const { data: record, error: fetchError } = await fastify.supabaseAdmin
+            .from('thank_you_sends')
+            .select('id, status')
+            .eq('id', sendId)
+            .eq('organization_id', ctx.organizationId)
+            .maybeSingle();
+
+        if (fetchError) {
+            request.log.error({ fetchError, organizationId: ctx.organizationId, sendId }, 'Error al consultar registro de agradecimiento para eliminación');
+            return reply.status(500).send({ success: false, error: 'No se pudo consultar el registro de auditoría.' });
+        }
+
+        if (!record) {
+            return reply.status(404).send({ success: false, error: 'Registro de auditoría no encontrado.' });
+        }
+
+        if (record.status !== THANK_YOU_STATUSES.OMITIDO && record.status !== THANK_YOU_STATUSES.FALLIDO) {
+            return reply.status(400).send({
+                success: false,
+                error: 'Solo se pueden eliminar registros con estado "omitido" o "fallido".',
+            });
+        }
+
+        const { error: deleteError } = await fastify.supabaseAdmin
+            .from('thank_you_sends')
+            .delete()
+            .eq('id', sendId)
+            .eq('organization_id', ctx.organizationId);
+
+        if (deleteError) {
+            request.log.error({ deleteError, organizationId: ctx.organizationId, sendId }, 'Error al eliminar registro de auditoría');
+            return reply.status(500).send({ success: false, error: 'No se pudo eliminar el registro de auditoría.' });
+        }
+
+        return reply.send({
+            success: true,
+            message: 'Registro de auditoría eliminado exitosamente.',
+        });
+    });
+
+    /**
+     * POST /api/organizations/:id/thank-you/resend
+     * Reenvío discrecional del correo de bienvenida y su adjunto, omitiendo la ventana de deduplicación.
+     */
+    fastify.post('/api/organizations/:id/thank-you/resend', async (request: FastifyRequest<{ Params: { id: string } }>, reply) => {
+        const ctx = await authorizeAdmin(request as any, reply);
+        if (!ctx) return;
+
+        const bodyResult = thankYouResendBodySchema.safeParse(request.body || {});
+        if (!bodyResult.success) {
+            return reply.status(400).send({
+                success: false,
+                error: 'Cuerpo de la petición inválido.',
+                details: bodyResult.error.format(),
+            });
+        }
+
+        const { sendId, contactId, email: directEmail } = bodyResult.data;
+
+        let targetEmail: string | null = null;
+        let targetContactId: string | null = null;
+        let prospectName = 'Estimado cliente';
+
+        if (sendId) {
+            const { data: sendRow, error: sendErr } = await fastify.supabaseAdmin
+                .from('thank_you_sends')
+                .select('id, contact_id, channel, status, contacts(id, email, full_name, phone_e164)')
+                .eq('id', sendId)
+                .eq('organization_id', ctx.organizationId)
+                .maybeSingle();
+
+            if (sendErr) {
+                request.log.error({ sendErr, organizationId: ctx.organizationId, sendId }, 'Error al consultar thank_you_sends para reenvío');
+                return reply.status(500).send({ success: false, error: 'No se pudo consultar el registro de auditoría.' });
+            }
+
+            if (!sendRow) {
+                return reply.status(404).send({ success: false, error: 'Registro de auditoría no encontrado.' });
+            }
+
+            const contactData = Array.isArray(sendRow.contacts) ? sendRow.contacts[0] : sendRow.contacts;
+            targetContactId = sendRow.contact_id || contactData?.id || null;
+            targetEmail = directEmail || contactData?.email || null;
+            if (contactData?.full_name) {
+                prospectName = contactData.full_name;
+            }
+        } else if (contactId) {
+            const { data: contactRow, error: contactErr } = await fastify.supabaseAdmin
+                .from('contacts')
+                .select('id, email, full_name')
+                .eq('id', contactId)
+                .eq('organization_id', ctx.organizationId)
+                .maybeSingle();
+
+            if (contactErr) {
+                request.log.error({ contactErr, organizationId: ctx.organizationId, contactId }, 'Error al consultar contacto para reenvío');
+                return reply.status(500).send({ success: false, error: 'No se pudo consultar el contacto.' });
+            }
+
+            if (!contactRow) {
+                return reply.status(404).send({ success: false, error: 'Contacto no encontrado en esta organización.' });
+            }
+
+            targetContactId = contactRow.id;
+            targetEmail = directEmail || contactRow.email || null;
+            if (contactRow.full_name) {
+                prospectName = contactRow.full_name;
+            }
+        } else if (directEmail) {
+            targetEmail = directEmail;
+            const { data: contactByEmail } = await fastify.supabaseAdmin
+                .from('contacts')
+                .select('id, email, full_name')
+                .eq('email', directEmail.trim())
+                .eq('organization_id', ctx.organizationId)
+                .maybeSingle();
+
+            if (contactByEmail) {
+                targetContactId = contactByEmail.id;
+                if (contactByEmail.full_name) {
+                    prospectName = contactByEmail.full_name;
+                }
+            } else {
+                // Crear contacto para asociar la auditoría
+                const { data: createdContact } = await fastify.supabaseAdmin
+                    .from('contacts')
+                    .insert({
+                        organization_id: ctx.organizationId,
+                        email: directEmail.trim(),
+                        full_name: 'Prospecto',
+                    })
+                    .select('id')
+                    .single();
+
+                targetContactId = createdContact?.id || null;
+            }
+        }
+
+        if (!targetEmail) {
+            return reply.status(400).send({
+                success: false,
+                error: 'No se encontró una dirección de correo electrónico válida para el reenvío.',
+            });
+        }
+
+        // Obtener configuración de organización y adjuntos
+        const { data: org } = await fastify.supabaseAdmin
+            .from('organizations')
+            .select('name, integration_settings')
+            .eq('id', ctx.organizationId)
+            .single();
+
+        const orgName = org?.name || 'Datagol AI';
+        const settings = (org?.integration_settings as Record<string, any>) || {};
+        const thankYouConfig = settings.thankYou || {};
+
+        const activeAttachment = await getActiveOrganizationAttachment(fastify, ctx.organizationId);
+        let signedUrl: string | null = null;
+        let fileBuffer: Buffer | null = null;
+
+        if (activeAttachment) {
+            signedUrl = await generateAttachmentSignedUrl(fastify, activeAttachment.storage_path, 3600 * 24);
+            fileBuffer = await downloadAttachmentBuffer(fastify, activeAttachment.storage_path);
+        }
+
+        const sendRes = await sendThankYouEmail({
+            organizationId: ctx.organizationId,
+            to: targetEmail,
+            prospectName,
+            businessName: orgName,
+            customSubject: thankYouConfig.emailSubject,
+            customBody: thankYouConfig.emailBody,
+            attachmentBuffer: fileBuffer,
+            attachmentFileName: activeAttachment?.file_name,
+            attachmentDownloadUrl: signedUrl,
+        });
+
+        if (!sendRes) {
+            if (sendId) {
+                await fastify.supabaseAdmin
+                    .from('thank_you_sends')
+                    .update({
+                        status: THANK_YOU_STATUSES.FALLIDO,
+                        skip_reason: 'Fallo al reenviar correo de agradecimiento vía Resend',
+                    })
+                    .eq('id', sendId);
+            }
+            return reply.status(500).send({
+                success: false,
+                error: 'No se pudo enviar el correo de agradecimiento vía Resend.',
+            });
+        }
+
+        const sentTimestamp = new Date().toISOString();
+
+        if (sendId) {
+            await fastify.supabaseAdmin
+                .from('thank_you_sends')
+                .update({
+                    status: THANK_YOU_STATUSES.ENVIADO,
+                    sent_at: sentTimestamp,
+                    skip_reason: null,
+                    attachment_id: activeAttachment?.id ?? null,
+                })
+                .eq('id', sendId);
+
+            return reply.send({
+                success: true,
+                message: `Correo de agradecimiento reenviado exitosamente a ${targetEmail}`,
+                data: {
+                    sendId,
+                    channel: 'email',
+                    recipient: targetEmail,
+                    sentAt: sentTimestamp,
+                },
+            });
+        } else {
+            const { data: newSendRecord } = await fastify.supabaseAdmin
+                .from('thank_you_sends')
+                .insert({
+                    organization_id: ctx.organizationId,
+                    contact_id: targetContactId,
+                    channel: THANK_YOU_CHANNELS.EMAIL,
+                    status: THANK_YOU_STATUSES.ENVIADO,
+                    sent_at: sentTimestamp,
+                    attachment_id: activeAttachment?.id ?? null,
+                    skip_reason: null,
+                })
+                .select('id, sent_at')
+                .single();
+
+            return reply.send({
+                success: true,
+                message: `Correo de agradecimiento enviado exitosamente a ${targetEmail}`,
+                data: {
+                    sendId: newSendRecord?.id,
+                    channel: 'email',
+                    recipient: targetEmail,
+                    sentAt: newSendRecord?.sent_at || sentTimestamp,
+                },
+            });
+        }
     });
 }
 

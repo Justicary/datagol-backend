@@ -313,6 +313,249 @@ describe('Rutas HTTP de Agradecimiento Automático y Adjuntos', () => {
         });
     });
 
+    describe('DELETE /api/organizations/:id/thank-you/log/:sendId', () => {
+        let contactId: string;
+        let omitidoSendId: string;
+        let fallidoSendId: string;
+        let enviadoSendId: string;
+
+        beforeAll(async () => {
+            const { data: contact } = await supabaseAdmin
+                .from('contacts')
+                .insert({
+                    organization_id: orgId,
+                    full_name: 'Contacto Para Delete Log',
+                    email: `delete-log-${crypto.randomUUID()}@example.invalid`,
+                })
+                .select('id')
+                .single();
+            contactId = contact!.id;
+
+            const { data: s1 } = await supabaseAdmin
+                .from('thank_you_sends')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: contactId,
+                    channel: 'email',
+                    status: 'omitido',
+                    skip_reason: 'sin_canal_disponible',
+                })
+                .select('id')
+                .single();
+            omitidoSendId = s1!.id;
+
+            const { data: s2 } = await supabaseAdmin
+                .from('thank_you_sends')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: contactId,
+                    channel: 'email',
+                    status: 'fallido',
+                    skip_reason: 'Fallo de entrega SMTP',
+                })
+                .select('id')
+                .single();
+            fallidoSendId = s2!.id;
+
+            const { data: s3 } = await supabaseAdmin
+                .from('thank_you_sends')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: contactId,
+                    channel: 'email',
+                    status: 'enviado',
+                    sent_at: new Date().toISOString(),
+                })
+                .select('id')
+                .single();
+            enviadoSendId = s3!.id;
+        });
+
+        it('rechaza con 403 si un miembro no-admin intenta eliminar', async () => {
+            const res = await app.inject({
+                method: 'DELETE',
+                url: `/api/organizations/${orgId}/thank-you/log/${omitidoSendId}`,
+                headers: { authorization: `Bearer ${member.jwt}` },
+            });
+            expect(res.statusCode).toBe(403);
+        });
+
+        it('rechaza con 404 si el sendId no existe en la organización', async () => {
+            const fakeId = crypto.randomUUID();
+            const res = await app.inject({
+                method: 'DELETE',
+                url: `/api/organizations/${orgId}/thank-you/log/${fakeId}`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+            });
+            expect(res.statusCode).toBe(404);
+            expect(res.json().error).toBe('Registro de auditoría no encontrado.');
+        });
+
+        it('REGLA ESTRICTA: rechaza con 400 si el registro tiene estado "enviado"', async () => {
+            const res = await app.inject({
+                method: 'DELETE',
+                url: `/api/organizations/${orgId}/thank-you/log/${enviadoSendId}`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+            });
+            expect(res.statusCode).toBe(400);
+            expect(res.json().error).toContain('Solo se pueden eliminar registros con estado "omitido" o "fallido"');
+        });
+
+        it('elimina exitosamente un registro con estado "omitido"', async () => {
+            const res = await app.inject({
+                method: 'DELETE',
+                url: `/api/organizations/${orgId}/thank-you/log/${omitidoSendId}`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+            });
+            expect(res.statusCode).toBe(200);
+            expect(res.json().success).toBe(true);
+
+            const { data } = await supabaseAdmin.from('thank_you_sends').select('id').eq('id', omitidoSendId).maybeSingle();
+            expect(data).toBeNull();
+        });
+
+        it('elimina exitosamente un registro con estado "fallido"', async () => {
+            const res = await app.inject({
+                method: 'DELETE',
+                url: `/api/organizations/${orgId}/thank-you/log/${fallidoSendId}`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+            });
+            expect(res.statusCode).toBe(200);
+            expect(res.json().success).toBe(true);
+
+            const { data } = await supabaseAdmin.from('thank_you_sends').select('id').eq('id', fallidoSendId).maybeSingle();
+            expect(data).toBeNull();
+        });
+    });
+
+    describe('POST /api/organizations/:id/thank-you/resend', () => {
+        let resendContactId: string;
+        let resendContactEmail: string;
+        let failedSendId: string;
+
+        beforeAll(async () => {
+            resendContactEmail = `resend-prospect-${crypto.randomUUID()}@example.invalid`;
+            const { data: contact } = await supabaseAdmin
+                .from('contacts')
+                .insert({
+                    organization_id: orgId,
+                    full_name: 'Prospecto Para Reenvío',
+                    email: resendContactEmail,
+                })
+                .select('id')
+                .single();
+            resendContactId = contact!.id;
+
+            const { data: sendRow } = await supabaseAdmin
+                .from('thank_you_sends')
+                .insert({
+                    organization_id: orgId,
+                    contact_id: resendContactId,
+                    channel: 'email',
+                    status: 'fallido',
+                    skip_reason: 'Fallo previo',
+                })
+                .select('id')
+                .single();
+            failedSendId = sendRow!.id;
+        });
+
+        beforeEach(() => {
+            vi.spyOn(emailService, 'sendThankYouEmail').mockResolvedValue({ id: 'resend-email-msg-123' } as any);
+        });
+
+        it('rechaza con 400 si el cuerpo está vacío (sin sendId, contactId ni email)', async () => {
+            const res = await app.inject({
+                method: 'POST',
+                url: `/api/organizations/${orgId}/thank-you/resend`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+                payload: {},
+            });
+            expect(res.statusCode).toBe(400);
+        });
+
+        it('rechaza con 403 si un miembro no-admin intenta reenviar', async () => {
+            const res = await app.inject({
+                method: 'POST',
+                url: `/api/organizations/${orgId}/thank-you/resend`,
+                headers: { authorization: `Bearer ${member.jwt}` },
+                payload: { sendId: failedSendId },
+            });
+            expect(res.statusCode).toBe(403);
+        });
+
+        it('reenvía exitosamente por sendId y actualiza el registro existente a enviado', async () => {
+            const res = await app.inject({
+                method: 'POST',
+                url: `/api/organizations/${orgId}/thank-you/resend`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+                payload: { sendId: failedSendId },
+            });
+
+            expect(res.statusCode).toBe(200);
+            const json = res.json();
+            expect(json.success).toBe(true);
+            expect(json.data.sendId).toBe(failedSendId);
+            expect(json.data.recipient).toBe(resendContactEmail);
+            expect(emailService.sendThankYouEmail).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    organizationId: orgId,
+                    to: resendContactEmail,
+                })
+            );
+
+            // Verificar que se actualizó en la BD a 'enviado' y sent_at poblado
+            const { data: updated } = await supabaseAdmin
+                .from('thank_you_sends')
+                .select('status, sent_at, skip_reason')
+                .eq('id', failedSendId)
+                .single();
+
+            expect(updated?.status).toBe('enviado');
+            expect(updated?.sent_at).toBeTruthy();
+            expect(updated?.skip_reason).toBeNull();
+        });
+
+        it('reenvía exitosamente por contactId insertando un nuevo registro de auditoría', async () => {
+            const res = await app.inject({
+                method: 'POST',
+                url: `/api/organizations/${orgId}/thank-you/resend`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+                payload: { contactId: resendContactId },
+            });
+
+            expect(res.statusCode).toBe(200);
+            const json = res.json();
+            expect(json.success).toBe(true);
+            expect(json.data.recipient).toBe(resendContactEmail);
+            expect(json.data.sendId).toBeTruthy();
+
+            const { data: newRecord } = await supabaseAdmin
+                .from('thank_you_sends')
+                .select('status, contact_id')
+                .eq('id', json.data.sendId)
+                .single();
+
+            expect(newRecord?.status).toBe('enviado');
+            expect(newRecord?.contact_id).toBe(resendContactId);
+        });
+
+        it('reenvía exitosamente por email directo', async () => {
+            const directEmail = `direct-${crypto.randomUUID()}@example.invalid`;
+            const res = await app.inject({
+                method: 'POST',
+                url: `/api/organizations/${orgId}/thank-you/resend`,
+                headers: { authorization: `Bearer ${owner.jwt}` },
+                payload: { email: directEmail },
+            });
+
+            expect(res.statusCode).toBe(200);
+            const json = res.json();
+            expect(json.success).toBe(true);
+            expect(json.data.recipient).toBe(directEmail);
+        });
+    });
+
     describe('Gestión de Adjuntos (POST, GET, DELETE /attachments)', () => {
         it('POST /attachments sube un PDF válido y lo activa', async () => {
             const mockRecord = {

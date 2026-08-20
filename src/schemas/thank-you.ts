@@ -67,3 +67,26 @@ export const orgAttachmentParamSchema = z.object({
     id: z.string().uuid('El parámetro id debe ser un UUID válido'),
     attId: z.string().uuid('El parámetro attId debe ser un UUID válido'),
 });
+
+/**
+ * Esquema de parámetros para DELETE /api/organizations/:id/thank-you/log/:sendId
+ */
+export const orgSendParamSchema = z.object({
+    id: z.string().uuid('El parámetro id debe ser un UUID válido'),
+    sendId: z.string().uuid('El parámetro sendId debe ser un UUID válido'),
+});
+
+/**
+ * Esquema de cuerpo para POST /api/organizations/:id/thank-you/resend
+ */
+export const thankYouResendBodySchema = z
+    .object({
+        sendId: z.string().uuid('sendId debe ser un UUID válido').optional(),
+        contactId: z.string().uuid('contactId debe ser un UUID válido').optional(),
+        email: z.string().email('Debe ser un correo electrónico válido').optional(),
+    })
+    .refine((data) => Boolean(data.sendId || data.contactId || data.email), {
+        message: 'Se requiere al menos sendId, contactId o email para reenviar el agradecimiento',
+    });
+
+export type ThankYouResendBody = z.infer<typeof thankYouResendBodySchema>;
