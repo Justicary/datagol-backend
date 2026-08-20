@@ -293,6 +293,7 @@ Personal de Datagol con acceso transversal. Nivel support es de solo lectura.
 | `retainer_includes` | `_text` |  |
 | `cta_text` | `text` |  |
 | `show_retainer` | `bool` |  |
+| `max_users` | `int4` |  |
 
 ## Table `plan_features`
 
@@ -547,6 +548,82 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 | `metadata` | `jsonb` |  |
 | `created_at` | `timestamptz` |  |
 
+## Table `permissions`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `key` | `text` | Primary |
+| `name` | `text` |  |
+| `description` | `text` |  Nullable |
+| `category` | `text` |  |
+| `is_sensitive` | `bool` |  |
+| `sort_order` | `int4` |  |
+| `created_at` | `timestamptz` |  |
+
+## Table `role_permissions`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `role` | `text` | Primary |
+| `permission_key` | `text` | Primary |
+| `enabled` | `bool` |  |
+
+## Table `organization_role_permissions`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `role` | `text` |  |
+| `permission_key` | `text` |  |
+| `enabled` | `bool` |  |
+| `reason` | `text` |  |
+| `expires_at` | `timestamptz` |  Nullable |
+| `granted_by` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `permission_audit_log`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  Nullable |
+| `role` | `text` |  Nullable |
+| `permission_key` | `text` |  Nullable |
+| `action` | `text` |  |
+| `previous_value` | `bool` |  Nullable |
+| `new_value` | `bool` |  Nullable |
+| `target_user_id` | `uuid` |  Nullable |
+| `reason` | `text` |  Nullable |
+| `actor_user_id` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `organization_invitations`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `email` | `text` |  |
+| `role` | `text` |  |
+| `token_hash` | `text` |  Unique |
+| `invited_by` | `uuid` |  Nullable |
+| `expires_at` | `timestamptz` |  |
+| `accepted_at` | `timestamptz` |  Nullable |
+| `revoked_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
 ## RLS Policies
 
 ### `organization_members`
@@ -577,7 +654,7 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+| `call_logs_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_conversations'::text)` | — |
 
 ### `plan_features`
 
@@ -608,7 +685,8 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+| `appointments_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
+| `appointments_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_pipeline'::text)` | `has_permission(organization_id, 'manage_pipeline'::text)` |
 
 ### `feature_audit_log`
 
@@ -621,25 +699,28 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `admin_delete_organizations` | DELETE | authenticated | PERMISSIVE | `is_platform_admin()` | — |
-| `org_self_access` | ALL | authenticated | PERMISSIVE | `(id IN ( SELECT auth_organization_ids() AS auth_organization_ids))` | `(id IN ( SELECT auth_organization_ids() AS auth_organization_ids))` |
+| `org_read` | SELECT | authenticated | PERMISSIVE | `((id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
+| `org_update` | UPDATE | authenticated | PERMISSIVE | `(has_permission(id, 'configure_agent'::text) OR is_platform_admin())` | `(has_permission(id, 'configure_agent'::text) OR is_platform_admin())` |
 
 ### `usage_events`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_read_usage` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+| `usage_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_costs'::text)` | — |
 
 ### `contact_notes`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+| `notes_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
+| `notes_write` | INSERT | authenticated | PERMISSIVE | — | `has_permission(organization_id, 'edit_contacts'::text)` |
 
 ### `contact_addresses`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+| `addresses_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
+| `addresses_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'edit_contacts'::text)` | `has_permission(organization_id, 'edit_contacts'::text)` |
 
 ### `whatsapp_messages`
 
@@ -669,13 +750,15 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+| `contacts_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
+| `contacts_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'edit_contacts'::text)` | `has_permission(organization_id, 'edit_contacts'::text)` |
 
 ### `leads`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
-| `tenant_isolation` | ALL | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` |
+| `leads_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
+| `leads_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_pipeline'::text)` | `has_permission(organization_id, 'manage_pipeline'::text)` |
 
 ### `weekly_reports`
 
@@ -701,4 +784,35 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 |--------|---------|-------|--------|-------|------------|
 | `unanswered_questions_admin_all` | ALL | authenticated | PERMISSIVE | `(EXISTS ( SELECT 1    FROM organization_members   WHERE ((organization_members.user_id = auth.uid()) AND (organization_members.role = 'platform_admin'::text))))` | — |
 | `unanswered_questions_org_access` | ALL | authenticated | PERMISSIVE | `(organization_id IN ( SELECT om.organization_id    FROM organization_members om   WHERE (om.user_id = auth.uid())))` | `(organization_id IN ( SELECT om.organization_id    FROM organization_members om   WHERE (om.user_id = auth.uid())))` |
+
+### `permissions`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `catalog_read` | SELECT | authenticated | PERMISSIVE | `true` | — |
+
+### `role_permissions`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `catalog_read` | SELECT | authenticated | PERMISSIVE | `true` | — |
+
+### `organization_role_permissions`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `org_role_perms_read` | SELECT | authenticated | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
+| `org_role_perms_write` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `permission_audit_log`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `perm_audit_read` | SELECT | authenticated | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
+
+### `organization_invitations`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `invitations_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_users'::text)` | — |
 

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { resolveToolOrganization } from '../../lib/tool-auth.js';
-import { withToolTimeout, ToolTimeoutError } from '../../lib/tool-timeout.js';
+import { withToolTimeout, ToolTimeoutError, TOOL_READ_TIMEOUT_MS } from '../../lib/tool-timeout.js';
 import { getAvailableSlots, CalCredentialsMissingError, CalProviderError } from '../../services/cal-com-tool-client.js';
 import {
     toolParamsSchema,
@@ -55,13 +55,15 @@ export async function availabilityToolRoute(fastify: FastifyInstance) {
         }
 
         try {
-            const slots = await withToolTimeout((signal) =>
-                getAvailableSlots(
-                    fastify,
-                    auth.organizationId,
-                    { eventTypeId: auth.calEventTypeId!, startTime, endTime, timeZone },
-                    signal
-                )
+            const slots = await withToolTimeout(
+                (signal) =>
+                    getAvailableSlots(
+                        fastify,
+                        auth.organizationId,
+                        { eventTypeId: auth.calEventTypeId!, startTime, endTime, timeZone },
+                        signal
+                    ),
+                TOOL_READ_TIMEOUT_MS
             );
 
             const topSlots = slots.slice(0, 2).map((s) => s.time);

@@ -4,7 +4,9 @@
  * cualquier llamada saliente al proveedor de calendario dentro del camino
  * crítico de un tool call. Un tool que se cuelga es una llamada perdida.
  */
-export const TOOL_HARD_TIMEOUT_MS = 2500;
+export const TOOL_READ_TIMEOUT_MS = 3500;
+export const TOOL_MUTATION_TIMEOUT_MS = 7500;
+export const TOOL_HARD_TIMEOUT_MS = 7500;
 
 export class ToolTimeoutError extends Error {
     constructor(ms: number) {
@@ -20,7 +22,7 @@ export class ToolTimeoutError extends Error {
  */
 export async function withToolTimeout<T>(
     fn: (signal: AbortSignal) => Promise<T>,
-    ms: number = TOOL_HARD_TIMEOUT_MS
+    ms: number = TOOL_MUTATION_TIMEOUT_MS
 ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new ToolTimeoutError(ms)), ms);
