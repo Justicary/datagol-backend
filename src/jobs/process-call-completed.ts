@@ -108,6 +108,7 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         p_business_sector: mapped.businessSector,
         p_contact_phone_raw: mapped.contactPhoneRaw,
         p_inquiry_reason: mapped.inquiryReason,
+        p_plan_of_interest: mapped.planOfInterest,
         p_temperature: mapped.temperature,
         p_source: mapped.source,
         p_source_detail: mapped.sourceDetail,
@@ -170,6 +171,7 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         const city = mapped.city || geocoded?.city || null;
         const state = mapped.state || geocoded?.state || null;
         const postalCode = mapped.zip || geocoded?.postalCode || null;
+        const neighborhood = geocoded?.neighborhood || null;
 
         const { error: addressError } = await fastify.supabaseAdmin.rpc('resolve_contact_address', {
             p_org_id: event.organization_id,
@@ -181,6 +183,8 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
             p_lat: geocoded?.lat ?? null,
             p_lng: geocoded?.lng ?? null,
             p_type: CONTACT_ADDRESS_TYPES.DOMICILIO,
+            p_neighborhood: neighborhood,
+            p_label: 'Mi Casa',
         });
 
         if (addressError) {

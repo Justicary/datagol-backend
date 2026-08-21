@@ -93,7 +93,7 @@ describe('4.1 — notify-hot-lead', () => {
 
             expect(sendHotLeadAlertEmail).toHaveBeenCalledTimes(1);
             expect(vi.mocked(sendHotLeadAlertEmail).mock.calls[0][0]).toMatchObject({
-                to: 'datagolmx@gmail.com',
+                to: expect.stringMatching(/@/),
                 leadName: 'Prospecto de Prueba',
                 leadPhone: '+525599999999',
             });

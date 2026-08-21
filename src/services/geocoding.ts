@@ -3,7 +3,7 @@ import { getSecret } from './secret-service.js';
 import { SECRET_KEYS } from '../types/secret-keys.js';
 
 const GEOCODING_API_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
-const GEOCODING_TIMEOUT_MS = 5000;
+const GEOCODING_TIMEOUT_MS = 10000;
 
 export interface AddressParts {
     address: string | null;
@@ -116,7 +116,10 @@ export async function geocodeAddress(
     if (!fullAddress) return null;
 
     const apiKey = await resolveGoogleMapsApiKey(organizationId);
-    if (!apiKey) return null;
+    if (!apiKey) {
+        fastify.log.info({ organizationId, msg: 'Sin google_maps_key configurada para la organización, se omite geocodificación' });
+        return null;
+    }
 
     try {
         const url = new URL(GEOCODING_API_URL);
@@ -128,20 +131,33 @@ export async function geocodeAddress(
         });
 
         if (!response.ok) {
-            fastify.log.warn({ organizationId, status: response.status, msg: 'Google Maps Geocoding respondió error HTTP' });
+            fastify.log.warn({ organizationId, status: response.status, statusText: response.statusText, msg: 'Google Maps Geocoding respondió error HTTP' });
             return null;
         }
 
         const data = (await response.json()) as any;
         const parsed = parseGoogleGeocodeResponse(data);
         if (!parsed) {
-            fastify.log.warn({ organizationId, status: data?.status, msg: 'Google Maps Geocoding no resolvió la dirección' });
+            fastify.log.warn({ organizationId, status: data?.status, errorMessage: data?.error_message, msg: 'Google Maps Geocoding no resolvió la dirección' });
             return null;
         }
 
+        fastify.log.info({
+            organizationId,
+            lat: parsed.lat,
+            lng: parsed.lng,
+            neighborhood: parsed.neighborhood,
+            postalCode: parsed.postalCode,
+            msg: 'Dirección geocodificada exitosamente con Google Maps',
+        });
+
         return parsed;
     } catch (err) {
-        fastify.log.warn({ organizationId, err, msg: 'Excepción geocodificando dirección con Google Maps' });
+        fastify.log.warn({
+            organizationId,
+            err: err instanceof Error ? { message: err.message, name: err.name } : err,
+            msg: 'Excepción geocodificando dirección con Google Maps',
+        });
         return null;
     }
 }

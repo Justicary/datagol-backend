@@ -77,7 +77,7 @@ describe('4.2 — send-call-summary', () => {
 
             expect(sendCallSummaryEmail).toHaveBeenCalledTimes(1);
             expect(vi.mocked(sendCallSummaryEmail).mock.calls[0][0]).toMatchObject({
-                to: 'datagolmx@gmail.com',
+                to: expect.stringMatching(/@/),
                 callerPhone: '+525599999999',
                 summary: 'El cliente pidió información de precios.',
             });

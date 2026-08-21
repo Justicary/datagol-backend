@@ -705,6 +705,18 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
             expect(mapped!.sourceDetail).toBe('me lo dijo un pajarito, no recuerdo bien');
         });
 
+        it('prioriza detalle_origen_prospecto sobre el enum de origen_prospecto para sourceDetail', () => {
+            const payload = buildPayload({
+                dataCollectionResults: {
+                    origen_prospecto: { value: 'anuncio_pagado' },
+                    detalle_origen_prospecto: { value: 'Vio anuncio en Facebook sobre implantes dentales' },
+                },
+            });
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.source).toBe('anuncio_pagado');
+            expect(mapped!.sourceDetail).toBe('Vio anuncio en Facebook sobre implantes dentales');
+        });
+
         it('contraparte: campo ausente en data_collection_results → source y sourceDetail quedan null (no "desconocido")', () => {
             const payload = buildPayload({ dataCollectionResults: { motivo_consulta: { value: 'Otra cosa' } } });
             const mapped = mapElevenLabsPayload(payload);

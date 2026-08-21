@@ -594,20 +594,16 @@ describe('Continuidad cross-canal — WhatsApp (whatsapp_user_id) vs. voz previa
 
         let contactId = existingContact?.id;
         if (!contactId) {
-            const { data: createdContact, error: createErr } = await supabaseAdmin
-                .from('contacts')
-                .upsert({
-                    organization_id: REAL_ORG_ID,
-                    phone_e164: EXISTING_CONTACT_PHONE,
-                    first_name: 'Contacto',
-                    last_name: 'Prueba Continuidad',
-                }, { onConflict: 'organization_id,phone_e164' })
-                .select('id')
-                .single();
-            if (createErr || !createdContact) {
+            const { data: resolvedId, error: createErr } = await supabaseAdmin
+                .rpc('resolve_contact', {
+                    p_org_id: REAL_ORG_ID,
+                    p_phone: EXISTING_CONTACT_PHONE,
+                    p_email: null,
+                });
+            if (createErr || !resolvedId) {
                 throw new Error(`No se pudo autocrear el contacto de prueba ${EXISTING_CONTACT_PHONE}: ${createErr?.message}`);
             }
-            contactId = createdContact.id;
+            contactId = resolvedId;
         }
 
         const whatsappPayload = {

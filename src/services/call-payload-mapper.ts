@@ -304,6 +304,7 @@ const DATA_COLLECTION_KEYS = {
     zip: 'cp_prospecto',
     messageVolume: 'volumen_mensajes',
     origenProspecto: 'origen_prospecto',
+    detalleOrigenProspecto: 'detalle_origen_prospecto',
     // Compatibilidad retroactiva con nombre previo
     comoSeEntero: 'como_se_entero',
 } as const;
@@ -528,7 +529,11 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         planOfInterest: extractString(results, DATA_COLLECTION_KEYS.planOfInterest),
         messageVolume: extractString(results, DATA_COLLECTION_KEYS.messageVolume),
         source: extractLeadSource(results, [DATA_COLLECTION_KEYS.origenProspecto, DATA_COLLECTION_KEYS.comoSeEntero]),
-        sourceDetail: extractLeadSourceDetail(results, [DATA_COLLECTION_KEYS.origenProspecto, DATA_COLLECTION_KEYS.comoSeEntero]),
+        sourceDetail: extractLeadSourceDetail(results, [
+            DATA_COLLECTION_KEYS.detalleOrigenProspecto,
+            DATA_COLLECTION_KEYS.origenProspecto,
+            DATA_COLLECTION_KEYS.comoSeEntero,
+        ]),
         bookedAppointment: extractBoolean(results, DATA_COLLECTION_KEYS.bookedAppointment),
         needsFollowup: extractBoolean(results, DATA_COLLECTION_KEYS.needsFollowup),
         followupNotes: extractString(results, DATA_COLLECTION_KEYS.followupNotes),

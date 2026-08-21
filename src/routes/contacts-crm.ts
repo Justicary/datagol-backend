@@ -694,7 +694,7 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         const [leadsResult, appointmentsResult, notesResult, addressesResult] = await Promise.all([
             scopedClient
                 .from('leads')
-                .select('id, channel, conversation_id, call_log_id, inquiry_reason, temperature, booked_appointment, created_at')
+                .select('id, channel, conversation_id, call_log_id, inquiry_reason, plan_of_interest, temperature, booked_appointment, source, source_detail, created_at')
                 .eq('organization_id', organizationId)
                 .eq('contact_id', contactId)
                 .order('created_at', { ascending: false }),

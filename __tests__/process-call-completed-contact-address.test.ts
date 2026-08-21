@@ -103,7 +103,7 @@ describe('process-call-completed: consolidación de dirección en contact_addres
 
         const { data: address } = await supabaseAdmin
             .from('contact_addresses')
-            .select('street, city, state, postal_code, address_type, is_primary')
+            .select('street, city, state, postal_code, address_type, is_primary, label, neighborhood')
             .eq('contact_id', contact!.id)
             .maybeSingle();
 
@@ -111,6 +111,7 @@ describe('process-call-completed: consolidación de dirección en contact_addres
         expect(address?.city).toBe('CDMX');
         expect(address?.postal_code).toBe('06600');
         expect(address?.address_type).toBe('domicilio');
+        expect(address?.label).toBe('Mi Casa');
         expect(address?.is_primary).toBe(true);
 
         await supabaseAdmin.from('contacts').delete().eq('id', contact!.id);
