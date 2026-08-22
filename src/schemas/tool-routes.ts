@@ -79,7 +79,7 @@ export const bookingResponseSchema = z.object({
 export type BookingResponse = z.infer<typeof bookingResponseSchema>;
 
 export const rescheduleBodySchema = z.object({
-    customerName: z.string().min(1),
+    customerName: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
     // Mismo criterio que bookingBodySchema: la cita original pudo haberse
     // creado solo con teléfono (sin correo) si vino de un canal sin correo.
     // La ruta exige al menos uno de los dos para poder ubicarla.
@@ -147,6 +147,35 @@ export const locationsResponseSchema = z.object({
 });
 export type LocationsResponse = z.infer<typeof locationsResponseSchema>;
 
+export const appointmentDetailsItemSchema = z.object({
+    id: z.string().uuid(),
+    customerName: z.string(),
+    customerEmail: z.string().nullable(),
+    customerPhone: z.string().nullable(),
+    startTime: z.string(),
+    endTime: z.string(),
+    formattedDate: z.string(),
+    timeZone: z.string(),
+    serviceAddress: z.string().nullable(),
+    status: z.string(),
+});
+export type AppointmentDetailsItem = z.infer<typeof appointmentDetailsItemSchema>;
+
+export const appointmentBodySchema = z.object({
+    customerPhone: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    customerEmail: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
+    customerName: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+});
+export type AppointmentBody = z.infer<typeof appointmentBodySchema>;
+
+export const appointmentResponseSchema = z.object({
+    found: z.boolean(),
+    message: z.string(),
+    appointment: appointmentDetailsItemSchema.nullable(),
+});
+export type AppointmentResponse = z.infer<typeof appointmentResponseSchema>;
+
 export function isValidDateString(value: string): boolean {
     return !Number.isNaN(new Date(value).getTime());
 }
+

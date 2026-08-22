@@ -746,13 +746,6 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 |--------|---------|-------|--------|-------|------------|
 | `tenant_read` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
 
-### `contacts`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `contacts_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
-| `contacts_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'edit_contacts'::text)` | `has_permission(organization_id, 'edit_contacts'::text)` |
-
 ### `leads`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
@@ -777,6 +770,13 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `tenant_read` | SELECT | public | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
+### `contacts`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `contacts_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
+| `contacts_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'edit_contacts'::text)` | `has_permission(organization_id, 'edit_contacts'::text)` |
 
 ### `unanswered_questions`
 

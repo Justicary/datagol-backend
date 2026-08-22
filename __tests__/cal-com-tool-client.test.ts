@@ -184,6 +184,43 @@ describe('src/services/cal-com-tool-client.ts', () => {
         expect(calCall?.[0]).toBe('https://api.cal.com/v2/bookings/cal_booking_123/reschedule');
     });
 
+    it('auto-recuperación: si Cal.com devuelve 400 indicando que ya fue reprogramado a un nuevo UID, reintenta con el nuevo UID', async () => {
+        let callCount = 0;
+        vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+            const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.startsWith('https://api.cal.com/')) {
+                callCount++;
+                if (callCount === 1) {
+                    return new Response(
+                        JSON.stringify({
+                            status: 'error',
+                            error: {
+                                code: 'BadRequestException',
+                                message: "Can't reschedule booking with uid=old_uid because it has been cancelled and rescheduled already to booking with uid=new_child_uid. You probably want to reschedule new_child_uid instead",
+                            },
+                        }),
+                        { status: 400 }
+                    );
+                }
+                return new Response(
+                    JSON.stringify({ data: { uid: 'new_child_uid', start: '2026-09-05T10:00:00Z' } }),
+                    { status: 200 }
+                );
+            }
+            return realFetch(input as any, init);
+        });
+
+        const result = await rescheduleBooking(
+            buildFakeFastify(),
+            testOrgId,
+            { calBookingId: 'old_uid', newStartTime: '2026-09-05T10:00:00Z' },
+            new AbortController().signal
+        );
+
+        expect(result.calBookingId).toBe('new_child_uid');
+        expect(callCount).toBe(2);
+    });
+
     // -------------------------------------------------------------------
     // getBooking (B.2, docs/tasks/asistencia-valor de cierre.md)
     // -------------------------------------------------------------------

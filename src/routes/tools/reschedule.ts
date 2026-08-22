@@ -3,6 +3,7 @@ import { resolveToolOrganization } from '../../lib/tool-auth.js';
 import { withToolTimeout, ToolTimeoutError } from '../../lib/tool-timeout.js';
 import { rescheduleBooking, CalCredentialsMissingError, CalProviderError } from '../../services/cal-com-tool-client.js';
 import { normalizePhoneE164 } from '../../services/phone-normalization.js';
+import { formatSpanishAppointmentDate } from './appointment.js';
 import { toolParamsSchema, rescheduleBodySchema, rescheduleResponseSchema, isValidDateString } from '../../schemas/tool-routes.js';
 import { APPOINTMENT_STATUSES } from '../../types/appointment-status.js';
 
@@ -14,9 +15,8 @@ const NO_CAL_SYNC_MESSAGE = 'Encontré tu cita pero no puedo sincronizarla con e
 
 /**
  * POST /tools/:webhookToken/reschedule — Fase 5.2.
- * Verifica que la cita exista y pertenezca a quien llama, por nombre y
- * correo y/o teléfono, antes de tocarla. Si no coincide, devuelve un mensaje
- * claro que el agente pueda verbalizar — nunca un fallo genérico.
+ * Verifica que la cita exista y pertenezca a quien llama, por correo y/o teléfono,
+ * antes de reprogramarla en Cal.com y actualizarla en la base de datos.
  */
 export async function rescheduleToolRoute(fastify: FastifyInstance) {
     fastify.post('/tools/:webhookToken/reschedule', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -36,7 +36,7 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
             });
         }
 
-        const bodyResult = rescheduleBodySchema.safeParse(request.body);
+        const bodyResult = rescheduleBodySchema.safeParse(request.body || {});
         if (!bodyResult.success) {
             return reply.status(400).send({ error: 'BadRequest', message: 'Cuerpo de la petición inválido' });
         }
@@ -48,56 +48,80 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
 
         // La cita original pudo haberse agendado solo con teléfono (canal web
         // chat sin correo) o solo con correo — pero reprogramar exige alguno
-        // de los dos para poder ubicarla con seguridad.
-        if (!customerEmail && !customerPhone) {
+        // de los dos o nombre para poder ubicarla con seguridad.
+        if (!customerEmail && !customerPhone && !customerName) {
             return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: MISSING_CONTACT_MESSAGE }));
         }
 
-        // Dueño de la cita verificado por nombre + (correo y/o teléfono),
-        // nunca solo por un ID que el LLM podría inventar o repetir de otra
-        // llamada. Si se da un solo identificador, se filtra solo por ese;
-        // si se dan ambos, deben coincidir los dos.
-        let appointmentQuery = fastify.supabaseAdmin
-            .from('appointments')
-            .select('id, organization_id, contact_id, contact_address_id, customer_name, customer_email, customer_phone, service_address, latitude, longitude, call_log_id, cal_booking_id, start_time, end_time')
-            .eq('organization_id', auth.organizationId)
-            .ilike('customer_name', customerName.trim())
-            .neq('status', APPOINTMENT_STATUSES.CANCELADA)
-            .gt('start_time', new Date().toISOString());
-
-        if (customerEmail) {
-            appointmentQuery = appointmentQuery.ilike('customer_email', customerEmail.trim());
-        }
-        if (customerPhone) {
-            const normalizedPhone = normalizePhoneE164(customerPhone);
-            appointmentQuery = appointmentQuery.eq('customer_phone', normalizedPhone.success ? normalizedPhone.phoneE164 : customerPhone.trim());
-        }
-
-        const { data: appointment, error: lookupError } = await appointmentQuery
-            .order('start_time', { ascending: true })
-            .limit(1)
-            .maybeSingle();
-
-        if (lookupError) {
-            request.log.error({ organizationId: auth.organizationId, err: lookupError.message, msg: 'Error consultando appointments para reschedule' });
-            return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: DEGRADED_MESSAGE }));
-        }
-
-        if (!appointment) {
-            return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: NOT_FOUND_MESSAGE }));
-        }
-
-        if (!appointment.cal_booking_id) {
-            request.log.warn({ organizationId: auth.organizationId, appointmentId: appointment.id, msg: 'Cita sin cal_booking_id, no se puede reprogramar en Cal.com' });
-            return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: NO_CAL_SYNC_MESSAGE }));
-        }
-
         try {
+            // 1. Obtener timezone del tenant para verbalizar la fecha en español
+            const { data: orgData } = await fastify.supabaseAdmin
+                .from('organizations')
+                .select('timezone')
+                .eq('id', auth.organizationId)
+                .maybeSingle();
+            const timeZone = orgData?.timezone || 'America/Mexico_City';
+
+            // 2. Consulta resiliente sobre appointments
+            const lookbackTime = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+            let appointmentQuery = fastify.supabaseAdmin
+                .from('appointments')
+                .select('id, organization_id, contact_id, contact_address_id, customer_name, customer_email, customer_phone, service_address, latitude, longitude, call_log_id, cal_booking_id, start_time, end_time')
+                .eq('organization_id', auth.organizationId)
+                .neq('status', APPOINTMENT_STATUSES.CANCELADA)
+                .gte('start_time', lookbackTime);
+
+            const normalizedPhone = customerPhone ? normalizePhoneE164(customerPhone) : null;
+            const phoneToMatch = normalizedPhone?.success ? normalizedPhone.phoneE164 : null;
+            const rawPhone = customerPhone?.trim() || null;
+
+            if (customerEmail && (phoneToMatch || rawPhone)) {
+                const phoneClauses: string[] = [];
+                if (phoneToMatch) phoneClauses.push(`customer_phone.eq.${phoneToMatch}`);
+                if (rawPhone && rawPhone !== phoneToMatch) phoneClauses.push(`customer_phone.eq.${rawPhone}`);
+                phoneClauses.push(`customer_email.ilike.${customerEmail.trim()}`);
+                appointmentQuery = appointmentQuery.or(phoneClauses.join(','));
+            } else if (phoneToMatch || rawPhone) {
+                if (phoneToMatch && rawPhone && phoneToMatch !== rawPhone) {
+                    appointmentQuery = appointmentQuery.or(`customer_phone.eq.${phoneToMatch},customer_phone.eq.${rawPhone}`);
+                } else {
+                    appointmentQuery = appointmentQuery.eq('customer_phone', phoneToMatch || rawPhone!);
+                }
+            } else if (customerEmail) {
+                appointmentQuery = appointmentQuery.ilike('customer_email', customerEmail.trim());
+            } else if (customerName) {
+                appointmentQuery = appointmentQuery.ilike('customer_name', customerName.trim());
+            }
+
+            const { data: appointment, error: lookupError } = await appointmentQuery
+                .order('start_time', { ascending: true })
+                .limit(1)
+                .maybeSingle();
+
+            if (lookupError) {
+                request.log.error({ organizationId: auth.organizationId, err: lookupError.message, msg: 'Error consultando appointments para reschedule' });
+                return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: DEGRADED_MESSAGE }));
+            }
+
+            if (!appointment) {
+                return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: NOT_FOUND_MESSAGE }));
+            }
+
+            if (!appointment.cal_booking_id) {
+                request.log.warn({ organizationId: auth.organizationId, appointmentId: appointment.id, msg: 'Cita sin cal_booking_id, no se puede reprogramar en Cal.com' });
+                return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: NO_CAL_SYNC_MESSAGE }));
+            }
+
             const calResult = await withToolTimeout((signal) =>
                 rescheduleBooking(
                     fastify,
                     auth.organizationId,
-                    { calBookingId: appointment.cal_booking_id as string, newStartTime, reason: `Reprogramado por ${customerName} durante llamada de voz` },
+                    {
+                        calBookingId: appointment.cal_booking_id as string,
+                        newStartTime,
+                        reason: customerName ? `Reprogramado por ${customerName} durante llamada de voz` : 'Reprogramado por el cliente durante llamada de voz',
+                    },
                     signal
                 )
             );
@@ -148,10 +172,12 @@ export async function rescheduleToolRoute(fastify: FastifyInstance) {
                 return reply.status(200).send(rescheduleResponseSchema.parse({ rescheduled: false, message: DEGRADED_MESSAGE }));
             }
 
+            const formattedDate = formatSpanishAppointmentDate(calResult.startTime, timeZone);
+
             return reply.status(200).send(
                 rescheduleResponseSchema.parse({
                     rescheduled: true,
-                    message: `Tu cita fue reprogramada para ${calResult.startTime}.`,
+                    message: `Tu cita fue reprogramada para el ${formattedDate}.`,
                     newStartTime: calResult.startTime,
                 })
             );

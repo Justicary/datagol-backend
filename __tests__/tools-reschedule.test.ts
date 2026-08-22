@@ -340,4 +340,72 @@ describe('POST /tools/:webhookToken/reschedule', () => {
             await app.close();
         }
     });
+
+    it('búsqueda resiliente: encuentra y reprograma buscando con teléfono local de 10 dígitos guardado sin +52', async () => {
+        const localPhone = '2227055371';
+        const appointment = await createAppointment({
+            customer_name: 'Alberto Álvarez Test',
+            customer_email: 'victor-test-phone@example.invalid',
+            customer_phone: localPhone, // Guardado sin +52
+            cal_booking_id: 'cal_booking_local_phone_test',
+        });
+        createdAppointmentIds.push(appointment.id);
+
+        const newStartIso = '2026-09-25T15:00:00.000Z';
+        const newCalBookingId = 'cal_booking_new_local_phone';
+        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: newCalBookingId, startTime: newStartIso, endTime: null });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/reschedule`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: {
+                    customerPhone: '2227055371', // Se envía local o con E.164
+                    newStartTime: newStartIso,
+                },
+            });
+
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.rescheduled).toBe(true);
+            expect(body.message).toContain('Tu cita fue reprogramada para el');
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('búsqueda resiliente: encuentra y reprograma por correo aún si el nombre no se envía o es diferente', async () => {
+        const uniqueEmail = `reschedule-email-${Date.now()}@example.invalid`;
+        const appointment = await createAppointment({
+            customer_name: 'Nombre Original En BD',
+            customer_email: uniqueEmail,
+            cal_booking_id: 'cal_booking_email_only_test',
+        });
+        createdAppointmentIds.push(appointment.id);
+
+        const newStartIso = '2026-09-26T18:00:00.000Z';
+        const newCalBookingId = 'cal_booking_new_email_only';
+        vi.mocked(rescheduleBooking).mockResolvedValue({ calBookingId: newCalBookingId, startTime: newStartIso, endTime: null });
+
+        const app = await buildTestApp();
+        try {
+            const response = await app.inject({
+                method: 'POST',
+                url: `/tools/${TEST_WEBHOOK_TOKEN}/reschedule`,
+                headers: { 'x-tool-secret': TEST_TOOL_SECRET },
+                payload: {
+                    customerEmail: uniqueEmail.toUpperCase(),
+                    newStartTime: newStartIso,
+                },
+            });
+
+            expect(response.statusCode).toBe(200);
+            const body = response.json();
+            expect(body.rescheduled).toBe(true);
+        } finally {
+            await app.close();
+        }
+    });
 });

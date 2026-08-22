@@ -30,6 +30,12 @@ export async function getAuthorizedAgentTools(organizationId: string): Promise<A
             requiredFeature: 'calendar_booking',
         },
         {
+            name: 'appointment',
+            description: 'Consulta los detalles y horario de una cita existente',
+            enabled: features.has('calendar_booking'),
+            requiredFeature: 'calendar_booking',
+        },
+        {
             name: 'call_transfer',
             description: 'Transfiere la llamada a un agente humano',
             enabled: features.has('call_transfer'),

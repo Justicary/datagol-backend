@@ -231,6 +231,15 @@ export async function rescheduleBooking(
 
     if (!response.ok) {
         const errText = await response.text();
+
+        // Auto-recuperación: si Cal.com indica que esta reserva ya fue movida a un nuevo UID hijo
+        const match = errText.match(/rescheduled already to booking with uid=([a-zA-Z0-9_-]+)/i);
+        if (match && match[1] && match[1] !== params.calBookingId) {
+            const nextUid = match[1];
+            fastify.log.info({ organizationId, oldUid: params.calBookingId, nextUid, msg: 'Cal.com booking ya tenía UID reprogramado, reintentando con nuevo UID' });
+            return rescheduleBooking(fastify, organizationId, { ...params, calBookingId: nextUid }, signal);
+        }
+
         fastify.log.warn({ organizationId, status: response.status, msg: 'Cal.com respondió error en /bookings/:id/reschedule' });
         throw new CalProviderError(response.status, errText);
     }

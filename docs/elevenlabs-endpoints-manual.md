@@ -57,6 +57,7 @@ Todas las rutas de herramientas comparten el prefijo `/tools/:webhookToken/`:
 |---|---|---|---|
 | `checkAvailability` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/availability` | Consulta horarios libres en Cal.com para un rango de fechas. |
 | `bookAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/booking` | Agenda la cita en Cal.com y guarda el registro en `appointments`. |
+| `getAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/appointment` | Consulta los detalles y horario de una cita existente agendada por el cliente. |
 | `rescheduleAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/reschedule` | Reprograma una cita existente verificando identidad del cliente. |
 | `cancelAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/cancel` | Cancela una cita existente a solicitud del cliente, verificando su identidad. |
 | `getLocations` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/locations` | Consulta la matriz, sucursales y direcciones físicas o de facturación del negocio. |
@@ -107,7 +108,19 @@ ElevenLabs **no** envía firmas HMAC en las Tools; únicamente permite inyectar 
   * `timeZone` (string, opcional)
   * `serviceAddress` (string, opcional)
 
-#### C) Configuración de `rescheduleAppointment`:
+#### C) Configuración de `getAppointment`:
+* **Name**: `getAppointment`
+* **Description**: `Consulta los detalles, fecha y horario de una cita existente agendada por el cliente cuando pregunte '¿A qué hora es mi cita?' o '¿Cuándo tengo mi cita?'. Requiere al menos el teléfono o correo con el que se agendó.`
+* **Method**: `POST`
+* **URL**: `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/appointment` *(o `/appointment-details`)*
+* **Headers**:
+  * `x-tool-secret`: `<TOOL_SECRET>`
+* **Request Body Parameters**:
+  * `customerPhone` (string, opcional)
+  * `customerEmail` (string, opcional)
+  * `customerName` (string, opcional)
+
+#### D) Configuración de `rescheduleAppointment`:
 * **Name**: `rescheduleAppointment`
 * **Description**: `Permite reprogramar o modificar la fecha y hora de una cita previamente agendada.`
 * **Method**: `POST`
@@ -120,7 +133,7 @@ ElevenLabs **no** envía firmas HMAC en las Tools; únicamente permite inyectar 
   * `customerPhone` (string, opcional)
   * `newStartTime` (string)
 
-#### D) Configuración de `cancelAppointment`:
+#### E) Configuración de `cancelAppointment`:
 * **Name**: `cancelAppointment`
 * **Description**: `Cancela una cita previamente agendada a solicitud del cliente. Requiere el nombre completo y al menos el correo o teléfono con los que se agendó.`
 * **Method**: `POST`
@@ -133,7 +146,7 @@ ElevenLabs **no** envía firmas HMAC en las Tools; únicamente permite inyectar 
   * `customerPhone` (string, opcional)
   * `reason` (string, opcional — motivo de la cancelación)
 
-#### E) Configuración de `getLocations`:
+#### F) Configuración de `getLocations`:
 * **Name**: `getLocations`
 * **Description**: `Consulta la ubicación de la matriz, sucursales o dirección de facturación del negocio para informar al cliente cuando pregunte por direcciones, sedes o dónde estamos ubicados.`
 * **Method**: `POST`
