@@ -61,6 +61,10 @@ export const FEATURE_KEYS = {
     // Reportes en lenguaje natural (docs/tasks/reportes-lenguaje-natural.md).
     // requires_provider es NULL (BYOK de LLM), exige isLlmConfigValidated.
     NATURAL_LANGUAGE_REPORTS: 'natural_language_reports',
+    // Integración de correo nativa (docs/tasks/native-mail-integration.md).
+    // requires_provider es NULL: las credenciales IMAP/SMTP las aporta el
+    // cliente, no un proveedor que Datagol administre.
+    EMAIL_INTEGRATION: 'email_integration',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

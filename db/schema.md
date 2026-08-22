@@ -28,6 +28,7 @@
 | `suspended_at` | `timestamptz` |  Nullable |
 | `retention_days` | `int4` |  |
 | `timezone` | `text` |  |
+| `max_mailboxes` | `int4` |  Nullable |
 
 ## Table `knowledge_base`
 
@@ -294,6 +295,7 @@ Personal de Datagol con acceso transversal. Nivel support es de solo lectura.
 | `cta_text` | `text` |  |
 | `show_retainer` | `bool` |  |
 | `max_users` | `int4` |  |
+| `max_mailboxes` | `int4` |  Nullable |
 
 ## Table `plan_features`
 
@@ -623,6 +625,57 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 | `accepted_at` | `timestamptz` |  Nullable |
 | `revoked_at` | `timestamptz` |  Nullable |
 | `created_at` | `timestamptz` |  |
+
+## Table `email_accounts`
+
+Buzones IMAP/SMTP vinculados por organización (docs/tasks/native-mail-integration.md). Credenciales en Supabase Vault vía vault_secret_id, no en esta tabla ni en organization_secrets.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `email_address` | `text` |  |
+| `provider_label` | `text` |  Nullable |
+| `imap_host` | `text` |  |
+| `imap_port` | `int4` |  |
+| `imap_secure` | `bool` |  |
+| `imap_username` | `text` |  |
+| `smtp_host` | `text` |  |
+| `smtp_port` | `int4` |  |
+| `smtp_secure` | `bool` |  |
+| `smtp_username` | `text` |  |
+| `vault_secret_id` | `uuid` |  |
+| `status` | `text` |  |
+| `last_validated_at` | `timestamptz` |  Nullable |
+| `last_error` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `email_outbox`
+
+Borradores y bitácora de envío de correo por organización, con clave de idempotencia UNIQUE (organization_id, idempotency_key) — AGENTS.md §4.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `email_account_id` | `uuid` |  |
+| `idempotency_key` | `text` |  |
+| `to_addresses` | `_text` |  |
+| `cc_addresses` | `_text` |  Nullable |
+| `subject` | `text` |  |
+| `body_text` | `text` |  |
+| `body_html` | `text` |  Nullable |
+| `contact_id` | `uuid` |  Nullable |
+| `status` | `text` |  |
+| `provider_message_id` | `text` |  Nullable |
+| `error_message` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `sent_at` | `timestamptz` |  Nullable |
 
 ## RLS Policies
 

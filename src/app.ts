@@ -11,6 +11,7 @@ import adminOrganizationsRoutes from './routes/admin/organizations.js';
 import adminPlansRoutes from './routes/admin/plans.js';
 import adminFactoryResetRoutes from './routes/admin/factory-reset.js';
 import adminReportsRoutes from './routes/admin/reports.js';
+import adminEmailAccountsRoutes from './routes/admin/email-accounts.js';
 import plansRoutes from './routes/plans.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
@@ -181,6 +182,8 @@ export async function buildApp() {
     await app.register(adminFactoryResetRoutes);
     // Supervisión y bitácora de preguntas no resueltas de reportes en lenguaje natural
     await app.register(adminReportsRoutes);
+    // Vinculación de buzones IMAP/SMTP por organización (integración de correo nativa)
+    await app.register(adminEmailAccountsRoutes);
 
     // Registro modular de otros plugins y rutas de la API
     await app.register(plansRoutes);

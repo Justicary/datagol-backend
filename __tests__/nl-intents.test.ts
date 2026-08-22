@@ -1,12 +1,27 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../src/services/email/email-account.service.js', () => ({
+    getActiveEmailAccount: vi.fn(),
+    NO_ACTIVE_MAILBOX_MESSAGE: 'No tengo un buzón de correo configurado en este momento.',
+}));
+vi.mock('../src/services/email/email-account-vault.js', () => ({
+    getAccountCredentials: vi.fn(),
+}));
+vi.mock('../src/services/email/imap-client.js', () => ({
+    searchInbox: vi.fn(),
+}));
+
 import { ALL_INTENTS, getIntentByKey } from '../src/services/reports/intents/index.js';
 import { ALL_NL_INTENT_KEYS } from '../src/types/natural-reports.js';
 import { resolvePeriod } from '../src/services/reports/nl-dimensions.js';
 import { FastifyInstance } from 'fastify';
+import { getActiveEmailAccount } from '../src/services/email/email-account.service.js';
+import { getAccountCredentials } from '../src/services/email/email-account-vault.js';
+import { searchInbox } from '../src/services/email/imap-client.js';
 
-describe('Catálogo de 18 Intenciones de Reportes en Lenguaje Natural', () => {
-    it('registra exactamente las 18 intenciones exigidas por la v1', () => {
-        expect(ALL_INTENTS).toHaveLength(18);
+describe('Catálogo de 22 Intenciones de Reportes en Lenguaje Natural', () => {
+    it('registra exactamente las 22 intenciones exigidas por la v1 (18 originales + 4 de correos)', () => {
+        expect(ALL_INTENTS).toHaveLength(22);
         for (const key of ALL_NL_INTENT_KEYS) {
             const intent = getIntentByKey(key);
             expect(intent).toBeDefined();
@@ -303,5 +318,165 @@ describe('Ejecución de intenciones con consultas parametrizadas', () => {
         expect(result.shape).toBe('tabla');
         expect((result.data as any).tasaConversacionACita).toBe(50);
         expect((result.data as any).tasaProspectoACliente).toBe(50);
+    });
+
+    // 19. conteo_correos_enviados
+    it('ejecuta conteo_correos_enviados correctamente', async () => {
+        const intent = getIntentByKey('conteo_correos_enviados')!;
+        const fastify = buildMockFastify([], 8);
+
+        const result = await intent.execute(fastify, orgId, {}, period);
+        expect(result.shape).toBe('numero');
+        expect((result.data as any).total).toBe(8);
+        expect((result.data as any).periodoAnterior).toBeUndefined();
+    });
+
+    it('conteo_correos_enviados calcula la comparación contra el periodo anterior cuando se pide comparar_con', async () => {
+        const intent = getIntentByKey('conteo_correos_enviados')!;
+        const periodWithComparison = resolvePeriod({ type: 'este_mes' }, 'America/Mexico_City', {
+            now: fixedNow,
+            compareTo: 'periodo_anterior',
+        });
+        expect(periodWithComparison.previousPeriod).toBeDefined();
+
+        // buildMockFastify devuelve el mismo count para ambas consultas
+        // (actual y periodo anterior) — se ejercita la rama de comparación
+        // con un resultado determinista ("igual").
+        const fastify = buildMockFastify([], 10);
+
+        const result = await intent.execute(fastify, orgId, {}, periodWithComparison);
+        expect((result.data as any).periodoAnterior).toEqual({
+            total: 10,
+            cambioPorcentual: 0,
+            direccion: 'igual',
+        });
+    });
+
+    // 20. listado_correos_enviados
+    it('ejecuta listado_correos_enviados correctamente, con límite por defecto 10', async () => {
+        const intent = getIntentByKey('listado_correos_enviados')!;
+        const fastify = buildMockFastify([
+            { id: 'e-1', to_addresses: ['a@b.com'], subject: 'Confirmación', status: 'sent', created_at: '2026-08-15T10:00:00Z', sent_at: '2026-08-15T10:00:05Z' },
+        ]);
+
+        const result = await intent.execute(fastify, orgId, {}, period);
+        expect(result.shape).toBe('lista');
+        expect((result.data as any)[0].subject).toBe('Confirmación');
+    });
+
+    // 21. correos_con_error
+    it('ejecuta correos_con_error e incluye advertencia cuando no hay resultados', async () => {
+        const intent = getIntentByKey('correos_con_error')!;
+        const fastify = buildMockFastify([]);
+
+        const result = await intent.execute(fastify, orgId, {}, period);
+        expect(result.shape).toBe('lista');
+        expect(result.data).toEqual([]);
+        expect(result.warnings[0]).toContain('No se registraron correos con error');
+    });
+
+    it('ejecuta correos_con_error devolviendo error_message por cada fila fallida', async () => {
+        const intent = getIntentByKey('correos_con_error')!;
+        const fastify = buildMockFastify([
+            { id: 'e-2', to_addresses: ['x@y.com'], subject: 'Recordatorio', error_message: '550 mailbox not found', created_at: '2026-08-10T10:00:00Z' },
+        ]);
+
+        const result = await intent.execute(fastify, orgId, {}, period);
+        expect((result.data as any)[0].error_message).toBe('550 mailbox not found');
+    });
+
+    // 22. resumen_correos_recibidos — única intención con fuente de datos IMAP en vivo
+    describe('resumen_correos_recibidos', () => {
+        beforeEach(() => {
+            vi.mocked(getActiveEmailAccount).mockReset();
+            vi.mocked(getAccountCredentials).mockReset();
+            vi.mocked(searchInbox).mockReset();
+        });
+
+        it('devuelve warnings (no lanza) cuando la organización no tiene buzón vinculado', async () => {
+            const intent = getIntentByKey('resumen_correos_recibidos')!;
+            vi.mocked(getActiveEmailAccount).mockResolvedValue({
+                ok: false,
+                message: 'No tengo un buzón de correo configurado en este momento.',
+            });
+            const fastify = buildMockFastify([]);
+
+            const result = await intent.execute(fastify, orgId, {}, period);
+            expect(result.data).toEqual([]);
+            expect(result.warnings).toEqual([
+                'No tienes ningún buzón de correo vinculado en tu cuenta para consultar correos entrantes.',
+            ]);
+            expect(searchInbox).not.toHaveBeenCalled();
+        });
+
+        it('contraparte de éxito: devuelve los correos encontrados vía IMAP en vivo', async () => {
+            const intent = getIntentByKey('resumen_correos_recibidos')!;
+            vi.mocked(getActiveEmailAccount).mockResolvedValue({
+                ok: true,
+                account: {
+                    id: 'acc-1',
+                    imap_host: 'imap.example.invalid',
+                    imap_port: 993,
+                    imap_secure: true,
+                    imap_username: 'buzon@example.invalid',
+                    vault_secret_id: 'vault-1',
+                    status: 'active',
+                },
+            });
+            vi.mocked(getAccountCredentials).mockResolvedValue({ imapPassword: 'clave', smtpPassword: 'clave' });
+            vi.mocked(searchInbox).mockResolvedValue([
+                { uid: 1, from: 'cliente@example.invalid', subject: 'Consulta de precio', date: '2026-08-17T09:00:00Z', snippet: 'Consulta de precio' },
+            ]);
+            const fastify = buildMockFastify([]);
+
+            const result = await intent.execute(fastify, orgId, {}, period);
+            expect(result.shape).toBe('lista');
+            expect((result.data as any)[0].from).toBe('cliente@example.invalid');
+            expect(result.warnings).toEqual([]);
+        });
+
+        it('propaga el error si searchInbox falla (se convierte en 500 en la capa superior, no se degrada aquí)', async () => {
+            const intent = getIntentByKey('resumen_correos_recibidos')!;
+            vi.mocked(getActiveEmailAccount).mockResolvedValue({
+                ok: true,
+                account: {
+                    id: 'acc-1',
+                    imap_host: 'imap.example.invalid',
+                    imap_port: 993,
+                    imap_secure: true,
+                    imap_username: 'buzon@example.invalid',
+                    vault_secret_id: 'vault-1',
+                    status: 'active',
+                },
+            });
+            vi.mocked(getAccountCredentials).mockResolvedValue({ imapPassword: 'clave', smtpPassword: 'clave' });
+            vi.mocked(searchInbox).mockRejectedValue(new Error('IMAP timeout'));
+            const fastify = buildMockFastify([]);
+
+            await expect(intent.execute(fastify, orgId, {}, period)).rejects.toThrow('IMAP timeout');
+        });
+
+        it('pasa unseenOnly a searchInbox cuando soloNoLeidos:true', async () => {
+            const intent = getIntentByKey('resumen_correos_recibidos')!;
+            vi.mocked(getActiveEmailAccount).mockResolvedValue({
+                ok: true,
+                account: {
+                    id: 'acc-1',
+                    imap_host: 'imap.example.invalid',
+                    imap_port: 993,
+                    imap_secure: true,
+                    imap_username: 'buzon@example.invalid',
+                    vault_secret_id: 'vault-1',
+                    status: 'active',
+                },
+            });
+            vi.mocked(getAccountCredentials).mockResolvedValue({ imapPassword: 'clave', smtpPassword: 'clave' });
+            vi.mocked(searchInbox).mockResolvedValue([]);
+            const fastify = buildMockFastify([]);
+
+            const result = await intent.execute(fastify, orgId, { soloNoLeidos: true }, period);
+            expect(searchInbox).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ unseenOnly: true }));
+            expect(result.warnings[0]).toContain('No tienes correos sin leer');
+        });
     });
 });

@@ -15,7 +15,12 @@
     "src/plugins/permissions.ts",
     "src/services/invitation-service.ts",
     "src/routes/organization-members.ts",
-    "src/routes/admin/permissions.ts"
+    "src/routes/admin/permissions.ts",
+    "src/services/email/email-account-vault.ts",
+    "src/services/email/email-account.service.ts",
+    "src/services/email/email-dispatch.service.ts",
+    "src/services/email/imap-client.ts",
+    "src/services/email/smtp-client.ts"
   ],
   "thresholds": {
     "high": 90,

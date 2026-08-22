@@ -46,7 +46,7 @@ Si el usuario no especifica periodo, usa por defecto: {"type": "este_mes"}.
 REGLAS DURAS OBLIGATORIAS:
 1. Elige EXACTAMENTE UNA intención del catálogo si la pregunta encaja con claridad.
 2. Si la pregunta es ambigua o demasiado vaga (ejemplo: "¿cómo voy?", "¿está bien?", "¿qué pasó?"), responde con status "requiere_aclaracion" y una pregunta de vuelta en "preguntaAclaracion".
-3. Si la pregunta pide algo fuera del catálogo de 18 intenciones (ej. pipeline detallado, nóminas, configuración técnica de IA, inventarios), responde con status "no_resuelta". NUNCA aproximes a la intención más cercana si no corresponde.
+3. Si la pregunta pide algo fuera del catálogo de 22 intenciones (ej. pipeline detallado, nóminas, configuración técnica de IA, inventarios), responde con status "no_resuelta". NUNCA aproximes a la intención más cercana si no corresponde.
 4. PROHIBIDO inventar intenciones o parámetros.
 5. "interpretation": SIEMPRE incluye una breve frase en español llano que resuma lo que entendiste (ej. "Prospectos nuevos, canal WhatsApp, mes pasado").
 

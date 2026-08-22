@@ -2,6 +2,9 @@
 
 Este documento detalla la arquitectura, el catálogo de intenciones, la gestión de dimensiones temporales y el procedimiento para extender el sistema con nuevas intenciones de reporte en la v2.
 
+> Catálogo actual: **22 intenciones** (18 originales + 4 de correo, ver §2.1 y
+> [`docs/tasks/reportes-nl-correos-backend.md`](tasks/reportes-nl-correos-backend.md)).
+
 ---
 
 ## 🏛️ 1. Arquitectura: "El LLM Traduce, no Consulta"
@@ -42,9 +45,9 @@ Cualquier propuesta que pretenda que el LLM escriba consultas SQL en runtime que
 
 ---
 
-## 📋 2. Catálogo Oficial de Intenciones (v1 - 18 Intenciones)
+## 📋 2. Catálogo Oficial de Intenciones (22 Intenciones)
 
-Las intenciones están agrupadas en 5 familias y definidas en `src/services/reports/intents/`:
+Las intenciones están agrupadas en 6 familias y definidas en `src/services/reports/intents/`:
 
 ### 📅 Agenda
 1. `listado_citas`: Listado de citas agendadas en el periodo con cliente, teléfono, estado y dirección (`LIMIT 50`).
@@ -73,6 +76,12 @@ Las intenciones están agrupadas en 5 familias y definidas en `src/services/repo
 16. `resultado_negocio`: Clientes ganados (`won_at`), monto total vendido (`deal_value`), ticket promedio, min y max.
 17. `cumplimiento_citas`: Tasa de asistencia real (asistieron vs no asistieron vs canceladas vs sin marcar).
 18. `tasa_conversion`: Conversión de conversaciones a citas y de prospectos a clientes ganados.
+
+### 📧 Correos
+19. `conteo_correos_enviados`: Total de correos con `status = 'sent'` en `email_outbox` en el periodo. Única intención que consume `period.previousPeriod` para calcular comparación porcentual contra el periodo anterior (campo `periodoAnterior` en el `data`, solo presente si el LLM clasificó `comparar_con` en la pregunta).
+20. `listado_correos_enviados`: Lista de correos enviados (`status = 'sent'`) con destinatario, asunto y fecha (`limit` opcional, default 10).
+21. `correos_con_error`: Correos con `status = 'failed'` en el periodo, con `error_message` (máx. 15).
+22. `resumen_correos_recibidos`: **Única intención con fuente de datos en vivo (IMAP) en vez de Supabase** — ver §7 para el diseño completo.
 
 ---
 
@@ -121,3 +130,46 @@ Las preguntas que el LLM clasifica como `no_resuelta`, `requiere_aclaracion` o q
 - **Para Superadministradores de la Plataforma:**
   - `GET /api/admin/reports/unanswered-questions` (lista transversal con filtros).
   - `GET /api/admin/reports/unanswered-questions/summary` (resumen de motivos y preguntas más frecuentes para priorizar la v2).
+
+---
+
+## 🗂️ 7. `resumen_correos_recibidos` — Precedente de Intención con Fuente Externa en Vivo
+
+Es la primera (y hasta ahora única) intención cuya fuente de datos no es
+Supabase — abre una conexión IMAP real al buzón vinculado de la organización
+(`docs/mail-integration.md`). Documentado aparte porque establece dos
+patrones que cualquier intención futura con una fuente externa (o un
+prerequisito de negocio que puede faltar) debe seguir:
+
+### Sin llamada a LLM propia dentro de `execute()`
+
+`nl-execution-service.ts::executeIntent()` aplica un timeout **fijo de
+5000 ms a las 22 intenciones por igual**, no configurable por intención.
+Combinar una consulta IMAP en vivo (que ya de por sí puede acercarse al
+presupuesto de `routes/tools/**`, 3.5 s) con una llamada a LLM sin timeout
+propio dentro de esos 5 s es una apuesta a perder — y además duplicaría una
+llamada que el pipeline **ya hace para cualquier intención**:
+`nl-narrative-service.ts` sintetiza la frase de 1-2 líneas a partir de
+`data`, con verificación anti-alucinación incluida. Por eso
+`resumen_correos_recibidos.execute()` solo hace la búsqueda IMAP (con
+`withToolTimeout` interno de 3.5 s) y devuelve la lista estructurada — el
+resumen ejecutivo lo produce el paso de narrativa genérico, igual que las
+otras 21 intenciones. **Ninguna intención debería llamar a un proveedor de
+LLM por su cuenta dentro de `execute()`** — si necesita prosa, es el paso de
+narrativa el que la genera.
+
+### `warnings` en vez de un status nuevo para prerequisitos de negocio faltantes
+
+`AskReportResponse` solo tiene 3 status (`success | requiere_aclaracion |
+no_resuelta`) — no existe un `no_data`. Cuando la organización no tiene
+buzón de correo vinculado (una condición de negocio esperada, no un error
+del sistema), la intención devuelve `status: 'success'` con `data: []` y
+`warnings: ['No tienes ningún buzón de correo vinculado en tu cuenta para
+consultar correos entrantes.']` — `warnings` ya viaja del
+`IntentExecutionResult` a `AskReportSuccessResponse.warnings`, visible al
+cliente aparte de `narrative`. Un fallo real de infraestructura (timeout de
+IMAP, credenciales corruptas) sí se relanza como excepción — el `catch`
+genérico de `askReport()` ya lo convierte en 500 y lo registra en
+`unanswered_questions` con `reason: 'error'`. La distinción es intencional:
+**"faltó un prerequisito que el usuario puede resolver" usa `warnings`;
+"algo se rompió" usa una excepción.**

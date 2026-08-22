@@ -179,3 +179,83 @@ export function isValidDateString(value: string): boolean {
     return !Number.isNaN(new Date(value).getTime());
 }
 
+// Integración de correo nativa (docs/tasks/native-mail-integration.md §3) —
+// `emailAccountId` es opcional a propósito: la mayoría de organizaciones
+// tienen un único buzón vinculado (planes bajos limitan a 1-2), así que el
+// LLM no necesita conocer UUIDs de buzones para el caso común. Cuando el
+// llamador lo omite, la ruta resuelve el único buzón activo de la
+// organización — ver routes/tools/email.ts.
+const toEmailArray = (value: unknown) =>
+    typeof value === 'string' ? value.split(',').map((s) => s.trim()).filter(Boolean) : value;
+
+export const emailSearchBodySchema = z.object({
+    emailAccountId: z.preprocess(emptyStringToUndefined, z.string().uuid().optional()),
+    subject: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    from: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    since: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    before: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    limit: z.preprocess(
+        (v) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : v),
+        z.number().int().positive().max(50).optional()
+    ),
+});
+export type EmailSearchBody = z.infer<typeof emailSearchBodySchema>;
+
+const emailSearchResultItemSchema = z.object({
+    uid: z.number(),
+    from: z.string().nullable(),
+    subject: z.string().nullable(),
+    date: z.string().nullable(),
+    snippet: z.string(),
+});
+
+export const emailSearchResponseSchema = z.object({
+    found: z.boolean(),
+    message: z.string(),
+    messages: z.array(emailSearchResultItemSchema),
+});
+export type EmailSearchResponse = z.infer<typeof emailSearchResponseSchema>;
+
+export const emailReadBodySchema = z.object({
+    emailAccountId: z.preprocess(emptyStringToUndefined, z.string().uuid().optional()),
+    uid: z.union([z.number().int().positive(), z.string().min(1)]),
+});
+export type EmailReadBody = z.infer<typeof emailReadBodySchema>;
+
+export const emailReadResponseSchema = z.object({
+    found: z.boolean(),
+    message: z.string(),
+    email: z
+        .object({
+            uid: z.number(),
+            from: z.string().nullable(),
+            to: z.array(z.string()),
+            subject: z.string().nullable(),
+            date: z.string().nullable(),
+            bodyText: z.string(),
+            truncated: z.boolean(),
+        })
+        .nullable(),
+});
+export type EmailReadResponse = z.infer<typeof emailReadResponseSchema>;
+
+export const emailDispatchBodySchema = z.object({
+    emailAccountId: z.preprocess(emptyStringToUndefined, z.string().uuid().optional()),
+    idempotencyKey: z.string().min(1),
+    toAddresses: z.preprocess(toEmailArray, z.array(z.string().email()).min(1)),
+    ccAddresses: z.preprocess(toEmailArray, z.array(z.string().email()).optional()),
+    subject: z.string().min(1),
+    bodyText: z.string().min(1),
+    bodyHtml: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    contactId: z.preprocess(emptyStringToUndefined, z.string().uuid().optional()),
+    isDraft: z.boolean().default(false),
+});
+export type EmailDispatchBody = z.infer<typeof emailDispatchBodySchema>;
+
+export const emailDispatchResponseSchema = z.object({
+    dispatched: z.boolean(),
+    message: z.string(),
+    status: z.enum(['draft', 'sent']).nullable(),
+});
+export type EmailDispatchResponse = z.infer<typeof emailDispatchResponseSchema>;
+

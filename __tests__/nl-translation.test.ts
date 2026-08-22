@@ -21,6 +21,60 @@ describe('services/reports/nl-translation-service.ts', () => {
         expect(prompt).toContain('¿Cuántas citas tengo hoy?');
     });
 
+    it('el catálogo del prompt incluye las 4 intenciones de correos y el conteo actualizado a 22', () => {
+        const prompt = buildTranslationPrompt('¿Cuántos correos se han mandado?', 'America/Mexico_City', fixedNow);
+        expect(prompt).toContain('conteo_correos_enviados');
+        expect(prompt).toContain('listado_correos_enviados');
+        expect(prompt).toContain('correos_con_error');
+        expect(prompt).toContain('resumen_correos_recibidos');
+        expect(prompt).toContain('catálogo de 22 intenciones');
+    });
+
+    describe.each([
+        { intent: 'conteo_correos_enviados', question: '¿Cuántos correos se han mandado este mes?' },
+        { intent: 'listado_correos_enviados', question: '¿Cuáles fueron los últimos correos enviados?' },
+        { intent: 'correos_con_error', question: '¿Qué correos fallaron?' },
+        { intent: 'resumen_correos_recibidos', question: '¿Qué correos me llegaron hoy?' },
+    ])('clasificación de la nueva intención $intent', ({ intent, question }) => {
+        it(`traduce "${question}" a status:success con intent:"${intent}"`, async () => {
+            vi.spyOn(llmConfigService, 'getLlmConfig').mockResolvedValue({
+                provider: 'openai',
+                model: 'gpt-4o-mini',
+                baseUrl: null,
+                validatedAt: '2026-08-18T00:00:00Z',
+                lastError: null,
+            });
+            vi.spyOn(secretService, 'getSecret').mockResolvedValue('sk-mock-key');
+            vi.spyOn(llmConfigService, 'recordLlmUsage').mockResolvedValue();
+
+            const mockProvider = {
+                complete: vi.fn().mockResolvedValue({
+                    text: JSON.stringify({
+                        status: 'success',
+                        intent,
+                        parameters: { periodo: { type: 'este_mes' } },
+                        interpretation: `Interpretación de prueba para ${intent}`,
+                    }),
+                    inputTokens: 200,
+                    outputTokens: 50,
+                }),
+            };
+            vi.spyOn(LlmProviderFactory, 'getProvider').mockReturnValue(mockProvider as any);
+
+            const mockFastify = {
+                log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+                supabaseAdmin: {},
+            } as unknown as FastifyInstance;
+
+            const result = await translateQuestion(mockFastify, 'org-123', { question, timezone: 'America/Mexico_City', now: fixedNow });
+
+            expect(result.status).toBe('success');
+            if (result.status === 'success') {
+                expect(result.intent).toBe(intent);
+            }
+        });
+    });
+
     it('devuelve status success cuando el LLM retorna una intención válida del catálogo', async () => {
         vi.spyOn(llmConfigService, 'getLlmConfig').mockResolvedValue({
             provider: 'openai',
