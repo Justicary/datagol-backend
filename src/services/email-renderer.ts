@@ -11,6 +11,7 @@ import {
     type ThankYouEmailData,
     type WeeklyReportEmailData,
     type PendingOutcomeReminderEmailData,
+    type CustomTemplateEmailData,
 } from '../types/email-templates.js';
 import { type SafeEmailTheme, DEFAULT_DATAGOL_EMAIL_THEME } from './email-theme.js';
 
@@ -419,6 +420,32 @@ function buildContentBlock(
                     sections: [{ title: 'Citas sin desenlace', contentHtml: tableHtml, contentText: tableText, type: 'box' }],
                     primaryAction: d.dashboardUrl ? { label: 'Marcar desenlace ahora', url: d.dashboardUrl } : undefined,
                     footerNote: 'Generado automáticamente por Datagol AI',
+                },
+            };
+        }
+
+        case EMAIL_TYPES.CUSTOM_TEMPLATE_MESSAGE: {
+            const d = (data as CustomTemplateEmailData) || { subject: 'Mensaje', bodyHtml: '', bodyText: '' };
+
+            // `bodyHtml`/`bodyText` ya vienen convertidos por
+            // `lib/markdown-lite.ts` (send-template-email.service.ts) — a
+            // diferencia del resto de los tipos, este `contentHtml` NO se
+            // pasa por `escapeHtml()` de nuevo: ya es HTML seguro generado
+            // por el propio backend, escaparlo otra vez mostraría las
+            // etiquetas como texto literal.
+            return {
+                subject: d.subject,
+                block: {
+                    title: d.subject,
+                    sections: [
+                        {
+                            title: 'Mensaje',
+                            contentHtml: d.bodyHtml,
+                            contentText: d.bodyText,
+                            type: 'box',
+                        },
+                    ],
+                    footerNote: `Enviado por ${businessName} vía Datagol AI`,
                 },
             };
         }

@@ -32,6 +32,7 @@ export const EMAIL_TYPES = {
     WEEKLY_PLANNING_REPORT: 'weekly_planning_report',
     WEEKLY_EXECUTIVE_REPORT: 'weekly_executive_report',
     PENDING_OUTCOME_REMINDER: 'pending_outcome_reminder',
+    CUSTOM_TEMPLATE_MESSAGE: 'custom_template_message',
 } as const;
 
 export type EmailTypeId = (typeof EMAIL_TYPES)[keyof typeof EMAIL_TYPES];
@@ -162,6 +163,20 @@ export interface PendingOutcomeReminderEmailData {
     dashboardUrl?: string | null;
 }
 
+/**
+ * Datos para un correo de mensaje libre con plantilla visual
+ * (`send-template-email`, docs/tasks/send-template-email-backend.md): el
+ * cuerpo ya viene convertido a HTML/texto por `lib/markdown-lite.ts` — este
+ * tipo de correo no interpreta markdown, solo lo posiciona dentro de la
+ * plantilla visual elegida.
+ */
+export interface CustomTemplateEmailData {
+    subject: string;
+    bodyHtml: string;
+    bodyText: string;
+    businessName?: string | null;
+}
+
 export type EmailDataPayload =
     | { type: typeof EMAIL_TYPES.CALL_SUMMARY; data: CallSummaryEmailData }
     | { type: typeof EMAIL_TYPES.HOT_LEAD; data: HotLeadEmailData }
@@ -171,4 +186,5 @@ export type EmailDataPayload =
     | { type: typeof EMAIL_TYPES.THANK_YOU; data: ThankYouEmailData }
     | { type: typeof EMAIL_TYPES.WEEKLY_PLANNING_REPORT; data: WeeklyReportEmailData }
     | { type: typeof EMAIL_TYPES.WEEKLY_EXECUTIVE_REPORT; data: WeeklyReportEmailData }
-    | { type: typeof EMAIL_TYPES.PENDING_OUTCOME_REMINDER; data: PendingOutcomeReminderEmailData };
+    | { type: typeof EMAIL_TYPES.PENDING_OUTCOME_REMINDER; data: PendingOutcomeReminderEmailData }
+    | { type: typeof EMAIL_TYPES.CUSTOM_TEMPLATE_MESSAGE; data: CustomTemplateEmailData };

@@ -78,9 +78,37 @@ export interface EmailSearchFilters {
 export interface EmailSearchResultItem {
     uid: number;
     from: string | null;
+    fromName: string | null;
     subject: string | null;
     date: string | null;
     snippet: string;
+}
+
+/**
+ * FETCH de envelopes para un lote de UIDs ya resueltos, compartido por
+ * `searchInbox` y `getInboxSnapshot` para no duplicar el mapeo
+ * envelope -> `EmailSearchResultItem`. Requiere que el llamador ya tenga el
+ * lock del mailbox abierto.
+ */
+async function fetchEnvelopes(client: ImapFlow, uids: number[]): Promise<EmailSearchResultItem[]> {
+    const results: EmailSearchResultItem[] = [];
+
+    for await (const msg of client.fetch(uids, { envelope: true }, { uid: true })) {
+        const from = msg.envelope?.from?.[0];
+        results.push({
+            uid: msg.uid,
+            from: from ? (from.address ?? from.name ?? null) : null,
+            fromName: from?.name ?? null,
+            subject: msg.envelope?.subject ?? null,
+            date: msg.envelope?.date ? new Date(msg.envelope.date).toISOString() : null,
+            snippet: (msg.envelope?.subject ?? '').slice(0, 140),
+        });
+    }
+
+    // client.fetch no garantiza el orden de `uids`; se reordena por UID
+    // descendente (más reciente primero) explícitamente.
+    results.sort((a, b) => b.uid - a.uid);
+    return results;
 }
 
 /**
@@ -113,29 +141,64 @@ export async function searchInbox(
             }
 
             const targetUids = uids.slice(-limit).reverse();
-            const results: EmailSearchResultItem[] = [];
-
-            for await (const msg of client.fetch(targetUids, { envelope: true }, { uid: true })) {
-                const from = msg.envelope?.from?.[0];
-                results.push({
-                    uid: msg.uid,
-                    from: from ? (from.address ?? from.name ?? null) : null,
-                    subject: msg.envelope?.subject ?? null,
-                    date: msg.envelope?.date ? new Date(msg.envelope.date).toISOString() : null,
-                    snippet: (msg.envelope?.subject ?? '').slice(0, 140),
-                });
-            }
-
-            // client.fetch no garantiza el orden de targetUids; se reordena
-            // por UID descendente (más reciente primero) explícitamente.
-            results.sort((a, b) => b.uid - a.uid);
-            return results;
+            return await fetchEnvelopes(client, targetUids);
         } finally {
             lock.release();
         }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         throw new ImapConnectionError(`Error buscando correos: ${msg}`);
+    } finally {
+        try {
+            await client.logout();
+        } catch {
+            // Nada que cerrar si nunca llegó a conectar.
+        }
+    }
+}
+
+export interface InboxSnapshot {
+    totalMessages: number;
+    unreadCount: number;
+    unreadItems: EmailSearchResultItem[];
+}
+
+/**
+ * Snapshot de bandeja para el resumen de correo del dashboard admin
+ * (docs/tasks/email-inbox-summary-backend.md): UNA sola conexión que hace
+ * STATUS INBOX y, si hay no leídos, SEARCH+FETCH de los últimos
+ * `unreadLimit` — a diferencia de encadenar dos llamadas separadas (que
+ * abrirían dos sockets TLS), reutiliza la misma sesión para ambos pasos,
+ * igual que describe el diagrama de secuencia del doc de spec.
+ */
+export async function getInboxSnapshot(config: ImapConnectionConfig, unreadLimit = 5): Promise<InboxSnapshot> {
+    const client = buildClient(config);
+
+    try {
+        await client.connect();
+        const status = await client.status('INBOX', { messages: true, unseen: true });
+        const totalMessages = status.messages ?? 0;
+        const unreadCount = status.unseen ?? 0;
+
+        if (unreadCount === 0) {
+            return { totalMessages, unreadCount, unreadItems: [] };
+        }
+
+        const lock = await client.getMailboxLock('INBOX');
+        try {
+            const uids = (await client.search({ seen: false }, { uid: true })) as number[] | false;
+            if (!uids || uids.length === 0) {
+                return { totalMessages, unreadCount, unreadItems: [] };
+            }
+            const targetUids = uids.slice(-unreadLimit).reverse();
+            const unreadItems = await fetchEnvelopes(client, targetUids);
+            return { totalMessages, unreadCount, unreadItems };
+        } finally {
+            lock.release();
+        }
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new ImapConnectionError(`Error consultando estado de bandeja: ${msg}`);
     } finally {
         try {
             await client.logout();

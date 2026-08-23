@@ -3,6 +3,7 @@ import { isPlatformAdmin } from '../../lib/platform-admin.js';
 import { isFeatureEnabled } from '../../services/entitlements.js';
 import { FEATURE_KEYS } from '../../types/feature-taxonomy.js';
 import { validateAndSaveAccount, listAccounts, deleteAccount } from '../../services/email/email-account.service.js';
+import { getInboxSummary } from '../../services/email/email-summary.service.js';
 import {
     emailAccountOrgParamsSchema,
     emailAccountDeleteParamsSchema,
@@ -10,6 +11,7 @@ import {
     listEmailAccountsResponseSchema,
     createEmailAccountResponseSchema,
 } from '../../schemas/email-account.js';
+import { emailInboxSummaryResponseSchema } from '../../schemas/email-summary.js';
 
 /**
  * Gestión administrativa de buzones IMAP/SMTP por organización
@@ -92,6 +94,32 @@ export const adminEmailAccountsRoutes: FastifyPluginAsync = async (fastify) => {
                 account: result.account,
             })
         );
+    });
+
+    /**
+     * GET /api/admin/email-accounts/organization/:orgId/inbox-summary
+     * Resumen consolidado para el widget de correo del dashboard
+     * (docs/tasks/email-inbox-summary-backend.md): no leídos (IMAP en vivo,
+     * con caché de 60s), borradores/errores/enviados de `email_outbox`.
+     * Nunca responde 500 por un fallo del proveedor IMAP — degrada a
+     * métricas parciales, igual que `routes/tools/email.ts`.
+     */
+    fastify.get('/api/admin/email-accounts/organization/:orgId/inbox-summary', async (request, reply) => {
+        const paramsResult = emailAccountOrgParamsSchema.safeParse(request.params);
+        if (!paramsResult.success) {
+            return reply.status(400).send({ error: 'BadRequest', message: 'El parámetro "orgId" debe ser un UUID válido.' });
+        }
+        const { orgId } = paramsResult.data;
+
+        try {
+            const summary = await getInboxSummary(fastify, orgId);
+            return reply.status(200).send(emailInboxSummaryResponseSchema.parse(summary));
+        } catch (err) {
+            return reply.status(500).send({
+                error: 'InternalServerError',
+                message: err instanceof Error ? err.message : 'Error obteniendo el resumen de correo.',
+            });
+        }
     });
 
     /**

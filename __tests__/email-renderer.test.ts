@@ -62,6 +62,12 @@ describe('FASE C — Motor de renderizado de correos (email-renderer.ts)', () =>
             attachmentDownloadUrl: 'https://cdn.datagol.net/attachments/brochure.pdf',
             attachmentFileName: 'brochure_2026.pdf',
         },
+        [EMAIL_TYPES.CUSTOM_TEMPLATE_MESSAGE]: {
+            subject: 'Propuesta y resumen para Juan — Acme Corp',
+            bodyHtml: '<p style="margin: 0 0 12px 0;">Hola Juan,</p><p style="margin: 0 0 12px 0;">Fue un gusto conversar sobre Acme Corp. Adjunto los detalles acordados.</p>',
+            bodyText: 'Hola Juan,\n\nFue un gusto conversar sobre Acme Corp. Adjunto los detalles acordados.',
+            businessName: 'Datagol Ventas',
+        },
     };
 
     describe('Matriz de 5 plantillas × 5 tipos de correo', () => {

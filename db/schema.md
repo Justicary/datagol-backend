@@ -676,6 +676,8 @@ Borradores y bitácora de envío de correo por organización, con clave de idemp
 | `error_message` | `text` |  Nullable |
 | `created_at` | `timestamptz` |  |
 | `sent_at` | `timestamptz` |  Nullable |
+| `attachments` | `jsonb` |  Nullable |
+| `reply_to` | `text` |  Nullable |
 
 ## RLS Policies
 

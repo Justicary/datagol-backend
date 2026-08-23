@@ -80,13 +80,21 @@ export async function verifySmtpConnection(config: SmtpConnectionConfig): Promis
     }
 }
 
+export interface SendEmailAttachment {
+    filename: string;
+    content: Buffer;
+    contentType: string;
+}
+
 export interface SendEmailParams {
     fromAddress: string;
     to: string[];
     cc?: string[];
+    replyTo?: string;
     subject: string;
     text: string;
     html?: string;
+    attachments?: SendEmailAttachment[];
 }
 
 export interface SendEmailResult {
@@ -100,9 +108,11 @@ export async function sendEmail(config: SmtpConnectionConfig, params: SendEmailP
             from: params.fromAddress,
             to: params.to.join(', '),
             cc: params.cc && params.cc.length > 0 ? params.cc.join(', ') : undefined,
+            replyTo: params.replyTo,
             subject: params.subject,
             text: params.text,
             html: params.html,
+            attachments: params.attachments,
         });
         return { providerMessageId: info.messageId ?? null };
     } catch (err: unknown) {
