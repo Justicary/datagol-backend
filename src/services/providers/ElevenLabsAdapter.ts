@@ -25,7 +25,14 @@ export class ElevenLabsAdapter implements IVoiceProvider {
     orgConfig: Record<string, unknown>
   ): Promise<OutboundCallResult> {
     const apiKey = (orgConfig.elevenlabs_api_key as string) || this.defaultApiKey;
-    const agentId = (orgConfig.elevenlabs_agent_id as string) || this.defaultAgentId;
+    // "agent_test_widget"/"test_agent" son centinelas de "agente aún no
+    // configurado" que siembra el onboarding (ver isDummyAgent en
+    // datagol-frontend/src/app/api/voice/agent/route.ts) — nunca existen en
+    // ElevenLabs, así que se tratan como ausentes en vez de intentar marcar
+    // con ellos.
+    const dbAgentId = orgConfig.elevenlabs_agent_id as string | undefined;
+    const isDummyAgent = !dbAgentId || dbAgentId === 'agent_test_widget' || dbAgentId === 'test_agent';
+    const agentId = isDummyAgent ? this.defaultAgentId : dbAgentId;
     const callerNumber =
       (orgConfig.phone_number as string) ||
       (orgConfig.telnyx_phone_number as string) ||

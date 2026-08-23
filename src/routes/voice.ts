@@ -8,10 +8,12 @@ import { LEAD_CHANNELS } from '../types/lead-enums.js';
 // Problema 2): 3 llamadas/hora por IP de origen, 2 llamadas/día al mismo
 // número marcado. Cuenta también los intentos que fallan — un atacante no
 // debe poder reintentar sin límite solo porque un intento anterior fue
-// rechazado.
-const IP_RATE_LIMIT = 3;
+// rechazado. En desarrollo se relaja para no bloquear pruebas manuales
+// repetidas (mismo criterio que datagol-frontend/src/lib/rate-limit.ts).
+const isDev = process.env.NODE_ENV === 'development';
+const IP_RATE_LIMIT = isDev ? 100 : 3;
 const IP_RATE_WINDOW_MS = 60 * 60 * 1000;
-const PHONE_RATE_LIMIT = 2;
+const PHONE_RATE_LIMIT = isDev ? 50 : 2;
 const PHONE_RATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function resolveSourceIp(request: any): string {
