@@ -5,7 +5,7 @@
 
 export interface ValidatedFileMime {
     mimeType: string;
-    extension: 'pdf' | 'docx' | 'xlsx' | 'png' | 'jpg';
+    extension: 'pdf' | 'docx' | 'xlsx' | 'png' | 'jpg' | 'webp';
 }
 
 export const ALLOWED_MIME_TYPES = {
@@ -14,9 +14,16 @@ export const ALLOWED_MIME_TYPES = {
     XLSX: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     PNG: 'image/png',
     JPEG: 'image/jpeg',
+    WEBP: 'image/webp',
 } as const;
 
 export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+// Imagen de producto de catálogo (docs/tasks/catalogo-productos-grupos-cred.md):
+// tope deliberadamente más bajo que un adjunto de organización (10 MB) — es
+// una foto de producto para dashboard, WhatsApp y el tool de voz/texto, no un
+// archivo de alta resolución. 5 MB, PNG/JPEG/WebP.
+export const MAX_PRODUCT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Inspecciona el buffer binario para verificar si corresponde a un PDF, DOCX o XLSX legítimo.
@@ -108,5 +115,57 @@ export function validateAttachmentMagicBytes(buffer: Buffer): ValidatedFileMime 
     }
 
     // Ninguna firma admitida coincidió
+    return null;
+}
+
+/**
+ * Igual que `validateAttachmentMagicBytes`, pero restringido a imágenes
+ * (PNG/JPEG/WebP) y con su propio tope de tamaño — nunca reutiliza
+ * `MAX_ATTACHMENT_SIZE_BYTES` (10 MB): una imagen de producto tiene su propio
+ * límite, `MAX_PRODUCT_IMAGE_SIZE_BYTES` (5 MB).
+ */
+export function validateImageMagicBytes(buffer: Buffer, maxBytes: number = MAX_PRODUCT_IMAGE_SIZE_BYTES): ValidatedFileMime | null {
+    if (!buffer || buffer.length < 8) {
+        return null;
+    }
+
+    if (buffer.length > maxBytes) {
+        return null;
+    }
+
+    // PNG: firma fija de 8 bytes.
+    if (
+        buffer[0] === 0x89 &&
+        buffer[1] === 0x50 &&
+        buffer[2] === 0x4e &&
+        buffer[3] === 0x47 &&
+        buffer[4] === 0x0d &&
+        buffer[5] === 0x0a &&
+        buffer[6] === 0x1a &&
+        buffer[7] === 0x0a
+    ) {
+        return { mimeType: ALLOWED_MIME_TYPES.PNG, extension: 'png' };
+    }
+
+    // JPEG: marcador SOI 0xFF 0xD8 0xFF.
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        return { mimeType: ALLOWED_MIME_TYPES.JPEG, extension: 'jpg' };
+    }
+
+    // WebP: contenedor RIFF ("RIFF" en 0-3, "WEBP" en 8-11).
+    if (
+        buffer.length >= 12 &&
+        buffer[0] === 0x52 &&
+        buffer[1] === 0x49 &&
+        buffer[2] === 0x46 &&
+        buffer[3] === 0x46 &&
+        buffer[8] === 0x57 &&
+        buffer[9] === 0x45 &&
+        buffer[10] === 0x42 &&
+        buffer[11] === 0x50
+    ) {
+        return { mimeType: ALLOWED_MIME_TYPES.WEBP, extension: 'webp' };
+    }
+
     return null;
 }

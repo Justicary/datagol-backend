@@ -121,6 +121,14 @@ const elevenLabsWebhookSchema = z.object({
                 // contarla duplicaría tokens.
                 charging: z
                     .object({
+                        // Grupos de credenciales compartidos (docs/tasks/catalogo-productos-grupos-cred.md
+                        // FASE B.4): true cuando la llamada rebasó el pozo de
+                        // concurrencia contratado y ElevenLabs la facturó al
+                        // doble (agent_minute_burst en vez de agent_minute —
+                        // ver usage-registration.ts). Ausente/false en el caso
+                        // normal, igual que is_burst en todo payload que no
+                        // haya sido burst.
+                        is_burst: z.boolean().optional(),
                         llm_usage: z
                             .object({
                                 irreversible_generation: z
@@ -278,6 +286,13 @@ export interface MappedCallData {
      * es responsable de advertir con el conversation_id cuando esto pasa.
      */
     llmTokenUsage: LlmModelTokenUsage[];
+    /**
+     * `metadata.charging.is_burst` (docs/tasks/catalogo-productos-grupos-cred.md
+     * FASE B.4): `true` cuando ElevenLabs facturó esta llamada al doble por
+     * rebasar el pozo de concurrencia del grupo. `false` cuando el campo viene
+     * ausente o en `false` — nunca se asume burst por defecto.
+     */
+    isBurst: boolean;
 }
 
 /**
@@ -544,6 +559,7 @@ export function mapElevenLabsPayload(rawPayload: unknown): MappedCallData | null
         whatsappMessageQuantity,
         channel,
         llmTokenUsage,
+        isBurst: data.metadata?.charging?.is_burst === true,
     };
 }
 

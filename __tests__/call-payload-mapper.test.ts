@@ -592,6 +592,47 @@ describe('2.2 — Mapeo del payload de post-llamada de ElevenLabs a leads', () =
     });
 
     /**
+     * `isBurst` (`metadata.charging.is_burst`) — docs/tasks/catalogo-productos-grupos-cred.md
+     * FASE B.4: metering de grupos de credenciales compartidos.
+     */
+    describe('isBurst (metadata.charging.is_burst)', () => {
+        it('is_burst: true se mapea a isBurst: true', () => {
+            const payload: any = buildPayload({});
+            payload.data.metadata.charging = { is_burst: true };
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.isBurst).toBe(true);
+        });
+
+        it('contraparte: is_burst: false se mapea a isBurst: false', () => {
+            const payload: any = buildPayload({});
+            payload.data.metadata.charging = { is_burst: false };
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.isBurst).toBe(false);
+        });
+
+        it('sin metadata.charging.is_burst en absoluto, isBurst queda en false (nunca se asume burst por defecto)', () => {
+            const payload = buildPayload({});
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.isBurst).toBe(false);
+        });
+
+        it('is_burst coexiste con llm_usage en el mismo objeto charging sin interferir entre sí', () => {
+            const payload: any = buildPayload({});
+            payload.data.metadata.charging = {
+                is_burst: true,
+                llm_usage: {
+                    irreversible_generation: {
+                        model_usage: { 'gemini-2.5-flash': { input: { tokens: 10 }, output_total: { tokens: 2 } } },
+                    },
+                },
+            };
+            const mapped = mapElevenLabsPayload(payload);
+            expect(mapped!.isBurst).toBe(true);
+            expect(mapped!.llmTokenUsage).toEqual([{ model: 'gemini-2.5-flash', inputTokens: 10, outputTokens: 2 }]);
+        });
+    });
+
+    /**
      * Continuidad cross-canal — caso real de producción:
      * conv_6201kzkmwnd8e658dn4c8fqg1c0d trae
      * metadata.whatsapp.whatsapp_user_id = '5212213528341' (sin '+', con el

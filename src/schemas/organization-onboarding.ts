@@ -77,6 +77,13 @@ export const credentialsStatusResponseSchema = z.object({
             rotatedAt: z.string().nullable(),
         })
     ),
+    // FASE B.2 (grupos de credenciales): en grupo de uno, isOwner siempre es
+    // true y managedByOrganizationName siempre null — comportamiento idéntico
+    // al de antes de que existieran los grupos. En un grupo compartido real,
+    // un miembro no-owner ve las llaves en solo lectura con el nombre de
+    // quién las administra.
+    isOwner: z.boolean(),
+    managedByOrganizationName: z.string().nullable(),
 });
 
 export const tokensResponseSchema = z.object({

@@ -13,6 +13,8 @@ import { registerSweepCompetitorAnalysisWorker } from './sweep-competitor-analys
 import { registerReconcileCalBookingsWorker } from './reconcile-cal-bookings.js';
 import { registerNotifyPendingOutcomesWorker } from './notify-pending-outcomes.js';
 import { registerSendTemplateEmailWorker } from './send-template-email.js';
+import { registerCheckConcurrencyQuotaWorker } from './check-concurrency-quota.js';
+import { registerSyncCatalogKbWorker } from './sync-catalog-kb.js';
 
 /**
  * Registra todos los workers de pg-boss de la aplicación. Se invoca una vez
@@ -33,4 +35,6 @@ export async function registerJobs(fastify: FastifyInstance): Promise<void> {
     await registerReconcileCalBookingsWorker(fastify);
     await registerNotifyPendingOutcomesWorker(fastify);
     await registerSendTemplateEmailWorker(fastify);
+    await registerCheckConcurrencyQuotaWorker(fastify);
+    await registerSyncCatalogKbWorker(fastify);
 }

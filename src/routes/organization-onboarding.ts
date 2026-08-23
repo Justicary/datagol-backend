@@ -5,6 +5,7 @@ import { getPermissionsForUser } from '../services/permission-service.js';
 import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { setSecret, listSecretStatus } from '../services/secret-service.js';
 import { SECRET_KEYS, type SecretKey } from '../types/secret-keys.js';
+import { getCredentialGroupOwner, getOrganizationName } from '../services/credential-group-service.js';
 import { setOrganizationPlan, checkProviderCredentials, getOrganizationFeatures } from '../services/entitlements.js';
 import { reprovisionAgent } from '../services/agent-provisioning.js';
 import {
@@ -246,6 +247,21 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
         const ctx = await authorizeForOrganization(request, reply, PERMISSION_KEYS.MANAGE_CREDENTIALS);
         if (!ctx) return;
 
+        // FASE B.2 (docs/tasks/catalogo-productos-grupos-cred.md): rotar una
+        // llave compartida tumba a todo el grupo, así que solo el owner del
+        // grupo puede hacerlo. En grupo de uno, ctx.organizationId siempre es
+        // su propio owner — este chequeo no cambia nada para el caso normal.
+        const groupOwner = await getCredentialGroupOwner(ctx.organizationId);
+        if (groupOwner && groupOwner.ownerOrganizationId !== ctx.organizationId) {
+            const ownerName = await getOrganizationName(groupOwner.ownerOrganizationId);
+            return reply.status(403).send({
+                success: false,
+                error: 'Forbidden',
+                code: 'CREDENTIAL_GROUP_NOT_OWNER',
+                message: `Esta credencial es compartida por el grupo de credenciales; solo ${ownerName ?? 'la organización dueña del grupo'} puede rotarla.`,
+            });
+        }
+
         const bodyResult = credentialsBodySchema.safeParse(request.body);
         if (!bodyResult.success) {
             return reply.status(400).send({ success: false, error: 'Cuerpo de la petición inválido: se requiere "provider" y "value".' });
@@ -286,7 +302,17 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
         if (!ctx) return;
 
         const status = await listSecretStatus(ctx.organizationId);
-        return reply.status(200).send(credentialsStatusResponseSchema.parse({ success: true, data: status }));
+
+        // FASE B.2: si esta organización no es la owner de su grupo, el
+        // frontend necesita saber quién administra estas llaves para
+        // mostrarlas en solo lectura con esa nota.
+        const groupOwner = await getCredentialGroupOwner(ctx.organizationId);
+        const isOwner = !groupOwner || groupOwner.ownerOrganizationId === ctx.organizationId;
+        const managedByOrganizationName = isOwner ? null : await getOrganizationName(groupOwner!.ownerOrganizationId);
+
+        return reply.status(200).send(
+            credentialsStatusResponseSchema.parse({ success: true, data: status, isOwner, managedByOrganizationName })
+        );
     });
 
     /**

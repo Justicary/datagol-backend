@@ -26,26 +26,50 @@ function extractConversationId(body: unknown): string | null {
     return typeof conversationId === 'string' && conversationId.trim() !== '' ? conversationId : null;
 }
 
+function extractAgentId(body: unknown): string | null {
+    if (!body || typeof body !== 'object') return null;
+    const data = (body as Record<string, unknown>).data;
+    if (!data || typeof data !== 'object') return null;
+    const agentId = (data as Record<string, unknown>).agent_id;
+    return typeof agentId === 'string' && agentId.trim() !== '' ? agentId : null;
+}
+
 /**
- * Ruta de webhook de post-llamada de ElevenLabs (Fase 2.1).
+ * Ruta de webhook de post-llamada de ElevenLabs (Fase 2.1; extendida en
+ * docs/tasks/catalogo-productos-grupos-cred.md FASE B.3 para workspace
+ * compartido).
  *
- * La URL es específica por organización: `/webhooks/elevenlabs/:webhookToken`.
- * `webhookToken` (columna `organizations.webhook_token`) resuelve el tenant
- * ANTES de tocar el cuerpo de la petición — no depende de ningún campo del
- * payload, que un tercero podría falsificar. Es un identificador de
- * enrutamiento, no el secreto: la autenticación real ocurre después, con la
- * firma HMAC verificada contra `webhook_signing_secret` (organization_secrets/Vault).
+ * La URL es específica por instalación: `/webhooks/elevenlabs/:webhookToken`.
+ * `webhookToken` resuelve el tenant (o el GRUPO, si el workspace es
+ * compartido) ANTES de tocar el cuerpo de la petición — no depende de ningún
+ * campo del payload, que un tercero podría falsificar. Es un identificador
+ * de enrutamiento, no el secreto: la autenticación real ocurre después, con
+ * la firma HMAC verificada contra `webhook_signing_secret`
+ * (organization_secrets/Vault, de la organización DUEÑA del grupo).
  *
- * Orden de operaciones, no negociable (ver docs/tasks/backend-implementation.md §2.1):
- * 1. Resolver la organización por `webhookToken` de la ruta.
+ * Resolución en dos caminos, según dónde matchee `webhookToken` primero:
+ *
+ * A. `credential_groups.webhook_token` (workspace COMPARTIDO, FASE B.3): el
+ *    token identifica al GRUPO, no a una organización. Tras verificar la
+ *    firma con el secreto único del grupo, y SOLO ENTONCES, se lee `agent_id`
+ *    del cuerpo y se resuelve la organización por el índice único
+ *    `organizations.elevenlabs_agent_id` — rechazando si esa organización no
+ *    pertenece al grupo ya autenticado.
+ * B. `organizations.webhook_token` (instalación de un solo inquilino, camino
+ *    histórico sin cambios — Fase 2.1 original): el token ya identifica la
+ *    organización directamente, sin necesidad de `agent_id`.
+ *
+ * Orden de operaciones, no negociable en ambos caminos:
+ * 1. Resolver el grupo o la organización por `webhookToken` de la ruta.
  * 2. Verificar la firma antes de procesar el cuerpo.
- * 3. Insertar en `webhook_events` con (provider, event_id) — un reintento no reprocesa.
- * 4. Encolar el trabajo en pg-boss.
- * 5. Responder 2xx de inmediato.
+ * 3. (Solo camino A) Leer `agent_id` del cuerpo y resolver+validar la organización.
+ * 4. Insertar en `webhook_events` con (provider, event_id) — un reintento no reprocesa.
+ * 5. Encolar el trabajo en pg-boss.
+ * 6. Responder 2xx de inmediato.
  *
- * Requisito de onboarding: sin `webhook_token` ni `webhook_signing_secret`
- * dados de alta para la organización (ver scripts/provision-org-secrets.ts),
- * todo webhook a esta ruta se rechaza con 401.
+ * Requisito de onboarding: sin `webhook_token` (de organización o de grupo)
+ * ni `webhook_signing_secret` dados de alta, todo webhook a esta ruta se
+ * rechaza con 401.
  */
 export async function elevenLabsPostCallWebhookRoutes(fastify: FastifyInstance) {
     fastify.post(WEBHOOK_PATH, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -59,37 +83,92 @@ export async function elevenLabsPostCallWebhookRoutes(fastify: FastifyInstance) 
         const signatureHeader = request.headers['elevenlabs-signature'] as string | undefined;
         const body = request.body;
 
-        // 1. Resolver la organización por el token de la ruta, antes de leer el cuerpo.
-        const { data: org, error: orgError } = await fastify.supabaseAdmin
-            .from('organizations')
-            .select('id, status')
+        // 1. Resolver PRIMERO por grupo (workspace compartido, camino A). Si
+        // no matchea ningún grupo, cae al camino B histórico por organización.
+        const { data: group, error: groupError } = await fastify.supabaseAdmin
+            .from('credential_groups')
+            .select('id, owner_organization_id')
             .eq('webhook_token', webhookToken)
             .maybeSingle();
 
-        if (orgError || !org) {
-            request.log.warn({ msg: 'Webhook de ElevenLabs rechazado: webhookToken no resuelve a ninguna organización' });
-            return reply.status(401).send({ error: 'Unauthorized', message: 'Token de webhook inválido' });
+        let signingSecretOwnerId: string;
+        let resolvedGroupId: string | null = null;
+        let singleTenantOrg: { id: string; status: string } | null = null;
+
+        if (!groupError && group && group.owner_organization_id) {
+            signingSecretOwnerId = group.owner_organization_id as string;
+            resolvedGroupId = group.id as string;
+        } else {
+            const { data: org, error: orgError } = await fastify.supabaseAdmin
+                .from('organizations')
+                .select('id, status')
+                .eq('webhook_token', webhookToken)
+                .maybeSingle();
+
+            if (orgError || !org) {
+                request.log.warn({ msg: 'Webhook de ElevenLabs rechazado: webhookToken no resuelve a ningún grupo ni organización' });
+                return reply.status(401).send({ error: 'Unauthorized', message: 'Token de webhook inválido' });
+            }
+
+            signingSecretOwnerId = org.id as string;
+            singleTenantOrg = { id: org.id as string, status: org.status as string };
         }
 
-        const organizationId = org.id as string;
-
         // 2. Solo ahora se recupera el secreto de firma y se verifica.
-        const signingSecret = await getSecret(organizationId, SECRET_KEYS.WEBHOOK_SIGNING_SECRET);
+        // getSecret ya resuelve internamente contra la organización dueña del
+        // grupo (Fase B.1), así que pasar signingSecretOwnerId es correcto en
+        // ambos caminos aunque en el camino A ya sea directamente el owner.
+        const signingSecret = await getSecret(signingSecretOwnerId, SECRET_KEYS.WEBHOOK_SIGNING_SECRET);
         const verification = verifyElevenLabsSignature(rawBody, signatureHeader, signingSecret);
 
         if (!verification.valid) {
             request.log.warn({
-                organizationId,
+                signingSecretOwnerId,
                 reason: verification.reason,
                 msg: 'Webhook de ElevenLabs rechazado: firma inválida',
             });
             return reply.status(401).send({ error: 'Unauthorized', message: 'Firma de webhook inválida' });
         }
 
+        // 3. SOLO ahora (firma ya verificada) se lee agent_id del cuerpo, y
+        // solo en el camino A (grupo): en el camino B la organización ya se
+        // resolvió sin depender de ningún campo del payload.
+        let organizationId: string;
+        let orgStatus: string;
+
+        if (resolvedGroupId) {
+            const agentId = extractAgentId(body);
+            if (!agentId) {
+                request.log.warn({ groupId: resolvedGroupId, msg: 'Webhook de ElevenLabs (workspace compartido) rechazado: el cuerpo no trae agent_id' });
+                return reply.status(401).send({ error: 'Unauthorized', message: 'No se pudo identificar la organización del grupo' });
+            }
+
+            const { data: matchedOrg, error: matchError } = await fastify.supabaseAdmin
+                .from('organizations')
+                .select('id, status, credential_group_id')
+                .eq('elevenlabs_agent_id', agentId)
+                .maybeSingle();
+
+            if (matchError || !matchedOrg || matchedOrg.credential_group_id !== resolvedGroupId) {
+                request.log.warn({
+                    groupId: resolvedGroupId,
+                    agentId,
+                    msg: 'Webhook de ElevenLabs (workspace compartido) rechazado: agent_id no pertenece a ninguna organización de este grupo',
+                });
+                return reply.status(401).send({ error: 'Unauthorized', message: 'agent_id no pertenece a este grupo' });
+            }
+
+            organizationId = matchedOrg.id as string;
+            orgStatus = matchedOrg.status as string;
+        } else {
+            organizationId = singleTenantOrg!.id;
+            orgStatus = singleTenantOrg!.status;
+        }
+
         // Verificado DESPUÉS de la firma (nunca antes, mismo motivo que en
         // tool-auth): una organización suspendida no debe generar ni
         // call_logs ni usage_events nuevos.
-        if (org.status === 'suspended') {
+        if (orgStatus === 'suspended') {
             request.log.warn({ organizationId, msg: 'Webhook de ElevenLabs rechazado: organización suspendida' });
             return reply.status(403).send({ error: 'Forbidden', message: 'Esta organización tiene su implementación suspendida.' });
         }

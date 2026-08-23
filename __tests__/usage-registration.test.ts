@@ -30,6 +30,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
             hasPhoneCallLeg: false,
             isTextChannel: false,
             textMessageQuantity: null,
+            isBurst: false,
             llmTokenUsage: [],
         });
 
@@ -54,6 +55,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
             hasPhoneCallLeg: true,
             isTextChannel: false,
             textMessageQuantity: null,
+            isBurst: false,
             llmTokenUsage: [],
         });
 
@@ -74,6 +76,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
             hasPhoneCallLeg: false,
             isTextChannel: false,
             textMessageQuantity: null,
+            isBurst: false,
             llmTokenUsage: [],
         });
 
@@ -90,6 +93,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
             hasPhoneCallLeg: true,
             isTextChannel: false,
             textMessageQuantity: null,
+            isBurst: false,
             llmTokenUsage: [],
         });
 
@@ -107,6 +111,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
             hasPhoneCallLeg: true,
             isTextChannel: false,
             textMessageQuantity: null,
+            isBurst: false,
             llmTokenUsage: [{ model: 'gemini-2.5-flash', inputTokens: 100, outputTokens: 20 }],
         });
 
@@ -134,6 +139,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: true,
                 textMessageQuantity: null,
+                isBurst: false,
                 llmTokenUsage: [],
             });
 
@@ -151,6 +157,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: true,
                 textMessageQuantity: 7,
+                isBurst: false,
                 llmTokenUsage: [],
             });
 
@@ -170,6 +177,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: true,
                 textMessageQuantity: null,
+                isBurst: false,
                 llmTokenUsage: [],
             });
 
@@ -186,6 +194,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: true,
                 textMessageQuantity: -5,
+                isBurst: false,
                 llmTokenUsage: [],
             });
 
@@ -202,6 +211,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: true, // caso defensivo: no debería pasar en la práctica, pero isTextChannel manda igual
                 isTextChannel: true,
                 textMessageQuantity: 3,
+                isBurst: false,
                 llmTokenUsage: [],
             });
 
@@ -230,6 +240,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: false,
                 textMessageQuantity: null,
+                isBurst: false,
                 llmTokenUsage: [{ model: 'gemini-2.5-flash', inputTokens: 9735, outputTokens: 28 }],
             });
 
@@ -254,6 +265,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: true,
                 textMessageQuantity: 1,
+                isBurst: false,
                 llmTokenUsage: [{ model: 'gemini-2.5-flash', inputTokens: 500, outputTokens: 50 }],
             });
 
@@ -273,6 +285,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: false,
                 textMessageQuantity: null,
+                isBurst: false,
                 llmTokenUsage: [
                     { model: 'gemini-2.5-flash', inputTokens: 100, outputTokens: 10 },
                     { model: 'gpt-4o', inputTokens: 50, outputTokens: 5 },
@@ -295,6 +308,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: false,
                 textMessageQuantity: null,
+                isBurst: false,
                 llmTokenUsage: [],
             });
 
@@ -315,6 +329,7 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 hasPhoneCallLeg: false,
                 isTextChannel: false,
                 textMessageQuantity: null,
+                isBurst: false,
                 llmTokenUsage: [{ model: 'modelo-inexistente-diagnostico', inputTokens: 100, outputTokens: 10 }],
             });
 
@@ -324,6 +339,91 @@ describe('3.2 — resolveCallUsageEntries', () => {
                 expect.objectContaining({ unitType: 'llm_input_token_modelo-inexistente-diagnostico' }),
                 expect.stringContaining('no hay tarifa vigente')
             );
+        });
+    });
+
+    /**
+     * Burst de concurrencia (docs/tasks/catalogo-productos-grupos-cred.md,
+     * FASE B.4): `metadata.charging.is_burst` en `true` factura el minuto con
+     * `agent_minute_burst` (tarifa ya sembrada en provider_rates al doble de
+     * `agent_minute` — 0.16 vs 0.08 al momento de escribir esta prueba, ver
+     * verificación contra la base real más abajo) en vez de `agent_minute`.
+     */
+    describe('burst de concurrencia (metadata.charging.is_burst)', () => {
+        it('is_burst=true registra agent_minute_burst en vez de agent_minute, con la tarifa al doble', async () => {
+            const fastify = buildFakeFastify();
+            const entries = await resolveCallUsageEntries(fastify, {
+                organizationId: REAL_ORG_ID,
+                conversationId: 'conv-usage-burst-1',
+                durationSeconds: 120,
+                occurredAt: new Date('2026-06-01T00:00:00Z'),
+                hasPhoneCallLeg: false,
+                isTextChannel: false,
+                textMessageQuantity: null,
+                isBurst: true,
+                llmTokenUsage: [],
+            });
+
+            const burstEntry = entries.find((e) => e.unit_type === 'agent_minute_burst');
+            expect(burstEntry).toBeDefined();
+            expect(burstEntry?.provider).toBe('elevenlabs');
+            expect(burstEntry?.quantity).toBeCloseTo(2, 5);
+            expect(entries.find((e) => e.unit_type === 'agent_minute')).toBeUndefined();
+
+            const normalEntries = await resolveCallUsageEntries(fastify, {
+                organizationId: REAL_ORG_ID,
+                conversationId: 'conv-usage-burst-comparativo',
+                durationSeconds: 120,
+                occurredAt: new Date('2026-06-01T00:00:00Z'),
+                hasPhoneCallLeg: false,
+                isTextChannel: false,
+                textMessageQuantity: null,
+                isBurst: false,
+                llmTokenUsage: [],
+            });
+            const normalEntry = normalEntries.find((e) => e.unit_type === 'agent_minute');
+            expect(normalEntry).toBeDefined();
+
+            // La tarifa de burst es el doble de la normal — verificado contra
+            // provider_rates real, no un valor fijo hardcodeado en la prueba.
+            expect(burstEntry!.unit_rate_usd).toBeCloseTo(normalEntry!.unit_rate_usd * 2, 10);
+        });
+
+        it('contraparte: is_burst=false (o ausente) sigue registrando agent_minute normal, nunca agent_minute_burst', async () => {
+            const fastify = buildFakeFastify();
+            const entries = await resolveCallUsageEntries(fastify, {
+                organizationId: REAL_ORG_ID,
+                conversationId: 'conv-usage-burst-false',
+                durationSeconds: 90,
+                occurredAt: new Date('2026-06-01T00:00:00Z'),
+                hasPhoneCallLeg: false,
+                isTextChannel: false,
+                textMessageQuantity: null,
+                isBurst: false,
+                llmTokenUsage: [],
+            });
+
+            expect(entries.find((e) => e.unit_type === 'agent_minute')).toBeDefined();
+            expect(entries.find((e) => e.unit_type === 'agent_minute_burst')).toBeUndefined();
+        });
+
+        it('un canal de texto con is_burst=true no genera ningún asiento de duración (agent_minute ni agent_minute_burst nunca aplican a texto)', async () => {
+            const fastify = buildFakeFastify();
+            const entries = await resolveCallUsageEntries(fastify, {
+                organizationId: REAL_ORG_ID,
+                conversationId: 'conv-usage-burst-whatsapp',
+                durationSeconds: 300,
+                occurredAt: new Date('2026-06-01T00:00:00Z'),
+                hasPhoneCallLeg: false,
+                isTextChannel: true,
+                textMessageQuantity: 2,
+                isBurst: true,
+                llmTokenUsage: [],
+            });
+
+            expect(entries.find((e) => e.unit_type === 'agent_minute')).toBeUndefined();
+            expect(entries.find((e) => e.unit_type === 'agent_minute_burst')).toBeUndefined();
+            expect(entries.find((e) => e.unit_type === 'wa_message')).toBeDefined();
         });
     });
 });

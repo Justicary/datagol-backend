@@ -71,7 +71,13 @@ describe('routes/admin/permissions.ts — consola de permisos del superadmin (RB
         // Set exacto (no solo "contiene") — mata mutantes en el inicializador
         // `defaultsByRole[role] = []` y en el push condicionado por `enabled`.
         expect([...body.data.roleDefaults.owner].sort()).toEqual([...ALL_PERMISSION_KEYS].sort());
-        expect([...body.data.roleDefaults.viewer].sort()).toEqual([PERMISSION_KEYS.VIEW_CONTACTS, PERMISSION_KEYS.VIEW_CONVERSATIONS].sort());
+        // view_catalog se agregó al default de viewer en
+        // db/migrations/56_catalogo_productos.sql BLOQUE 10 (catálogo de
+        // productos) — no es sensible, así que viewer lo hereda igual que
+        // view_contacts/view_conversations.
+        expect([...body.data.roleDefaults.viewer].sort()).toEqual(
+            [PERMISSION_KEYS.VIEW_CONTACTS, PERMISSION_KEYS.VIEW_CONVERSATIONS, PERMISSION_KEYS.VIEW_CATALOG].sort()
+        );
         expect(body.data.roleDefaults.member).toContain(PERMISSION_KEYS.EDIT_CONTACTS);
         expect(body.data.roleDefaults.member).not.toContain(PERMISSION_KEYS.MANAGE_USERS);
     });

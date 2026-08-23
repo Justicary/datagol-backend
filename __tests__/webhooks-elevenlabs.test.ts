@@ -377,3 +377,225 @@ describe('2.1 — Idempotencia de entrega en webhook_events', () => {
         expect(rows?.length).toBe(1);
     });
 });
+
+/**
+ * FASE B.3 (docs/tasks/catalogo-productos-grupos-cred.md): workspace
+ * compartido. Requiere db/migrations/57_credential_group_webhook_token.sql
+ * aplicada (columna credential_groups.webhook_token) — sin ella, este
+ * describe entero falla en beforeAll con un error explícito (columna
+ * inexistente), nunca en silencio.
+ */
+describe('2.1 / B.3 — POST /webhooks/elevenlabs/:webhookToken con workspace compartido (grupo de credenciales)', () => {
+    const GROUP_WEBHOOK_TOKEN = `group-token-${crypto.randomUUID()}`;
+    const GROUP_SIGNING_SECRET = 'group-e2e-test-secret-xyz789';
+    const OWNER_AGENT_ID = `agent-owner-${crypto.randomUUID()}`;
+    const MEMBER_AGENT_ID = `agent-member-${crypto.randomUUID()}`;
+    const OUTSIDE_AGENT_ID = `agent-outside-${crypto.randomUUID()}`;
+
+    let groupId: string;
+    let ownerOrgId: string;
+    let memberOrgId: string;
+    let outsideOrgId: string;
+
+    beforeAll(async () => {
+        const { data: group, error: groupErr } = await supabaseAdmin
+            .from('credential_groups')
+            .insert({ name: 'Grupo compartido (webhooks-elevenlabs.test.ts)' })
+            .select('id')
+            .single();
+        if (groupErr || !group) throw new Error(`No se pudo crear credential_groups de prueba: ${groupErr?.message}`);
+        groupId = group.id;
+
+        const { data: owner, error: ownerErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Owner grupo compartido (webhooks-elevenlabs.test.ts)',
+                email: `owner-shared-webhook-test-${Date.now()}@example.invalid`,
+                credential_group_id: groupId,
+                elevenlabs_agent_id: OWNER_AGENT_ID,
+            })
+            .select('id')
+            .single();
+        if (ownerErr || !owner) throw new Error(`No se pudo crear la organización owner: ${ownerErr?.message}`);
+        ownerOrgId = owner.id;
+
+        const { error: groupUpdateErr } = await supabaseAdmin
+            .from('credential_groups')
+            .update({ owner_organization_id: ownerOrgId, webhook_token: GROUP_WEBHOOK_TOKEN })
+            .eq('id', groupId);
+        if (groupUpdateErr) throw new Error(`No se pudo configurar owner/webhook_token del grupo: ${groupUpdateErr.message}`);
+
+        const { data: member, error: memberErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Miembro grupo compartido (webhooks-elevenlabs.test.ts)',
+                email: `member-shared-webhook-test-${Date.now()}@example.invalid`,
+                credential_group_id: groupId,
+                elevenlabs_agent_id: MEMBER_AGENT_ID,
+            })
+            .select('id')
+            .single();
+        if (memberErr || !member) throw new Error(`No se pudo crear la organización miembro: ${memberErr?.message}`);
+        memberOrgId = member.id;
+
+        // Organización FUERA del grupo, con su propio agent_id — usada para
+        // probar el rechazo de "agent_id no pertenece a este grupo".
+        const { data: outside, error: outsideErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Fuera del grupo (webhooks-elevenlabs.test.ts)',
+                email: `outside-shared-webhook-test-${Date.now()}@example.invalid`,
+                elevenlabs_agent_id: OUTSIDE_AGENT_ID,
+            })
+            .select('id')
+            .single();
+        if (outsideErr || !outside) throw new Error(`No se pudo crear la organización fuera del grupo: ${outsideErr?.message}`);
+        outsideOrgId = outside.id;
+
+        const saved = await setSecret(ownerOrgId, SECRET_KEYS.WEBHOOK_SIGNING_SECRET, GROUP_SIGNING_SECRET);
+        if (!saved) throw new Error('No se pudo guardar webhook_signing_secret del grupo de prueba');
+        clearSecretCache(ownerOrgId);
+    });
+
+    afterAll(async () => {
+        await supabaseAdmin.from('webhook_events').delete().in('organization_id', [ownerOrgId, memberOrgId, outsideOrgId].filter(Boolean));
+        if (outsideOrgId) await supabaseAdmin.from('organizations').delete().eq('id', outsideOrgId);
+        if (memberOrgId) await supabaseAdmin.from('organizations').delete().eq('id', memberOrgId);
+        if (ownerOrgId) await supabaseAdmin.from('organizations').delete().eq('id', ownerOrgId);
+        if (groupId) await supabaseAdmin.from('credential_groups').delete().eq('id', groupId);
+    });
+
+    it('la firma se verifica ANTES de leer agent_id del cuerpo: firma inválida rechaza con 401 aunque el cuerpo ni siquiera traiga agent_id', async () => {
+        const app = await buildTestApp();
+        try {
+            const rawBody = JSON.stringify({ type: 'post_call_transcription', data: { conversation_id: 'shared-webhook-test:no-agent-id' } });
+            const badSignature = signPayload(rawBody, 'secreto-que-no-es-el-del-grupo');
+
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${GROUP_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': badSignature },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(401);
+            expect(response.json().error).toBe('Unauthorized');
+            expect(response.json().message).not.toContain('agent_id');
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('contraparte de éxito: firma válida + agent_id de un MIEMBRO no-owner del grupo resuelve esa organización y encola el trabajo', async () => {
+        const { app, sendSpy } = await buildTestAppWithFakeQueue();
+        try {
+            const conversationId = 'shared-webhook-test:member-valid';
+            const rawBody = JSON.stringify({
+                type: 'post_call_transcription',
+                data: { conversation_id: conversationId, agent_id: MEMBER_AGENT_ID },
+            });
+            const goodSignature = signPayload(rawBody, GROUP_SIGNING_SECRET);
+
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${GROUP_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': goodSignature },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.json().status).toBe('accepted');
+            expect(sendSpy).toHaveBeenCalledTimes(1);
+
+            const { data: rows } = await supabaseAdmin
+                .from('webhook_events')
+                .select('id, organization_id')
+                .eq('event_id', `post_call_transcription:${conversationId}`);
+            expect(rows?.length).toBe(1);
+            expect(rows?.[0].organization_id).toBe(memberOrgId);
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('agent_id que no pertenece a NINGUNA organización se rechaza con 401', async () => {
+        const app = await buildTestApp();
+        try {
+            const rawBody = JSON.stringify({
+                type: 'post_call_transcription',
+                data: { conversation_id: 'shared-webhook-test:agent-inexistente', agent_id: `agent-no-existe-${crypto.randomUUID()}` },
+            });
+            const signature = signPayload(rawBody, GROUP_SIGNING_SECRET);
+
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${GROUP_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': signature },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(401);
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('agent_id de una organización REAL pero de OTRO grupo se rechaza con 401 (no basta con que exista, debe pertenecer a este grupo)', async () => {
+        const app = await buildTestApp();
+        try {
+            const rawBody = JSON.stringify({
+                type: 'post_call_transcription',
+                data: { conversation_id: 'shared-webhook-test:agent-fuera-del-grupo', agent_id: OUTSIDE_AGENT_ID },
+            });
+            const signature = signPayload(rawBody, GROUP_SIGNING_SECRET);
+
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${GROUP_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': signature },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(401);
+
+            const { data: rows } = await supabaseAdmin
+                .from('webhook_events')
+                .select('id')
+                .eq('organization_id', outsideOrgId)
+                .eq('event_id', 'post_call_transcription:shared-webhook-test:agent-fuera-del-grupo');
+            expect(rows?.length ?? 0).toBe(0);
+        } finally {
+            await app.close();
+        }
+    });
+
+    it('el owner del grupo (agent_id propio) también resuelve correctamente — no es un caso especial frente a un miembro', async () => {
+        const { app, sendSpy } = await buildTestAppWithFakeQueue();
+        try {
+            const conversationId = 'shared-webhook-test:owner-valid';
+            const rawBody = JSON.stringify({
+                type: 'post_call_transcription',
+                data: { conversation_id: conversationId, agent_id: OWNER_AGENT_ID },
+            });
+            const signature = signPayload(rawBody, GROUP_SIGNING_SECRET);
+
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${GROUP_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': signature },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(sendSpy).toHaveBeenCalledTimes(1);
+
+            const { data: rows } = await supabaseAdmin
+                .from('webhook_events')
+                .select('organization_id')
+                .eq('event_id', `post_call_transcription:${conversationId}`);
+            expect(rows?.[0]?.organization_id).toBe(ownerOrgId);
+        } finally {
+            await app.close();
+        }
+    });
+});

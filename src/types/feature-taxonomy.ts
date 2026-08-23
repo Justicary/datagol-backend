@@ -65,6 +65,12 @@ export const FEATURE_KEYS = {
     // requires_provider es NULL: las credenciales IMAP/SMTP las aporta el
     // cliente, no un proveedor que Datagol administre.
     EMAIL_INTEGRATION: 'email_integration',
+    // Catálogo de productos con sugerencia de precio/disponibilidad vía RAG
+    // (docs/tasks/catalogo-productos-grupos-cred.md). Planes elite/enterprise
+    // (db/migrations/56_catalogo_productos.sql BLOQUE 10). requires_provider
+    // es NULL: la KB usada es la nativa de ElevenLabs, ya cubierta por
+    // elevenlabs_api_key, no un proveedor propio de este feature.
+    PRODUCT_RAG: 'product_rag',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

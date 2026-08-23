@@ -83,6 +83,7 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         isTextChannel: mapped.isTextChannel,
         textMessageQuantity: mapped.whatsappMessageQuantity,
         llmTokenUsage: mapped.llmTokenUsage,
+        isBurst: mapped.isBurst,
     });
 
     // Geocodificación (opcional por organización, ver services/geocoding.ts):

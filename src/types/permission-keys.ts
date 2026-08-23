@@ -35,6 +35,11 @@ export const PERMISSION_KEYS = {
     MANAGE_CREDENTIALS: 'manage_credentials',
     CHANGE_PLAN: 'change_plan',
     ERASE_CONTACT_DATA: 'erase_contact_data',
+    // Catálogo de productos (docs/tasks/catalogo-productos-grupos-cred.md,
+    // db/migrations/56_catalogo_productos.sql BLOQUE 10). No sensibles: ver
+    // catalogos/precios no expone datos de clientes ni credenciales.
+    VIEW_CATALOG: 'view_catalog',
+    MANAGE_CATALOG: 'manage_catalog',
 } as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[keyof typeof PERMISSION_KEYS];

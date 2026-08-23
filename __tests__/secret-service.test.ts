@@ -171,8 +171,12 @@ describe('src/services/secret-service.ts — Pruebas de Integración Reales cont
             // Mensaje exacto de la rama "no vaultSecretId" (línea 125-127) —
             // distingue esta rama del catch genérico de más abajo, que
             // loguearía un mensaje distinto si la ejecución cayera ahí en su lugar.
+            // Incluye ownerOrganizationId desde la FASE B.1 (docs/tasks/catalogo-productos-grupos-cred.md):
+            // setSecret siempre resuelve y registra la organización dueña del
+            // grupo — en grupo de uno (el caso de esta organización de prueba)
+            // coincide con organizationId.
             expect(errorSpy).toHaveBeenCalledWith(
-                { secretKey, organizationId: testOrgId },
+                { secretKey, organizationId: testOrgId, ownerOrganizationId: testOrgId },
                 '[SecretService] No se pudo crear o resolver vaultSecretId'
             );
 

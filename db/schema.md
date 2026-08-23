@@ -29,6 +29,7 @@
 | `retention_days` | `int4` |  |
 | `timezone` | `text` |  |
 | `max_mailboxes` | `int4` |  Nullable |
+| `credential_group_id` | `uuid` |  |
 
 ## Table `knowledge_base`
 
@@ -679,6 +680,205 @@ Borradores y bitácora de envío de correo por organización, con clave de idemp
 | `attachments` | `jsonb` |  Nullable |
 | `reply_to` | `text` |  Nullable |
 
+## Table `elevenlabs_plans`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `key` | `text` | Primary |
+| `name` | `text` |  |
+| `max_concurrent` | `int4` |  |
+| `monthly_credits_amount` | `int4` |  |
+| `minutes_per_month` | `int4` |  |
+| `notes` | `text` |  Nullable |
+| `updated_at` | `timestamptz` |  |
+
+## Table `credential_groups`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `name` | `text` |  |
+| `owner_organization_id` | `uuid` |  Nullable |
+| `elevenlabs_plan_key` | `text` |  Nullable |
+| `concurrency_override` | `int4` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+| `webhook_token` | `text` |  Nullable |
+
+## Table `organization_concurrency_quota`
+
+Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza una llamada.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `organization_id` | `uuid` | Primary |
+| `soft_limit` | `int4` |  |
+| `notes` | `text` |  Nullable |
+| `updated_at` | `timestamptz` |  |
+
+## Table `catalogs`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `owner_organization_id` | `uuid` |  |
+| `name` | `text` |  |
+| `description` | `text` |  Nullable |
+| `is_shared` | `bool` |  |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+| `kb_folder_id` | `text` |  Nullable |
+
+## Table `catalog_access`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `catalog_id` | `uuid` | Primary |
+| `organization_id` | `uuid` | Primary |
+| `can_edit` | `bool` |  |
+| `granted_at` | `timestamptz` |  |
+
+## Table `products`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `catalog_id` | `uuid` |  |
+| `name` | `text` |  |
+| `brand` | `text` |  Nullable |
+| `category` | `text` |  Nullable |
+| `description` | `text` |  Nullable |
+| `active_components` | `text` |  Nullable |
+| `suggested_use` | `text` |  Nullable |
+| `contraindications` | `text` |  Nullable |
+| `keywords` | `text` |  Nullable |
+| `sat_product_key` | `text` |  Nullable |
+| `is_active` | `bool` |  |
+| `external_id` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+| `image_path` | `text` |  Nullable |
+| `image_mime_type` | `text` |  Nullable |
+| `image_size_bytes` | `int8` |  Nullable |
+| `image_uploaded_at` | `timestamptz` |  Nullable |
+
+## Table `product_variants`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `product_id` | `uuid` |  |
+| `catalog_id` | `uuid` |  |
+| `sku` | `text` |  |
+| `presentation` | `text` |  Nullable |
+| `barcode` | `text` |  Nullable |
+| `price` | `numeric` |  Nullable |
+| `currency` | `text` |  |
+| `price_includes_tax` | `bool` |  |
+| `tax_rate` | `numeric` |  |
+| `stock_status` | `text` |  |
+| `stock_note` | `text` |  Nullable |
+| `is_active` | `bool` |  |
+| `price_changed_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `variant_price_history`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `variant_id` | `uuid` |  |
+| `price` | `numeric` |  Nullable |
+| `currency` | `text` |  Nullable |
+| `changed_at` | `timestamptz` |  |
+| `changed_by` | `uuid` |  Nullable |
+| `source` | `text` |  Nullable |
+
+## Table `organization_variant_overrides`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `organization_id` | `uuid` | Primary |
+| `variant_id` | `uuid` | Primary |
+| `price` | `numeric` |  Nullable |
+| `stock_status` | `text` |  Nullable |
+| `stock_note` | `text` |  Nullable |
+| `is_available` | `bool` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `product_kb_sync`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `product_id` | `uuid` | Primary |
+| `credential_group_id` | `uuid` | Primary |
+| `kb_document_id` | `text` |  Nullable |
+| `synced_content_hash` | `text` |  Nullable |
+| `synced_at` | `timestamptz` |  Nullable |
+| `rag_indexed_at` | `timestamptz` |  Nullable |
+| `status` | `text` |  |
+| `error` | `text` |  Nullable |
+| `attempts` | `int4` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `catalog_imports`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `catalog_id` | `uuid` |  |
+| `file_name` | `text` |  Nullable |
+| `mode` | `text` |  |
+| `status` | `text` |  |
+| `rows_total` | `int4` |  |
+| `rows_created` | `int4` |  |
+| `rows_updated` | `int4` |  |
+| `rows_failed` | `int4` |  |
+| `column_mapping` | `jsonb` |  |
+| `errors` | `jsonb` |  |
+| `created_by` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `completed_at` | `timestamptz` |  Nullable |
+
+## Table `concurrency_quota_alerts`
+
+Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_quota.soft_limit dentro del pozo compartido del grupo. RLS habilitada sin políticas: solo service_role la escribe/lee, mismo patrón que organization_usage_alerts (migración 31).
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `credential_group_id` | `uuid` |  |
+| `current_count` | `int4` |  |
+| `soft_limit` | `int4` |  |
+| `alert_date` | `date` |  |
+| `sent_at` | `timestamptz` |  |
+
 ## RLS Policies
 
 ### `organization_members`
@@ -870,4 +1070,73 @@ Borradores y bitácora de envío de correo por organización, con clave de idemp
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `invitations_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_users'::text)` | — |
+
+### `credential_groups`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `cred_groups_read` | SELECT | authenticated | PERMISSIVE | `((id IN ( SELECT organizations.credential_group_id    FROM organizations   WHERE (organizations.id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)))) OR is_platform_admin())` | — |
+
+### `elevenlabs_plans`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `plans_read` | SELECT | authenticated | PERMISSIVE | `true` | — |
+
+### `organization_variant_overrides`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `overrides_all` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_catalog'::text)` | `has_permission(organization_id, 'manage_catalog'::text)` |
+
+### `product_kb_sync`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `kb_sync_read` | SELECT | authenticated | PERMISSIVE | `(product_id IN ( SELECT p.id    FROM products p   WHERE (p.catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))))` | — |
+
+### `organization_concurrency_quota`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quota_read` | SELECT | authenticated | PERMISSIVE | `(organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids))` | — |
+
+### `catalog_access`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `catalog_access_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+
+### `product_variants`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `product_variants_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+| `product_variants_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+
+### `variant_price_history`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `price_history_read` | SELECT | authenticated | PERMISSIVE | `(variant_id IN ( SELECT v.id    FROM product_variants v   WHERE (v.catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))))` | — |
+
+### `catalog_imports`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `imports_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+
+### `catalogs`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `catalogs_read` | SELECT | authenticated | PERMISSIVE | `(id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+| `catalogs_write` | ALL | authenticated | PERMISSIVE | `has_permission(owner_organization_id, 'manage_catalog'::text)` | `has_permission(owner_organization_id, 'manage_catalog'::text)` |
+
+### `products`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `products_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+| `products_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
 

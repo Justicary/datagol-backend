@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { validateEnv } from '../config/env.js';
 import { parseDatabaseUrl } from '../lib/database-url.js';
 import { logger } from '../lib/logger.js';
+import { getCredentialGroupOwner } from './credential-group-service.js';
 import type { SecretKey } from '../types/secret-keys.js';
 
 interface CachedSecret {
@@ -35,6 +36,23 @@ function getCacheKey(organizationId: string, secretKey: string): string {
 }
 
 /**
+ * Resuelve la organización contra la que realmente vive el secreto
+ * compartido (docs/tasks/catalogo-productos-grupos-cred.md, FASE B.1): la
+ * dueña del grupo de credenciales de `organizationId`, no `organizationId`
+ * en sí. En un grupo de uno son la misma organización — comportamiento
+ * idéntico al de antes de que existieran los grupos.
+ *
+ * Nunca lanza ni bloquea: si el grupo no se puede resolver (organización
+ * sin `credential_group_id`, dato aún no retro-llenado, etc.), degrada a
+ * `organizationId` tal cual — mismo criterio de "nunca romper el camino
+ * existente por una pieza nueva que aún no aplica" de toda la Fase B.
+ */
+async function resolveSecretOwnerId(organizationId: string): Promise<string> {
+    const owner = await getCredentialGroupOwner(organizationId);
+    return owner?.ownerOrganizationId ?? organizationId;
+}
+
+/**
  * Resuelve un secreto desde `organization_secrets` -> Supabase Vault (`vault.decrypted_secrets`).
  */
 export async function getSecret(
@@ -45,7 +63,9 @@ export async function getSecret(
         return null;
     }
 
-    const cacheKey = getCacheKey(organizationId, secretKey);
+    const ownerOrganizationId = await resolveSecretOwnerId(organizationId);
+
+    const cacheKey = getCacheKey(ownerOrganizationId, secretKey);
     const now = Date.now();
     const cached = secretCache.get(cacheKey);
 
@@ -54,11 +74,12 @@ export async function getSecret(
     }
 
     try {
-        // 1. Obtener la referencia en organization_secrets
+        // 1. Obtener la referencia en organization_secrets (de la organización
+        // DUEÑA del grupo, no de la que preguntó).
         const { data: orgSecret, error: orgSecErr } = await supabaseAdmin
             .from('organization_secrets')
             .select('vault_secret_id')
-            .eq('organization_id', organizationId)
+            .eq('organization_id', ownerOrganizationId)
             .eq('secret_key', secretKey)
             .maybeSingle();
 
@@ -90,14 +111,25 @@ export async function getSecret(
 
 /**
  * Guarda o actualiza un secreto en Supabase Vault (`vault.create_secret`) y en `organization_secrets`.
+ *
+ * FASE B.1/B.2: escribe siempre contra la organización DUEÑA del grupo de
+ * credenciales de `organizationId`, nunca contra `organizationId` en sí — así
+ * `setSecret` siempre afecta el secreto real y compartido del grupo,
+ * independientemente de qué organización miembro lo haya invocado. Quién
+ * tiene permitido invocarlo es una decisión de la capa de ruta (B.2,
+ * `routes/organization-onboarding.ts`), no de este servicio: aquí solo se
+ * garantiza que el resultado es siempre coherente para todo el grupo. En
+ * grupo de uno, `ownerOrganizationId === organizationId`, comportamiento
+ * idéntico al de antes de que existieran los grupos.
  */
 export async function setSecret(
     organizationId: string,
     secretKey: SecretKey,
     secretValue: string
 ): Promise<boolean> {
+    const ownerOrganizationId = await resolveSecretOwnerId(organizationId);
     const pool = getPgPool();
-    const vaultSecretName = `org:${organizationId}:${secretKey}`;
+    const vaultSecretName = `org:${ownerOrganizationId}:${secretKey}`;
 
     try {
         let vaultSecretId: string | null = null;
@@ -115,7 +147,7 @@ export async function setSecret(
             // Crear nuevo secreto vía función oficial vault.create_secret
             const createRes = await pool.query(
                 'SELECT vault.create_secret($1, $2, $3) AS id;',
-                [secretValue, vaultSecretName, `Secreto ${secretKey} de organización ${organizationId}`]
+                [secretValue, vaultSecretName, `Secreto ${secretKey} de organización ${ownerOrganizationId}`]
             );
             if (createRes.rows && createRes.rows.length > 0) {
                 vaultSecretId = createRes.rows[0].id;
@@ -123,16 +155,16 @@ export async function setSecret(
         }
 
         if (!vaultSecretId) {
-            logger.error({ secretKey, organizationId }, '[SecretService] No se pudo crear o resolver vaultSecretId');
+            logger.error({ secretKey, organizationId, ownerOrganizationId }, '[SecretService] No se pudo crear o resolver vaultSecretId');
             return false;
         }
 
-        // 2. Guardar enlace en organization_secrets
+        // 2. Guardar enlace en organization_secrets, contra la organización dueña.
         const { error: linkErr } = await supabaseAdmin
             .from('organization_secrets')
             .upsert(
                 {
-                    organization_id: organizationId,
+                    organization_id: ownerOrganizationId,
                     secret_key: secretKey,
                     vault_secret_id: vaultSecretId,
                 },
@@ -140,15 +172,15 @@ export async function setSecret(
             );
 
         if (linkErr) {
-            logger.error({ err: linkErr, secretKey, organizationId }, '[SecretService] Error al vincular en organization_secrets');
+            logger.error({ err: linkErr, secretKey, organizationId, ownerOrganizationId }, '[SecretService] Error al vincular en organization_secrets');
             return false;
         }
 
-        clearSecretCache(organizationId);
+        clearSecretCache(ownerOrganizationId);
         return true;
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error({ err, secretKey, organizationId, msg }, '[SecretService] Excepción guardando secreto');
+        logger.error({ err, secretKey, organizationId, ownerOrganizationId, msg }, '[SecretService] Excepción guardando secreto');
         return false;
     }
 }
@@ -164,6 +196,12 @@ export interface SecretStatus {
  * para endpoints de readiness/estado (routes/organization-onboarding.ts) que
  * no necesitan el valor del secreto, solo saber si ya fue dado de alta.
  *
+ * FASE B.2: resuelve contra la organización DUEÑA del grupo, igual que
+ * `getSecret`/`setSecret` — así un miembro no-owner de un grupo compartido ve
+ * en solo lectura que la llave existe (y cuándo rotó), aunque él nunca la
+ * haya guardado en su propia fila de `organization_secrets`. Grupo de uno:
+ * mismo resultado que antes.
+ *
  * Las claves ausentes en `organization_secrets` no aparecen en el objeto
  * devuelto — el llamador decide qué claves espera y las trata como
  * `present: false` si faltan.
@@ -173,10 +211,12 @@ export async function listSecretStatus(organizationId: string): Promise<Record<s
         return {};
     }
 
+    const ownerOrganizationId = await resolveSecretOwnerId(organizationId);
+
     const { data, error } = await supabaseAdmin
         .from('organization_secrets')
         .select('secret_key, rotated_at')
-        .eq('organization_id', organizationId);
+        .eq('organization_id', ownerOrganizationId);
 
     if (error || !data) {
         return {};

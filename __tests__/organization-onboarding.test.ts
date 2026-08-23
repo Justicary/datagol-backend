@@ -390,6 +390,149 @@ describe('routes/organization-onboarding.ts', () => {
         });
     });
 
+    /**
+     * FASE B.2 (docs/tasks/catalogo-productos-grupos-cred.md): rotar una
+     * llave compartida tumba a todo el grupo, así que solo el owner del
+     * grupo de credenciales puede llamar POST .../credentials; el resto la
+     * ve en solo lectura (GET .../credentials/status) con nota de quién la
+     * administra.
+     */
+    describe('FASE B.2 — rotación de credenciales restringida al owner del grupo', () => {
+        let ownerUser: TestUser;
+        let memberUser: TestUser;
+        let ownerOrgId: string;
+        let memberOrgId: string;
+        let groupId: string;
+
+        beforeAll(async () => {
+            ownerUser = await createTestUserWithJwt();
+            memberUser = await createTestUserWithJwt();
+
+            const { data: ownerOrg, error: ownerErr } = await supabaseAdmin.rpc('create_organization_with_owner', {
+                p_name: 'Owner Grupo B2 Test Org',
+                p_email: `owner-b2-${crypto.randomUUID()}@example.invalid`,
+                p_phone_number: null,
+                p_user_id: ownerUser.userId,
+            });
+            if (ownerErr || !ownerOrg) throw new Error(`Setup falló (owner): ${ownerErr?.message}`);
+            ownerOrgId = ownerOrg.id;
+
+            const { data: memberOrg, error: memberErr } = await supabaseAdmin.rpc('create_organization_with_owner', {
+                p_name: 'Member Grupo B2 Test Org',
+                p_email: `member-b2-${crypto.randomUUID()}@example.invalid`,
+                p_phone_number: null,
+                p_user_id: memberUser.userId,
+            });
+            if (memberErr || !memberOrg) throw new Error(`Setup falló (member): ${memberErr?.message}`);
+            memberOrgId = memberOrg.id;
+
+            // Fusiona ambas organizaciones en el mismo grupo, con ownerOrgId
+            // como dueño — simula una franquicia que comparte workspace,
+            // reutilizando el credential_groups de grupo-de-uno que ya tenía
+            // ownerOrgId en vez de crear uno nuevo desde cero.
+            const { data: ownerOrgRow, error: readGroupErr } = await supabaseAdmin
+                .from('organizations')
+                .select('credential_group_id')
+                .eq('id', ownerOrgId)
+                .single();
+            if (readGroupErr || !ownerOrgRow) throw new Error(`No se pudo leer credential_group_id del owner: ${readGroupErr?.message}`);
+            groupId = ownerOrgRow.credential_group_id;
+
+            const { error: updateMemberErr } = await supabaseAdmin
+                .from('organizations')
+                .update({ credential_group_id: groupId })
+                .eq('id', memberOrgId);
+            if (updateMemberErr) throw new Error(`No se pudo unir memberOrg al grupo: ${updateMemberErr.message}`);
+
+            const saved = await setSecret(ownerOrgId, SECRET_KEYS.CAL_API_KEY, 'cal_shared_group_secret_value');
+            if (!saved) throw new Error('No se pudo preparar el secreto compartido de prueba');
+        });
+
+        afterAll(async () => {
+            await supabaseAdmin.from('organization_secrets').delete().in('organization_id', [ownerOrgId, memberOrgId]);
+            await deleteTestOrganization(memberOrgId);
+            await deleteTestOrganization(ownerOrgId);
+            await deleteTestUser(memberUser.userId);
+            await deleteTestUser(ownerUser.userId);
+        });
+
+        it('un miembro no-owner recibe 403 al intentar rotar una credencial compartida', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: `/api/organizations/${memberOrgId}/credentials`,
+                    headers: { authorization: `Bearer ${memberUser.jwt}` },
+                    payload: { provider: 'cal', value: 'intento-de-miembro-no-owner' },
+                });
+                expect(response.statusCode).toBe(403);
+                expect(response.json().code).toBe('CREDENTIAL_GROUP_NOT_OWNER');
+
+                // La escritura fue rechazada: el valor original del owner sigue vigente.
+                const stillOriginal = await getSecret(ownerOrgId, SECRET_KEYS.CAL_API_KEY);
+                expect(stillOriginal).toBe('cal_shared_group_secret_value');
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('contraparte de éxito: el owner del grupo SÍ puede rotar la credencial compartida', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: `/api/organizations/${ownerOrgId}/credentials`,
+                    headers: { authorization: `Bearer ${ownerUser.jwt}` },
+                    payload: { provider: 'cal', value: 'rotado-por-el-owner' },
+                });
+                expect(response.statusCode).toBe(200);
+
+                const rotated = await getSecret(ownerOrgId, SECRET_KEYS.CAL_API_KEY);
+                expect(rotated).toBe('rotado-por-el-owner');
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('GET .../credentials/status de un miembro no-owner muestra la llave compartida en solo lectura con isOwner=false y el nombre de quién la administra', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'GET',
+                    url: `/api/organizations/${memberOrgId}/credentials/status`,
+                    headers: { authorization: `Bearer ${memberUser.jwt}` },
+                });
+                expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(body.isOwner).toBe(false);
+                expect(body.managedByOrganizationName).toBe('Owner Grupo B2 Test Org');
+                // El secreto lo guardó el owner, en su propia fila de
+                // organization_secrets — el miembro debe verlo igual, resuelto
+                // contra el grupo (FASE B.1/B.2), no contra su propia fila (vacía).
+                expect(body.data[SECRET_KEYS.CAL_API_KEY]).toMatchObject({ present: true });
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('contraparte: GET .../credentials/status del owner muestra isOwner=true y managedByOrganizationName=null', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'GET',
+                    url: `/api/organizations/${ownerOrgId}/credentials/status`,
+                    headers: { authorization: `Bearer ${ownerUser.jwt}` },
+                });
+                expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(body.isOwner).toBe(true);
+                expect(body.managedByOrganizationName).toBeNull();
+            } finally {
+                await app.close();
+            }
+        });
+    });
+
     describe('POST /api/organizations/:id/tokens', () => {
         let owner: TestUser;
         let orgId: string;

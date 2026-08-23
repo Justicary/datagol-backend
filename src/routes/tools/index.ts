@@ -6,6 +6,7 @@ import { cancelToolRoute } from './cancel.js';
 import { locationsToolRoute } from './locations.js';
 import { appointmentToolRoute } from './appointment.js';
 import { emailToolRoute } from './email.js';
+import { productsToolRoute } from './products.js';
 
 /**
  * Registro de `routes/tools/**` (Fase 5). Encapsulado en su propio contexto
@@ -37,6 +38,8 @@ export async function toolRoutes(fastify: FastifyInstance) {
     await fastify.register(locationsToolRoute);
     await fastify.register(appointmentToolRoute);
     await fastify.register(emailToolRoute);
+    // Precio y disponibilidad de catálogo (docs/tasks/catalogo-productos-grupos-cred.md FASE D)
+    await fastify.register(productsToolRoute);
 }
 
 export default toolRoutes;

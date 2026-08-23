@@ -25,6 +25,8 @@ import organizationLlmRoutes from './routes/organization-llm.js';
 import organizationReportsRoutes from './routes/organization-reports.js';
 import organizationCompetitorSitesRoutes from './routes/organization-competitor-sites.js';
 import organizationAttachmentsRoutes from './routes/organization-attachments.js';
+import organizationConcurrencyRoutes from './routes/organization-concurrency.js';
+import catalogRoutes from './routes/catalogs.js';
 import sendTemplateEmailRoutes from './routes/send-template-email.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
@@ -208,6 +210,10 @@ export async function buildApp() {
     await app.register(organizationReportsRoutes);
     await app.register(organizationCompetitorSitesRoutes);
     await app.register(organizationAttachmentsRoutes);
+    // Reparto de concurrencia del grupo de credenciales (docs/tasks/catalogo-productos-grupos-cred.md FASE B.4)
+    await app.register(organizationConcurrencyRoutes);
+    // Catálogo de productos e importación (docs/tasks/catalogo-productos-grupos-cred.md FASE E)
+    await app.register(catalogRoutes);
     // Despacho de correo con plantilla personalizada a contactos del CRM
     // (docs/tasks/send-template-email-backend.md)
     await app.register(sendTemplateEmailRoutes);

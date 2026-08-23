@@ -28,6 +28,15 @@ export interface CallUsageInput {
      * lo advierte con el conversation_id, nunca inventa un consumo.
      */
     llmTokenUsage: LlmModelTokenUsage[];
+    /**
+     * `metadata.charging.is_burst` (docs/tasks/catalogo-productos-grupos-cred.md
+     * FASE B.4): en un grupo de credenciales compartido, si la llamada rebasó
+     * el pozo de concurrencia, ElevenLabs la factura al doble. Cuando es
+     * `true`, el candidato de duración usa `AGENT_MINUTE_BURST` en vez de
+     * `AGENT_MINUTE` — nunca ambos para el mismo minuto, la tarifa de
+     * `agent_minute_burst` en `provider_rates` ya es el doble.
+     */
+    isBurst: boolean;
 }
 
 /**
@@ -124,8 +133,13 @@ function buildCallUsageCandidates(input: CallUsageInput): UsageCandidate[] {
 
     const minutes = input.durationSeconds / 60;
 
+    // Burst (FASE B.4): AGENT_MINUTE_BURST reemplaza a AGENT_MINUTE para este
+    // minuto, nunca se agregan los dos — la tarifa de burst en provider_rates
+    // ya es el doble de la normal, sumarlas facturaría triple.
+    const durationUnitType = input.isBurst ? USAGE_EVENT_UNIT_TYPES.AGENT_MINUTE_BURST : USAGE_EVENT_UNIT_TYPES.AGENT_MINUTE;
+
     const candidates: UsageCandidate[] = [
-        { provider: USAGE_EVENT_PROVIDERS.ELEVENLABS, unitType: USAGE_EVENT_UNIT_TYPES.AGENT_MINUTE, quantity: minutes },
+        { provider: USAGE_EVENT_PROVIDERS.ELEVENLABS, unitType: durationUnitType, quantity: minutes },
         ...llmCandidates,
     ];
 

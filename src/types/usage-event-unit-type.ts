@@ -14,6 +14,12 @@
  */
 export const USAGE_EVENT_UNIT_TYPES = {
     AGENT_MINUTE: 'agent_minute',
+    // Grupos de credenciales compartidos (docs/tasks/catalogo-productos-grupos-cred.md,
+    // FASE B.4): cuando `metadata.charging.is_burst` viene en true, el minuto
+    // se factura con este unit_type en vez de AGENT_MINUTE — la tarifa en
+    // provider_rates ya está al doble, no es un cargo adicional encima de
+    // agent_minute. Nunca se registran ambos para el mismo minuto.
+    AGENT_MINUTE_BURST: 'agent_minute_burst',
     SIP_INBOUND_LOCAL_MX: 'sip_inbound_local_mx',
     WA_MESSAGE: 'wa_message',
 } as const;
