@@ -319,7 +319,9 @@ export class ElevenLabsAdapter implements IVoiceProvider {
     });
 
     if (!response.ok) {
-      throw new Error('Error al consultar la configuración en ElevenLabs ConvAI.');
+      const errText = await response.text();
+      logger.error({ status: response.status, errText, agentId }, 'Error al consultar la configuración en ElevenLabs ConvAI');
+      throw new Error(`ElevenLabs devolvió ${response.status} al consultar la configuración del agente ${agentId}: ${errText}`);
     }
 
     const agentData = (await response.json()) as any;

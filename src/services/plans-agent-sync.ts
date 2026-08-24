@@ -97,10 +97,11 @@ export async function syncPlansToElevenLabsAgent(targetOrgId?: string): Promise<
     const orgId = org.id as string;
     const dbAgentId = org.elevenlabs_agent_id as string | null;
 
-    // 2. Resolver API Key y Agent ID
+    // 2. Resolver API Key y Agent ID (reconocer centinelas de dummy agent como 'agent_test_widget')
     const vaultApiKey = await getSecret(orgId, SECRET_KEYS.ELEVENLABS_API_KEY);
     const apiKey = vaultApiKey || process.env.ELEVENLABS_API_KEY;
-    const agentId = dbAgentId || process.env.ELEVENLABS_AGENT_ID;
+    const isDummyAgent = !dbAgentId || dbAgentId === 'agent_test_widget' || dbAgentId === 'test_agent';
+    const agentId = (isDummyAgent ? process.env.ELEVENLABS_AGENT_ID : dbAgentId) || process.env.ELEVENLABS_AGENT_ID;
 
     if (!apiKey || !agentId) {
         throw new Error(
