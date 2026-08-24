@@ -4,7 +4,6 @@ import supabasePlugin from '../src/plugins/supabase.js';
 import plansRoutes from '../src/routes/plans.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
 
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const TEST_PLAN_KEY = `diag_inactive_${Date.now()}`;
 
 async function buildTestApp() {
@@ -16,7 +15,7 @@ async function buildTestApp() {
 }
 
 describe('GET /api/plans/public', () => {
-    let originalIntegrationSettings: Record<string, unknown> | null;
+    let orgId: string;
 
     beforeAll(async () => {
         await supabaseAdmin.from('plans').insert({
@@ -31,20 +30,22 @@ describe('GET /api/plans/public', () => {
             cta_text: 'CTA de prueba',
         });
 
-        const { data: org } = await supabaseAdmin
+        const { data: org, error } = await supabaseAdmin
             .from('organizations')
-            .select('integration_settings')
-            .eq('id', REAL_ORG_ID)
-            .maybeSingle();
-        originalIntegrationSettings = (org?.integration_settings as Record<string, unknown> | null) ?? null;
+            .insert({
+                name: 'Org (plans-public.test.ts)',
+                email: `org-plans-pub-${Date.now()}@example.invalid`,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (error || !org) throw new Error(`No se pudo crear org de prueba: ${error?.message}`);
+        orgId = org.id;
     });
 
     afterAll(async () => {
         await supabaseAdmin.from('plans').delete().eq('key', TEST_PLAN_KEY);
-        await supabaseAdmin
-            .from('organizations')
-            .update({ integration_settings: originalIntegrationSettings })
-            .eq('id', REAL_ORG_ID);
+        if (orgId) await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     it('contraparte de éxito: devuelve el catálogo activo con nombre, precios MXN, llamadas concurrentes y copy de marketing', async () => {
@@ -96,12 +97,12 @@ describe('GET /api/plans/public', () => {
     it('contraparte de éxito: con organizationId y tipoCambioUSD configurado, lo devuelve', async () => {
         await supabaseAdmin
             .from('organizations')
-            .update({ integration_settings: { ...(originalIntegrationSettings ?? {}), tipoCambioUSD: 18.5 } })
-            .eq('id', REAL_ORG_ID);
+            .update({ integration_settings: { tipoCambioUSD: 18.5 } })
+            .eq('id', orgId);
 
         const app = await buildTestApp();
         try {
-            const response = await app.inject({ method: 'GET', url: `/api/plans/public?organizationId=${REAL_ORG_ID}` });
+            const response = await app.inject({ method: 'GET', url: `/api/plans/public?organizationId=${orgId}` });
             expect(response.json().tipoCambioUsd).toBe(18.5);
         } finally {
             await app.close();

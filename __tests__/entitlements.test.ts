@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import { normalizePhoneE164 } from '../src/services/phone-normalization.js';
 import {
@@ -49,12 +49,38 @@ function traceQueryArgs(builder: any, selectSink: unknown[], eqSink: [unknown, u
     });
 }
 
-// Organización real existente en la base de datos con plan 'starter'
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
+// Organización aislada para la suite de pruebas
+let REAL_ORG_ID: string;
 // Organización ficticia que no existe en la base de datos
 const FAKE_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 describe('FASE 1 — Fundaciones & Entitlements', () => {
+    beforeAll(async () => {
+        const { data: org, error } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (entitlements.test.ts)',
+                email: `org-entitlements-test-${Date.now()}@example.invalid`,
+                plan_key: 'starter',
+                max_concurrent_calls: 1,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (error || !org) throw new Error(`No se pudo crear la org de prueba: ${error?.message}`);
+        REAL_ORG_ID = org.id;
+    });
+
+    afterAll(async () => {
+        if (REAL_ORG_ID) {
+            await supabaseAdmin.from('feature_audit_log').delete().eq('organization_id', REAL_ORG_ID);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID);
+            await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID);
+            await supabaseAdmin.from('organizations').delete().eq('id', REAL_ORG_ID);
+        }
+        clearEntitlementsCache();
+    });
+
     beforeEach(async () => {
         vi.restoreAllMocks();
         // Asegurar que la org siempre inicia en plan starter, sin overrides residuales ni cache

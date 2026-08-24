@@ -6,7 +6,6 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { setSecret, getSecret, clearSecretCache } from '../src/services/secret-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
 
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const TEST_TOOL_SECRET = 'locations-route-test-secret';
 
 async function buildTestApp() {
@@ -20,28 +19,25 @@ async function buildTestApp() {
 describe('POST /tools/:webhookToken/locations y /branches', () => {
     const TEST_WEBHOOK_TOKEN = `locations-test-token-${Date.now()}`;
     const createdAddressIds: string[] = [];
-    let originalWebhookToken: string | null = null;
-    let originalToolWebhookSecret: string | null = null;
+    let orgId: string;
 
     beforeAll(async () => {
-        const { data: before } = await supabaseAdmin
+        const { data: org, error: orgErr } = await supabaseAdmin
             .from('organizations')
-            .select('webhook_token')
-            .eq('id', REAL_ORG_ID)
-            .maybeSingle();
+            .insert({
+                name: 'Org (tools-locations.test.ts)',
+                email: `org-tools-locations-test-${Date.now()}@example.invalid`,
+                webhook_token: TEST_WEBHOOK_TOKEN,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (orgErr || !org) throw new Error(`No se pudo crear la organización de prueba: ${orgErr?.message}`);
+        orgId = org.id;
 
-        originalWebhookToken = before?.webhook_token ?? null;
-        originalToolWebhookSecret = await getSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET);
-
-        const { error: orgErr } = await supabaseAdmin
-            .from('organizations')
-            .update({ webhook_token: TEST_WEBHOOK_TOKEN })
-            .eq('id', REAL_ORG_ID);
-        if (orgErr) throw new Error(`No se pudo preparar webhook_token: ${orgErr.message}`);
-
-        const saved = await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
+        const saved = await setSecret(orgId, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
         if (!saved) throw new Error('No se pudo guardar tool_webhook_secret de prueba');
-        clearSecretCache(REAL_ORG_ID);
+        clearSecretCache(orgId);
     });
 
     afterAll(async () => {
@@ -50,18 +46,13 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
             await supabaseAdmin.from('contact_addresses').delete().in('id', createdAddressIds);
         }
 
-        // Restaurar estado de webhook_token y secreto
-        if (originalWebhookToken !== null) {
-            await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
-        }
-        if (originalToolWebhookSecret !== null) {
-            await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, originalToolWebhookSecret);
-        }
-        clearSecretCache(REAL_ORG_ID);
+        await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', orgId);
+        clearSecretCache(orgId);
+        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     beforeEach(async () => {
-        clearSecretCache(REAL_ORG_ID);
+        clearSecretCache(orgId);
     });
 
     it('rechaza con 401 si falta la cabecera x-tool-secret', async () => {
@@ -94,8 +85,8 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
     });
 
     it('rechaza con 403 si la organización está suspendida', async () => {
-        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
-        clearSecretCache(REAL_ORG_ID);
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', orgId);
+        clearSecretCache(orgId);
 
         const app = await buildTestApp();
         try {
@@ -110,8 +101,8 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
             const body = response.json();
             expect(body.error).toBe('Forbidden');
         } finally {
-            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
-            clearSecretCache(REAL_ORG_ID);
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', orgId);
+            clearSecretCache(orgId);
             await app.close();
         }
     });
@@ -139,7 +130,7 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
         const { data: addr, error } = await supabaseAdmin
             .from('contact_addresses')
             .insert({
-                organization_id: REAL_ORG_ID,
+                organization_id: orgId,
                 contact_id: null,
                 label: 'Matriz Angelópolis',
                 address_type: 'matriz',
@@ -182,7 +173,7 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
         const { data: factAddr, error } = await supabaseAdmin
             .from('contact_addresses')
             .insert({
-                organization_id: REAL_ORG_ID,
+                organization_id: orgId,
                 contact_id: null,
                 label: 'Domicilio Fiscal',
                 address_type: 'facturacion',
@@ -238,7 +229,7 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
         const { data: contact, error: contactErr } = await supabaseAdmin
             .from('contacts')
             .insert({
-                organization_id: REAL_ORG_ID,
+                organization_id: orgId,
                 full_name: 'Contacto Test Ubicaciones',
                 phone_e164: `+52222${Date.now().toString().slice(-7)}`,
             })
@@ -251,7 +242,7 @@ describe('POST /tools/:webhookToken/locations y /branches', () => {
         const { data: contactAddr, error: addrErr } = await supabaseAdmin
             .from('contact_addresses')
             .insert({
-                organization_id: REAL_ORG_ID,
+                organization_id: orgId,
                 contact_id: contactId,
                 label: 'Casa del Contacto Privado',
                 address_type: 'domicilio',

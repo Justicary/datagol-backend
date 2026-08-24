@@ -13,9 +13,6 @@ vi.mock('../src/services/cal-com-tool-client.js', async (importOriginal) => {
 
 import { createBooking, CalProviderError } from '../src/services/cal-com-tool-client.js';
 
-// Organización real existente (ver __tests__/entitlements.test.ts). Ya tiene
-// cal_event_type_id configurado en producción.
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const TEST_TOOL_SECRET = 'booking-route-test-secret';
 
 async function buildTestApp() {
@@ -32,34 +29,28 @@ describe('POST /tools/:webhookToken/booking', () => {
     const createdContactPhones: string[] = [];
     const createdContactEmails: string[] = [];
     const createdContactAddressIds: string[] = [];
-    let originalWebhookToken: string | null = null;
-    let originalToolWebhookSecret: string | null = null;
+    let orgId: string;
 
     beforeAll(async () => {
-        const { data: before } = await supabaseAdmin.from('organizations').select('webhook_token').eq('id', REAL_ORG_ID).maybeSingle();
-        originalWebhookToken = before?.webhook_token ?? null;
-        originalToolWebhookSecret = await getSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET);
+        const { data: org, error: orgErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (tools-booking.test.ts)',
+                email: `org-tools-booking-test-${Date.now()}@example.invalid`,
+                webhook_token: TEST_WEBHOOK_TOKEN,
+                cal_event_type_id: 12345,
+            })
+            .select('id')
+            .single();
+        if (orgErr || !org) throw new Error(`No se pudo crear la organización de prueba: ${orgErr?.message}`);
+        orgId = org.id;
 
-        const { error: orgErr } = await supabaseAdmin.from('organizations').update({ webhook_token: TEST_WEBHOOK_TOKEN }).eq('id', REAL_ORG_ID);
-        if (orgErr) throw new Error(`No se pudo preparar webhook_token: ${orgErr.message}`);
-
-        const saved = await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
+        const saved = await setSecret(orgId, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
         if (!saved) throw new Error('No se pudo guardar tool_webhook_secret de prueba');
-        clearSecretCache(REAL_ORG_ID);
+        clearSecretCache(orgId);
     });
 
     afterAll(async () => {
-        // Restaura el valor original en vez de hardcodear null/delete — esta
-        // organización puede tener onboarding real de producción (ver
-        // docs/tasks/elevenlabs-data-collection-key-mismatch.md).
-        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
-        if (originalToolWebhookSecret !== null) {
-            await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, originalToolWebhookSecret);
-        } else {
-            await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID).eq('secret_key', SECRET_KEYS.TOOL_WEBHOOK_SECRET);
-        }
-        clearSecretCache(REAL_ORG_ID);
-
         for (const conversationId of createdConversationIds) {
             await supabaseAdmin.from('appointments').delete().eq('conversation_id', conversationId);
         }
@@ -69,11 +60,14 @@ describe('POST /tools/:webhookToken/booking', () => {
             await supabaseAdmin.from('contact_addresses').delete().eq('id', addressId);
         }
         for (const phone of createdContactPhones) {
-            await supabaseAdmin.from('contacts').delete().eq('organization_id', REAL_ORG_ID).eq('phone_e164', phone);
+            await supabaseAdmin.from('contacts').delete().eq('organization_id', orgId).eq('phone_e164', phone);
         }
         for (const email of createdContactEmails) {
-            await supabaseAdmin.from('contacts').delete().eq('organization_id', REAL_ORG_ID).eq('email', email);
+            await supabaseAdmin.from('contacts').delete().eq('organization_id', orgId).eq('email', email);
         }
+        await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', orgId);
+        clearSecretCache(orgId);
+        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     beforeEach(() => {
@@ -113,7 +107,7 @@ describe('POST /tools/:webhookToken/booking', () => {
     });
 
     it('rechaza con 403 Forbidden cuando la organización está suspendida', async () => {
-        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', orgId);
         const app = await buildTestApp();
         try {
             const response = await app.inject({
@@ -126,7 +120,7 @@ describe('POST /tools/:webhookToken/booking', () => {
             expect(response.json().error).toBe('Forbidden');
             expect(vi.mocked(createBooking)).not.toHaveBeenCalled();
         } finally {
-            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', orgId);
             await app.close();
         }
     });
@@ -168,14 +162,14 @@ describe('POST /tools/:webhookToken/booking', () => {
                 .select('organization_id, conversation_id, contact_id, cal_booking_id')
                 .eq('conversation_id', conversationId)
                 .single();
-            expect(appointment?.organization_id).toBe(REAL_ORG_ID);
+            expect(appointment?.organization_id).toBe(orgId);
             expect(appointment?.cal_booking_id).toBe('cal_booking_test_1');
             expect(appointment?.contact_id).toBeTruthy();
 
             const { data: contact } = await supabaseAdmin
                 .from('contacts')
                 .select('id, phone_e164')
-                .eq('organization_id', REAL_ORG_ID)
+                .eq('organization_id', orgId)
                 .eq('phone_e164', '+525599988877')
                 .single();
             expect(contact?.id).toBe(appointment?.contact_id);
@@ -321,7 +315,7 @@ describe('POST /tools/:webhookToken/booking', () => {
 
             expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
                 expect.anything(),
-                REAL_ORG_ID,
+                orgId,
                 expect.objectContaining({ customerPhone: null, customerEmail: email }),
                 expect.anything()
             );
@@ -337,9 +331,9 @@ describe('POST /tools/:webhookToken/booking', () => {
         const phoneE164 = `+52${phone}`;
         createdContactPhones.push(phoneE164);
 
-        const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: REAL_ORG_ID, p_phone: phoneE164, p_email: null });
+        const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: orgId, p_phone: phoneE164, p_email: null });
         const { data: addressId } = await supabaseAdmin.rpc('resolve_contact_address', {
-            p_org_id: REAL_ORG_ID,
+            p_org_id: orgId,
             p_contact_id: contactId,
             p_street: 'Av. Ya Registrada 200',
             p_city: 'CDMX',
@@ -433,9 +427,9 @@ describe('POST /tools/:webhookToken/booking', () => {
         const phoneE164 = `+52${phone}`;
         createdContactPhones.push(phoneE164);
 
-        const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: REAL_ORG_ID, p_phone: phoneE164, p_email: null });
+        const { data: contactId } = await supabaseAdmin.rpc('resolve_contact', { p_org_id: orgId, p_phone: phoneE164, p_email: null });
         const { data: addressId } = await supabaseAdmin.rpc('resolve_contact_address', {
-            p_org_id: REAL_ORG_ID,
+            p_org_id: orgId,
             p_contact_id: contactId,
             p_street: 'Av. Confirmada Por El Cliente 400',
         });

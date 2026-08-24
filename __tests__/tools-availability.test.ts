@@ -14,9 +14,6 @@ vi.mock('../src/services/cal-com-tool-client.js', async (importOriginal) => {
 import { getAvailableSlots, CalProviderError } from '../src/services/cal-com-tool-client.js';
 import { ToolTimeoutError } from '../src/lib/tool-timeout.js';
 
-// Organización real existente (ver __tests__/entitlements.test.ts). Ya tiene
-// cal_event_type_id configurado en producción — no requiere prepararlo aquí.
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const TEST_TOOL_SECRET = 'availability-route-test-secret';
 
 async function buildTestApp() {
@@ -29,33 +26,31 @@ async function buildTestApp() {
 
 describe('POST /tools/:webhookToken/availability', () => {
     const TEST_WEBHOOK_TOKEN = `avail-test-token-${Date.now()}`;
-    let originalWebhookToken: string | null = null;
-    let originalToolWebhookSecret: string | null = null;
+    let orgId: string;
 
     beforeAll(async () => {
-        const { data: before } = await supabaseAdmin.from('organizations').select('webhook_token').eq('id', REAL_ORG_ID).maybeSingle();
-        originalWebhookToken = before?.webhook_token ?? null;
-        originalToolWebhookSecret = await getSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET);
+        const { data: org, error: orgErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (tools-availability.test.ts)',
+                email: `org-tools-availability-test-${Date.now()}@example.invalid`,
+                webhook_token: TEST_WEBHOOK_TOKEN,
+                cal_event_type_id: 12345,
+            })
+            .select('id')
+            .single();
+        if (orgErr || !org) throw new Error(`No se pudo crear la organización de prueba: ${orgErr?.message}`);
+        orgId = org.id;
 
-        const { error: orgErr } = await supabaseAdmin.from('organizations').update({ webhook_token: TEST_WEBHOOK_TOKEN }).eq('id', REAL_ORG_ID);
-        if (orgErr) throw new Error(`No se pudo preparar webhook_token: ${orgErr.message}`);
-
-        const saved = await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
+        const saved = await setSecret(orgId, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
         if (!saved) throw new Error('No se pudo guardar tool_webhook_secret de prueba');
-        clearSecretCache(REAL_ORG_ID);
+        clearSecretCache(orgId);
     });
 
     afterAll(async () => {
-        // Restaura el valor original en vez de hardcodear null/delete — esta
-        // organización puede tener onboarding real de producción (ver
-        // docs/tasks/elevenlabs-data-collection-key-mismatch.md).
-        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
-        if (originalToolWebhookSecret !== null) {
-            await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, originalToolWebhookSecret);
-        } else {
-            await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID).eq('secret_key', SECRET_KEYS.TOOL_WEBHOOK_SECRET);
-        }
-        clearSecretCache(REAL_ORG_ID);
+        await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', orgId);
+        clearSecretCache(orgId);
+        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     beforeEach(() => {
@@ -108,7 +103,7 @@ describe('POST /tools/:webhookToken/availability', () => {
     });
 
     it('rechaza con 403 Forbidden cuando la organización está suspendida', async () => {
-        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', orgId);
         const app = await buildTestApp();
         try {
             const response = await app.inject({
@@ -121,7 +116,7 @@ describe('POST /tools/:webhookToken/availability', () => {
             expect(response.json().error).toBe('Forbidden');
             expect(vi.mocked(getAvailableSlots)).not.toHaveBeenCalled();
         } finally {
-            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', orgId);
             await app.close();
         }
     });

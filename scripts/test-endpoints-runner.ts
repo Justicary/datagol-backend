@@ -253,6 +253,90 @@ async function main() {
         details: rescheduleValid.data ? `Mensaje: "${rescheduleValid.data.message}"` : undefined,
     });
 
+    // 3.7 getProducts (Catálogo de productos y precios) con secreto válido (espera 200 con results)
+    const productsValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({
+            skus: ['SKU-TEST-001', 'SKU-TEST-002'],
+        }),
+    });
+    recordResult({
+        name: 'POST /tools/products [Secreto válido -> Responde 200]',
+        passed: productsValid.status === 200 && Array.isArray(productsValid.data?.results),
+        statusCode: productsValid.status,
+        expectedStatus: 200,
+        durationMs: productsValid.durationMs,
+        details: productsValid.data ? `Resultados: ${JSON.stringify(productsValid.data.results)}` : undefined,
+    });
+
+    // 3.8 getAppointmentDetails (Consulta de citas) con secreto válido (espera 200 con found y message)
+    const appointmentValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/appointment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({
+            customerEmail: 'test-endpoint@example.invalid',
+        }),
+    });
+    recordResult({
+        name: 'POST /tools/appointment [Secreto válido -> Responde 200]',
+        passed: appointmentValid.status === 200 && typeof appointmentValid.data?.found === 'boolean',
+        statusCode: appointmentValid.status,
+        expectedStatus: 200,
+        durationMs: appointmentValid.durationMs,
+        details: appointmentValid.data ? `Mensaje: "${appointmentValid.data.message}"` : undefined,
+    });
+
+    // 3.9 getLocations (Sucursales / Direcciones) con secreto válido (espera 200 con locations y message)
+    const locationsValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/locations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({}),
+    });
+    recordResult({
+        name: 'POST /tools/locations [Secreto válido -> Responde 200]',
+        passed: locationsValid.status === 200 && typeof locationsValid.data?.message === 'string',
+        statusCode: locationsValid.status,
+        expectedStatus: 200,
+        durationMs: locationsValid.durationMs,
+        details: locationsValid.data ? `Mensaje: "${locationsValid.data.message}"` : undefined,
+    });
+
+    // 3.10 cancelAppointment (Cancelación de cita) con secreto válido (espera 200 con cancelled y message)
+    const cancelValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({
+            customerName: 'Contacto Inexistente',
+            customerEmail: 'no-existe@example.invalid',
+        }),
+    });
+    recordResult({
+        name: 'POST /tools/cancel [Secreto válido -> Responde 200]',
+        passed: cancelValid.status === 200 && typeof cancelValid.data?.cancelled === 'boolean',
+        statusCode: cancelValid.status,
+        expectedStatus: 200,
+        durationMs: cancelValid.durationMs,
+        details: cancelValid.data ? `Mensaje: "${cancelValid.data.message}"` : undefined,
+    });
+
+    // 3.11 searchInbox (Email search) con secreto válido (espera 200 con message verbalizable)
+    const emailValid = await runHttpRequest(`${targetUrl}/tools/${webhookToken}/email/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tool-secret': toolSecret || '' },
+        body: JSON.stringify({
+            subject: 'Consulta',
+        }),
+    });
+    recordResult({
+        name: 'POST /tools/email/search [Secreto válido -> Responde 200]',
+        passed: emailValid.status === 200 && typeof emailValid.data?.message === 'string',
+        statusCode: emailValid.status,
+        expectedStatus: 200,
+        durationMs: emailValid.durationMs,
+        details: emailValid.data ? `Mensaje: "${emailValid.data.message}"` : undefined,
+    });
+
     // 4. Familia 2: Post-Call Webhook
     console.log(`\n${YELLOW}📬 4. Probando Familia 2: Post-Call Webhook (/webhooks/elevenlabs/:token)...${NC}`);
 

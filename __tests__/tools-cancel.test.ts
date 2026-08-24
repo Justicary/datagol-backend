@@ -14,8 +14,6 @@ vi.mock('../src/services/cal-com-tool-client.js', async (importOriginal) => {
 
 import { cancelBooking, CalProviderError } from '../src/services/cal-com-tool-client.js';
 
-// Organización real existente (ver __tests__/entitlements.test.ts).
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const TEST_TOOL_SECRET = 'cancel-route-test-secret';
 
 async function buildTestApp() {
@@ -26,59 +24,60 @@ async function buildTestApp() {
     return app;
 }
 
-async function createAppointment(overrides: Record<string, unknown> = {}) {
-    const startTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    const endTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString();
-    const { data, error } = await supabaseAdmin
-        .from('appointments')
-        .insert({
-            organization_id: REAL_ORG_ID,
-            customer_name: 'Cliente Cancel',
-            customer_email: 'cliente-cancel@example.invalid',
-            customer_phone: '+525599998888',
-            start_time: startTime,
-            end_time: endTime,
-            cal_booking_id: 'cal_booking_cancel_base',
-            status: APPOINTMENT_STATUSES.CONFIRMADA,
-            ...overrides,
-        })
-        .select('id, start_time, end_time')
-        .single();
-    if (error || !data) throw new Error(`No se pudo crear la cita de prueba: ${error?.message}`);
-    return data;
-}
-
 describe('POST /tools/:webhookToken/cancel', () => {
     const TEST_WEBHOOK_TOKEN = `cancel-test-token-${Date.now()}`;
     const createdAppointmentIds: string[] = [];
-    let originalWebhookToken: string | null = null;
-    let originalToolWebhookSecret: string | null = null;
+    let orgId: string;
+
+    async function createAppointment(overrides: Record<string, unknown> = {}) {
+        const startTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const endTime = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString();
+        const { data, error } = await supabaseAdmin
+            .from('appointments')
+            .insert({
+                organization_id: orgId,
+                customer_name: 'Cliente Cancel',
+                customer_email: 'cliente-cancel@example.invalid',
+                customer_phone: '+525599998888',
+                start_time: startTime,
+                end_time: endTime,
+                cal_booking_id: 'cal_booking_cancel_base',
+                status: APPOINTMENT_STATUSES.CONFIRMADA,
+                ...overrides,
+            })
+            .select('id, start_time, end_time')
+            .single();
+        if (error || !data) throw new Error(`No se pudo crear la cita de prueba: ${error?.message}`);
+        return data;
+    }
 
     beforeAll(async () => {
-        const { data: before } = await supabaseAdmin.from('organizations').select('webhook_token').eq('id', REAL_ORG_ID).maybeSingle();
-        originalWebhookToken = before?.webhook_token ?? null;
-        originalToolWebhookSecret = await getSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET);
+        const { data: org, error: orgErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (tools-cancel.test.ts)',
+                email: `org-tools-cancel-test-${Date.now()}@example.invalid`,
+                webhook_token: TEST_WEBHOOK_TOKEN,
+                cal_event_type_id: 12345,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (orgErr || !org) throw new Error(`No se pudo crear la organización de prueba: ${orgErr?.message}`);
+        orgId = org.id;
 
-        const { error: orgErr } = await supabaseAdmin.from('organizations').update({ webhook_token: TEST_WEBHOOK_TOKEN }).eq('id', REAL_ORG_ID);
-        if (orgErr) throw new Error(`No se pudo preparar webhook_token: ${orgErr.message}`);
-
-        const saved = await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
+        const saved = await setSecret(orgId, SECRET_KEYS.TOOL_WEBHOOK_SECRET, TEST_TOOL_SECRET);
         if (!saved) throw new Error('No se pudo guardar tool_webhook_secret de prueba');
-        clearSecretCache(REAL_ORG_ID);
+        clearSecretCache(orgId);
     });
 
     afterAll(async () => {
-        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
-        if (originalToolWebhookSecret !== null) {
-            await setSecret(REAL_ORG_ID, SECRET_KEYS.TOOL_WEBHOOK_SECRET, originalToolWebhookSecret);
-        } else {
-            await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID).eq('secret_key', SECRET_KEYS.TOOL_WEBHOOK_SECRET);
-        }
-        clearSecretCache(REAL_ORG_ID);
-
         if (createdAppointmentIds.length > 0) {
             await supabaseAdmin.from('appointments').delete().in('id', createdAppointmentIds);
         }
+        await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', orgId);
+        clearSecretCache(orgId);
+        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     beforeEach(() => {
@@ -101,7 +100,7 @@ describe('POST /tools/:webhookToken/cancel', () => {
     });
 
     it('rechaza con 403 Forbidden cuando la organización está suspendida', async () => {
-        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', orgId);
         const app = await buildTestApp();
         try {
             const response = await app.inject({
@@ -114,7 +113,7 @@ describe('POST /tools/:webhookToken/cancel', () => {
             expect(response.json().error).toBe('Forbidden');
             expect(vi.mocked(cancelBooking)).not.toHaveBeenCalled();
         } finally {
-            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', orgId);
             await app.close();
         }
     });

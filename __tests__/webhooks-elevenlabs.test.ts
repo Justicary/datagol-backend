@@ -9,15 +9,6 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { setSecret, getSecret, clearSecretCache } from '../src/services/secret-service.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
 
-// Organización real existente (ver __tests__/entitlements.test.ts). En
-// producción esta organización SÍ tiene webhook_token/webhook_signing_secret
-// dados de alta (docs/tasks/elevenlabs-data-collection-key-mismatch.md) — los
-// describe blocks de abajo capturan el valor original antes de pisarlo con
-// uno de prueba y lo restauran en afterAll, en vez de hardcodear null/delete.
-// Un afterAll que asume "esta org nunca tiene webhook configurado" borra
-// silenciosamente el onboarding real cada vez que corre pnpm test completo.
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
-
 async function buildTestApp() {
     const app = Fastify({ logger: false });
 
@@ -79,34 +70,27 @@ function signPayload(rawBody: string, secret: string, timestamp = Math.floor(Dat
 }
 
 describe('2.1 — POST /webhooks/elevenlabs/:webhookToken', () => {
-    // Requiere db/migrations/04_organizations_webhook_token.sql aplicada
-    // (columna organizations.webhook_token).
     const TEST_WEBHOOK_TOKEN = `test-token-${crypto.randomUUID()}`;
-    let originalWebhookToken: string | null = null;
+    let orgId: string;
 
     beforeAll(async () => {
-        const { data: before } = await supabaseAdmin
+        const { data: org, error } = await supabaseAdmin
             .from('organizations')
-            .select('webhook_token')
-            .eq('id', REAL_ORG_ID)
-            .maybeSingle();
-        originalWebhookToken = before?.webhook_token ?? null;
-
-        const { error } = await supabaseAdmin
-            .from('organizations')
-            .update({ webhook_token: TEST_WEBHOOK_TOKEN })
-            .eq('id', REAL_ORG_ID);
-        // Falla explícita (no silenciosa) si falta aplicar
-        // db/migrations/04_organizations_webhook_token.sql: sin esto, "org no
-        // encontrada" y "org encontrada sin secreto" son indistinguibles (ambas
-        // dan 401), y las pruebas de abajo pasarían por la razón equivocada.
-        if (error) {
-            throw new Error(`No se pudo preparar organizations.webhook_token para la prueba: ${error.message}`);
+            .insert({
+                name: 'Org (webhooks-elevenlabs.test.ts block1)',
+                email: `org-wh-1-${Date.now()}@example.invalid`,
+                webhook_token: TEST_WEBHOOK_TOKEN,
+            })
+            .select('id')
+            .single();
+        if (error || !org) {
+            throw new Error(`No se pudo crear organizations para la prueba: ${error?.message}`);
         }
+        orgId = org.id;
     });
 
     afterAll(async () => {
-        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
+        if (orgId) await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     it('rechaza con 401 cuando el webhookToken de la ruta no resuelve a ninguna organización', async () => {
@@ -144,52 +128,39 @@ describe('2.1 — POST /webhooks/elevenlabs/:webhookToken', () => {
 describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
     const TEST_WEBHOOK_TOKEN = `sig-test-token-${crypto.randomUUID()}`;
     const SIGNING_SECRET = 'sig-e2e-test-secret-abc123';
-    let originalWebhookToken: string | null = null;
-    let originalSigningSecret: string | null = null;
+    let orgId: string;
 
     beforeAll(async () => {
-        const { data: before } = await supabaseAdmin
+        const { data: org, error } = await supabaseAdmin
             .from('organizations')
-            .select('webhook_token')
-            .eq('id', REAL_ORG_ID)
-            .maybeSingle();
-        originalWebhookToken = before?.webhook_token ?? null;
-        originalSigningSecret = await getSecret(REAL_ORG_ID, SECRET_KEYS.WEBHOOK_SIGNING_SECRET);
+            .insert({
+                name: 'Org (webhooks-elevenlabs.test.ts block2)',
+                email: `org-wh-2-${Date.now()}@example.invalid`,
+                webhook_token: TEST_WEBHOOK_TOKEN,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (error || !org) throw new Error(`No se pudo crear organizations para la prueba: ${error?.message}`);
+        orgId = org.id;
 
-        const { error } = await supabaseAdmin
-            .from('organizations')
-            .update({ webhook_token: TEST_WEBHOOK_TOKEN })
-            .eq('id', REAL_ORG_ID);
-        if (error) throw new Error(`No se pudo preparar webhook_token: ${error.message}`);
-
-        const saved = await setSecret(REAL_ORG_ID, SECRET_KEYS.WEBHOOK_SIGNING_SECRET, SIGNING_SECRET);
+        const saved = await setSecret(orgId, SECRET_KEYS.WEBHOOK_SIGNING_SECRET, SIGNING_SECRET);
         if (!saved) throw new Error('No se pudo guardar webhook_signing_secret de prueba');
-        clearSecretCache(REAL_ORG_ID);
+        clearSecretCache(orgId);
     });
 
     afterAll(async () => {
-        await supabaseAdmin.from('organizations').update({ webhook_token: originalWebhookToken }).eq('id', REAL_ORG_ID);
-
-        // Restaurar el valor original en vez de borrar sin condición: si la
-        // organización ya tenía un webhook_signing_secret real antes de este
-        // test (onboarding de producción), un DELETE incondicional lo pierde.
-        if (originalSigningSecret !== null) {
-            await setSecret(REAL_ORG_ID, SECRET_KEYS.WEBHOOK_SIGNING_SECRET, originalSigningSecret);
-        } else {
-            await supabaseAdmin
-                .from('organization_secrets')
-                .delete()
-                .eq('organization_id', REAL_ORG_ID)
-                .eq('secret_key', SECRET_KEYS.WEBHOOK_SIGNING_SECRET);
-        }
-        clearSecretCache(REAL_ORG_ID);
+        await supabaseAdmin.from('webhook_events').delete().eq('organization_id', orgId);
+        await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', orgId);
+        clearSecretCache(orgId);
+        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
     });
 
     afterEach(async () => {
         // event_id tiene forma "<eventType>:<conversationId>" — conversationId
         // (que sí empieza con "sig-e2e-test:") queda en medio de la cadena, no
         // al inicio, de ahí el comodín en ambos lados.
-        await supabaseAdmin.from('webhook_events').delete().eq('organization_id', REAL_ORG_ID).like('event_id', '%sig-e2e-test%');
+        await supabaseAdmin.from('webhook_events').delete().eq('organization_id', orgId).like('event_id', '%sig-e2e-test%');
     });
 
     it('rechaza con 401 una firma que no coincide, aunque haya secreto configurado (secreto incorrecto usado por el emisor)', async () => {
@@ -243,7 +214,7 @@ describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
             const { data: rows } = await supabaseAdmin
                 .from('webhook_events')
                 .select('id')
-                .eq('organization_id', REAL_ORG_ID)
+                .eq('organization_id', orgId)
                 .eq('event_id', `post_call_transcription:${conversationId}`);
             expect(rows?.length).toBe(1);
         } finally {
@@ -252,7 +223,7 @@ describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
     });
 
     it('organización suspendida + firma válida → 403, sin insert en webhook_events ni job encolado', async () => {
-        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', REAL_ORG_ID);
+        await supabaseAdmin.from('organizations').update({ status: 'suspended', suspended_reason: 'Prueba de suspensión' }).eq('id', orgId);
 
         const { app, sendSpy } = await buildTestAppWithFakeQueue();
         try {
@@ -277,11 +248,11 @@ describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
             const { data: rows } = await supabaseAdmin
                 .from('webhook_events')
                 .select('id')
-                .eq('organization_id', REAL_ORG_ID)
+                .eq('organization_id', orgId)
                 .eq('event_id', `post_call_transcription:${conversationId}`);
             expect(rows?.length).toBe(0);
         } finally {
-            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', REAL_ORG_ID);
+            await supabaseAdmin.from('organizations').update({ status: 'active', suspended_reason: null, suspended_at: null }).eq('id', orgId);
             await app.close();
         }
     });
@@ -322,7 +293,7 @@ describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
             const { data: rows } = await supabaseAdmin
                 .from('webhook_events')
                 .select('id')
-                .eq('organization_id', REAL_ORG_ID)
+                .eq('organization_id', orgId)
                 .eq('event_id', `post_call_transcription:${conversationId}`);
             expect(rows?.length).toBe(1);
         } finally {
@@ -333,6 +304,24 @@ describe('2.1 — Verificación de firma HMAC end-to-end (HTTP)', () => {
 
 describe('2.1 — Idempotencia de entrega en webhook_events', () => {
     const TEST_EVENT_ID = `test:idempotencia:${Date.now()}`;
+    let orgId: string;
+
+    beforeAll(async () => {
+        const { data: org, error } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (webhooks-elevenlabs.test.ts block3)',
+                email: `org-wh-3-${Date.now()}@example.invalid`,
+            })
+            .select('id')
+            .single();
+        if (error || !org) throw new Error(`No se pudo crear organizations para la prueba: ${error?.message}`);
+        orgId = org.id;
+    });
+
+    afterAll(async () => {
+        if (orgId) await supabaseAdmin.from('organizations').delete().eq('id', orgId);
+    });
 
     afterEach(async () => {
         await supabaseAdmin.from('webhook_events').delete().eq('event_id', TEST_EVENT_ID);
@@ -342,7 +331,7 @@ describe('2.1 — Idempotencia de entrega en webhook_events', () => {
         const first = await supabaseAdmin
             .from('webhook_events')
             .insert({
-                organization_id: REAL_ORG_ID,
+                organization_id: orgId,
                 provider: 'elevenlabs',
                 event_id: TEST_EVENT_ID,
                 event_type: 'post_call_transcription',
@@ -356,7 +345,7 @@ describe('2.1 — Idempotencia de entrega en webhook_events', () => {
         const second = await supabaseAdmin
             .from('webhook_events')
             .insert({
-                organization_id: REAL_ORG_ID,
+                organization_id: orgId,
                 provider: 'elevenlabs',
                 event_id: TEST_EVENT_ID,
                 event_type: 'post_call_transcription',
