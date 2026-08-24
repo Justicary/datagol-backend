@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { isPlatformAdmin } from '../../lib/platform-admin.js';
 import { clearEntitlementsCache } from '../../services/entitlements.js';
+import { getPlansPromptPreview, syncPlansToElevenLabsAgent } from '../../services/plans-agent-sync.js';
 
 interface PlanUpdateBody {
     name?: string;
@@ -24,6 +25,10 @@ interface ExchangeRateBody {
     tipoCambioUSD?: number;
 }
 
+interface SyncPromptBody {
+    organizationId?: string;
+}
+
 function isNonNegativeNumber(value: unknown): value is number {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
@@ -41,6 +46,41 @@ function isStringArray(value: unknown): value is string[] {
  */
 export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.addHook('preHandler', isPlatformAdmin);
+
+    /**
+     * GET /api/admin/plans/prompt-preview
+     * Vista previa del bloque de texto fonético PLANES: que se inyecta en el agente de voz.
+     */
+    fastify.get('/api/admin/plans/prompt-preview', async (_request, reply) => {
+        try {
+            const preview = await getPlansPromptPreview();
+            return reply.send({ success: true, data: preview });
+        } catch (err) {
+            return reply.status(500).send({
+                success: false,
+                error: 'InternalServerError',
+                message: err instanceof Error ? err.message : String(err),
+            });
+        }
+    });
+
+    /**
+     * POST /api/admin/plans/sync-prompt
+     * Sincroniza inmediatamente el System Prompt del agente en ElevenLabs con los planes de la base de datos.
+     */
+    fastify.post<{ Body: SyncPromptBody }>('/api/admin/plans/sync-prompt', async (request, reply) => {
+        try {
+            const { organizationId } = request.body || {};
+            const result = await syncPlansToElevenLabsAgent(organizationId);
+            return reply.send({ success: true, data: result });
+        } catch (err) {
+            return reply.status(500).send({
+                success: false,
+                error: 'InternalServerError',
+                message: err instanceof Error ? err.message : String(err),
+            });
+        }
+    });
 
     /**
      * GET /api/admin/plans

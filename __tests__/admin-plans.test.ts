@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import supabasePlugin from '../src/plugins/supabase.js';
 import adminPlansRoutes from '../src/routes/admin/plans.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { ElevenLabsAdapter } from '../src/services/providers/ElevenLabsAdapter.js';
 
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const TEST_PLAN_KEY = 'starter';
 
 async function buildTestApp() {
@@ -237,23 +237,110 @@ describe('routes/admin/plans.ts', () => {
         });
     });
 
-    describe('GET/PATCH /api/admin/exchange-rate', () => {
-        let originalIntegrationSettings: Record<string, unknown> | null;
+    describe('GET /api/admin/plans/prompt-preview', () => {
+        it('devuelve la vista previa del bloque PLANES: con éxito', async () => {
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'GET',
+                    url: '/api/admin/plans/prompt-preview',
+                    headers: { 'x-platform-admin': 'true' },
+                });
+                expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(body.success).toBe(true);
+                expect(typeof body.data.plansBlock).toBe('string');
+                expect(body.data.plansBlock).toContain('PLANES:');
+                expect(body.data.plansCount).toBeGreaterThan(0);
+                expect(Array.isArray(body.data.plans)).toBe(true);
+            } finally {
+                await app.close();
+            }
+        });
+    });
+
+    describe('POST /api/admin/plans/sync-prompt', () => {
+        let testOrgId: string;
 
         beforeAll(async () => {
-            const { data: org } = await supabaseAdmin
+            const { data: org, error } = await supabaseAdmin
                 .from('organizations')
-                .select('integration_settings')
-                .eq('id', REAL_ORG_ID)
-                .maybeSingle();
-            originalIntegrationSettings = (org?.integration_settings as Record<string, unknown> | null) ?? null;
+                .insert({
+                    name: 'Org Test Sync Prompt',
+                    email: `org-test-sync-${Date.now()}@example.invalid`,
+                    status: 'active',
+                    elevenlabs_agent_id: 'agent-mock-sync-123',
+                })
+                .select('id')
+                .single();
+            if (error || !org) throw new Error(`No se pudo crear org de prueba: ${error?.message}`);
+            testOrgId = org.id;
         });
 
         afterAll(async () => {
-            await supabaseAdmin
+            if (testOrgId) {
+                await supabaseAdmin.from('organizations').delete().eq('id', testOrgId);
+            }
+        });
+
+        it('sincroniza el system prompt con ElevenLabs mockeado', async () => {
+            const getSpy = vi.spyOn(ElevenLabsAdapter.prototype, 'getAgentConfig').mockResolvedValueOnce({
+                agentId: 'agent-mock-sync-123',
+                firstMessage: 'Hola',
+                systemPrompt: 'Eres un agente de Datagol.\n\nPLANES:\nViejo plan.\n\nREGLAS:\nSé amable.',
+                voiceId: 'voice-123',
+            });
+
+            const syncSpy = vi.spyOn(ElevenLabsAdapter.prototype, 'syncAgentConfig').mockResolvedValueOnce(true);
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/admin/plans/sync-prompt',
+                    headers: { 'x-platform-admin': 'true' },
+                    payload: { organizationId: testOrgId },
+                });
+
+                expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(body.success).toBe(true);
+                expect(body.data.agentId).toBe('agent-mock-sync-123');
+                expect(body.data.updatedPromptSnippet).toContain('PLANES:');
+
+                expect(getSpy).toHaveBeenCalledWith('agent-mock-sync-123', expect.any(String));
+                expect(syncSpy).toHaveBeenCalled();
+            } finally {
+                await app.close();
+                getSpy.mockRestore();
+                syncSpy.mockRestore();
+            }
+        });
+    });
+
+    describe('GET/PATCH /api/admin/exchange-rate', () => {
+        let testOrgId: string;
+        const originalIntegrationSettings = { testKey: 'preserved_value' };
+
+        beforeAll(async () => {
+            const { data: org, error } = await supabaseAdmin
                 .from('organizations')
-                .update({ integration_settings: originalIntegrationSettings })
-                .eq('id', REAL_ORG_ID);
+                .insert({
+                    name: 'Org Test Exchange Rate',
+                    email: `org-test-rate-${Date.now()}@example.invalid`,
+                    status: 'active',
+                    integration_settings: originalIntegrationSettings,
+                })
+                .select('id')
+                .single();
+            if (error || !org) throw new Error(`No se pudo crear org de prueba: ${error?.message}`);
+            testOrgId = org.id;
+        });
+
+        afterAll(async () => {
+            if (testOrgId) {
+                await supabaseAdmin.from('organizations').delete().eq('id', testOrgId);
+            }
         });
 
         it('400 sin organizationId en GET', async () => {
@@ -277,13 +364,13 @@ describe('routes/admin/plans.ts', () => {
                     method: 'PATCH',
                     url: '/api/admin/exchange-rate',
                     headers: { 'x-platform-admin': 'true' },
-                    payload: { organizationId: REAL_ORG_ID, tipoCambioUSD: 19.25 },
+                    payload: { organizationId: testOrgId, tipoCambioUSD: 19.25 },
                 });
                 expect(patchResponse.statusCode).toBe(200);
 
                 const getResponse = await app.inject({
                     method: 'GET',
-                    url: `/api/admin/exchange-rate?organizationId=${REAL_ORG_ID}`,
+                    url: `/api/admin/exchange-rate?organizationId=${testOrgId}`,
                     headers: { 'x-platform-admin': 'true' },
                 });
                 expect(getResponse.json().tipoCambioUSD).toBe(19.25);
@@ -291,10 +378,9 @@ describe('routes/admin/plans.ts', () => {
                 const { data: org } = await supabaseAdmin
                     .from('organizations')
                     .select('integration_settings')
-                    .eq('id', REAL_ORG_ID)
+                    .eq('id', testOrgId)
                     .single();
-                for (const key of Object.keys(originalIntegrationSettings ?? {})) {
-                    if (key === 'tipoCambioUSD') continue;
+                for (const key of Object.keys(originalIntegrationSettings)) {
                     expect((org?.integration_settings as Record<string, unknown>)[key]).toEqual(
                         (originalIntegrationSettings as Record<string, unknown>)[key]
                     );
@@ -311,7 +397,7 @@ describe('routes/admin/plans.ts', () => {
                     method: 'PATCH',
                     url: '/api/admin/exchange-rate',
                     headers: { 'x-platform-admin': 'true' },
-                    payload: { organizationId: REAL_ORG_ID, tipoCambioUSD: 0 },
+                    payload: { organizationId: testOrgId, tipoCambioUSD: 0 },
                 });
                 expect(response.statusCode).toBe(400);
             } finally {
