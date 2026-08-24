@@ -2,17 +2,15 @@
  * Cliente de la knowledge base de ElevenLabs Conversational AI (FASE C.2,
  * docs/tasks/catalogo-productos-grupos-cred.md).
  *
- * NO VERIFICADO contra la documentación/API vigente de ElevenLabs — decisión
- * explícita del usuario: implementar con mejor esfuerzo contra los endpoints
- * públicos de Conversational AI tal como se conocen, dejando comentado
- * dónde verificar antes de producción (mismo criterio que
- * db/migrations/15_llm_token_provider_rates.sql con las tarifas de LLM).
- * Endpoints asumidos:
- *   - POST   /v1/convai/knowledge-base/text        (crear documento de texto)
- *   - PATCH  /v1/convai/knowledge-base/:documentId  (actualizar contenido)
- *   - DELETE /v1/convai/knowledge-base/:documentId
- *   - POST   /v1/convai/knowledge-base/:documentId/rag-index (recalcular índice RAG)
- *   - GET    /v1/convai/knowledge-base              (listado, para C.3 — tamaño/uso)
+ * Verificado contra la documentación oficial de ElevenLabs Conversational AI:
+ * (https://elevenlabs.io/docs/api-reference/knowledge-base/create-from-text)
+ * Endpoints implementados:
+ *   - POST   /v1/convai/knowledge-base/text                   (crear documento de texto con parent_folder_id)
+ *   - PATCH  /v1/convai/knowledge-base/:documentId            (actualizar nombre/contenido)
+ *   - DELETE /v1/convai/knowledge-base/:documentId            (eliminar documento de la KB)
+ *   - POST   /v1/convai/knowledge-base/:documentId/rag-index  (calcular/recalcular índice RAG)
+ *   - POST   /v1/convai/knowledge-base/folder                 (crear carpeta en KB)
+ *   - GET    /v1/convai/knowledge-base                        (listado y uso de KB)
  * Todos con header `xi-api-key`, misma convención que el resto del código
  * (ElevenLabsAdapter.ts, check-elevenlabs-credits.ts).
  */
@@ -46,19 +44,23 @@ export interface KbDocumentResult {
 
 /**
  * Crea o actualiza el documento de texto de un producto. `existingDocumentId`
- * decide la operación: `null` crea (POST), un valor existente actualiza
- * (PATCH) — nunca se crea un documento duplicado para el mismo producto.
+ * decide la operación: `null` crea (POST a /text), un valor existente actualiza
+ * (PATCH a /:documentId) — nunca se crea un documento duplicado para el mismo producto.
  */
 export async function createOrUpdateKbTextDocument(params: CreateOrUpdateKbTextDocumentParams): Promise<KbDocumentResult> {
     const { apiKey, existingDocumentId, name, content, folderId } = params;
 
-    const url = existingDocumentId ? `${ELEVENLABS_KB_BASE_URL}/text/${existingDocumentId}` : `${ELEVENLABS_KB_BASE_URL}/text`;
+    const url = existingDocumentId ? `${ELEVENLABS_KB_BASE_URL}/${existingDocumentId}` : `${ELEVENLABS_KB_BASE_URL}/text`;
     const method = existingDocumentId ? 'PATCH' : 'POST';
+
+    const payload = existingDocumentId
+        ? { name, content }
+        : { name, text: content, ...(folderId ? { parent_folder_id: folderId } : {}) };
 
     const response = await fetch(url, {
         method,
         headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, text: content, ...(folderId ? { folder_id: folderId } : {}) }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(ELEVENLABS_TIMEOUT_MS),
     });
 
@@ -81,7 +83,7 @@ export async function createOrUpdateKbTextDocument(params: CreateOrUpdateKbTextD
  * el estado deseado ("no existe") ya se cumple.
  */
 export async function deleteKbDocument(apiKey: string, documentId: string): Promise<void> {
-    const response = await fetch(`${ELEVENLABS_KB_BASE_URL}/text/${documentId}`, {
+    const response = await fetch(`${ELEVENLABS_KB_BASE_URL}/${documentId}`, {
         method: 'DELETE',
         headers: { 'xi-api-key': apiKey },
         signal: AbortSignal.timeout(ELEVENLABS_TIMEOUT_MS),

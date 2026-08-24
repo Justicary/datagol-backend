@@ -10,9 +10,8 @@ import {
 
 /**
  * Red saliente a api.elevenlabs.io siempre mockeada — es un proveedor de
- * pago de terceros y su contrato exacto NO está verificado (ver comentario
- * en src/services/elevenlabs-kb-client.ts). Estas pruebas fijan el
- * comportamiento asumido del cliente, no el de la API real.
+ * pago de terceros. Estas pruebas verifican el contrato oficial del cliente
+ * contra la API de ElevenLabs Conversational AI Knowledge Base.
  */
 afterEach(() => {
     vi.restoreAllMocks();
@@ -24,7 +23,7 @@ function mockFetchOnce(response: Response) {
 
 describe('src/services/elevenlabs-kb-client.ts', () => {
     describe('createOrUpdateKbTextDocument', () => {
-        it('sin existingDocumentId, hace POST a .../text (crear)', async () => {
+        it('sin existingDocumentId, hace POST a .../text con parent_folder_id (crear)', async () => {
             const fetchSpy = mockFetchOnce(new Response(JSON.stringify({ id: 'doc_new_123' }), { status: 200 }));
 
             const result = await createOrUpdateKbTextDocument({
@@ -41,10 +40,14 @@ describe('src/services/elevenlabs-kb-client.ts', () => {
             expect(String(url)).not.toContain('/knowledge-base/text/');
             expect((init as RequestInit).method).toBe('POST');
             expect((init as RequestInit).headers).toMatchObject({ 'xi-api-key': 'key123' });
-            expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({ folder_id: 'folder-abc' });
+            expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+                name: 'SKU: ARN-GEL-060',
+                text: 'contenido de prueba',
+                parent_folder_id: 'folder-abc',
+            });
         });
 
-        it('contraparte: con existingDocumentId, hace PATCH al documento existente (actualizar, no duplicar)', async () => {
+        it('contraparte: con existingDocumentId, hace PATCH a .../:documentId con content (actualizar, no duplicar)', async () => {
             const fetchSpy = mockFetchOnce(new Response(JSON.stringify({ id: 'doc_existing_456' }), { status: 200 }));
 
             const result = await createOrUpdateKbTextDocument({
@@ -57,8 +60,13 @@ describe('src/services/elevenlabs-kb-client.ts', () => {
 
             expect(result.documentId).toBe('doc_existing_456');
             const [url, init] = fetchSpy.mock.calls[0];
-            expect(String(url)).toContain('/knowledge-base/text/doc_existing_456');
+            expect(String(url)).toContain('/knowledge-base/doc_existing_456');
+            expect(String(url)).not.toContain('/knowledge-base/text/');
             expect((init as RequestInit).method).toBe('PATCH');
+            expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+                name: 'SKU: ARN-GEL-060',
+                content: 'contenido actualizado',
+            });
         });
 
         it('respuesta no-ok lanza ElevenLabsKbError con el status', async () => {
@@ -71,11 +79,12 @@ describe('src/services/elevenlabs-kb-client.ts', () => {
     });
 
     describe('deleteKbDocument', () => {
-        it('hace DELETE al documento', async () => {
+        it('hace DELETE a .../:documentId (sin /text/)', async () => {
             const fetchSpy = mockFetchOnce(new Response(null, { status: 200 }));
             await deleteKbDocument('key123', 'doc_to_delete');
             const [url, init] = fetchSpy.mock.calls[0];
-            expect(String(url)).toContain('/knowledge-base/text/doc_to_delete');
+            expect(String(url)).toContain('/knowledge-base/doc_to_delete');
+            expect(String(url)).not.toContain('/knowledge-base/text/');
             expect((init as RequestInit).method).toBe('DELETE');
         });
 
