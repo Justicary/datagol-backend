@@ -453,3 +453,50 @@ export async function generateAndDeliverWeeklyReport(
         return { claimed: true, reportId, status: REPORT_STATUSES.FAILED };
     }
 }
+
+/**
+ * Renderiza una vista previa del reporte semanal sin persistir en Storage ni enviar correos.
+ */
+export async function renderWeeklyReportPreview(
+    fastify: FastifyInstance,
+    organizationId: string,
+    reportType: ReportType
+): Promise<{ html: string; subject: string; text?: string; reportType: ReportType }> {
+    const now = new Date();
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(now.setDate(diff)).toISOString().split('T')[0];
+
+    const data = await collectReportData(fastify, reportType, organizationId, monday);
+    const sections = buildReportSections(reportType, data);
+
+    const emailData: WeeklyReportEmailData = {
+        businessName: 'Datagol',
+        weekStart: data.weekStart,
+        weekEnd: data.weekEnd,
+        narrative: null,
+        recommendations: [],
+        sections,
+        downloadUrl: null,
+    };
+
+    const { data: org } = await fastify.supabaseAdmin
+        .from('organizations')
+        .select('name')
+        .eq('id', organizationId)
+        .maybeSingle();
+    if (org?.name) {
+        emailData.businessName = org.name;
+    }
+
+    const renderOptions = await resolveOrganizationEmailOptions(organizationId);
+    const emailType = reportType === REPORT_TYPES.PLANNING ? EMAIL_TYPES.WEEKLY_PLANNING_REPORT : EMAIL_TYPES.WEEKLY_EXECUTIVE_REPORT;
+    const rendered = renderEmail(emailType, emailData, renderOptions);
+
+    return {
+        reportType,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+    };
+}

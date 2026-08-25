@@ -186,4 +186,58 @@ describe('Rutas HTTP de reportes semanales (organization-reports.ts)', () => {
             expect(body.data.planning.dayOfWeek).toBe(1);
         });
     });
+
+    describe('GET /api/organizations/:id/reports/preview', () => {
+        it('devuelve 403 a un usuario ajeno a la organización', async () => {
+            const res = await app.inject({
+                method: 'GET',
+                url: `/api/organizations/${orgId}/reports/preview?type=planning`,
+                headers: { authorization: `Bearer ${outsider.jwt}` },
+            });
+            expect(res.statusCode).toBe(403);
+        });
+
+        it('devuelve la vista previa JSON de planificación para un miembro', async () => {
+            const res = await app.inject({
+                method: 'GET',
+                url: `/api/organizations/${orgId}/reports/preview?type=planning`,
+                headers: { authorization: `Bearer ${member.jwt}` },
+            });
+            expect(res.statusCode).toBe(200);
+            const body = res.json();
+            expect(body.success).toBe(true);
+            expect(body.data.reportType).toBe('planning');
+            expect(typeof body.data.subject).toBe('string');
+            expect(typeof body.data.html).toBe('string');
+            expect(body.data.html).toContain('<!DOCTYPE html>');
+        });
+
+        it('devuelve la vista previa del reporte ejecutivo para el alias sin prefijo /api', async () => {
+            const res = await app.inject({
+                method: 'GET',
+                url: `/organizations/${orgId}/reports/preview?type=executive`,
+                headers: { authorization: `Bearer ${member.jwt}` },
+            });
+            expect(res.statusCode).toBe(200);
+            const body = res.json();
+            expect(body.success).toBe(true);
+            expect(body.data.reportType).toBe('executive');
+            expect(typeof body.data.subject).toBe('string');
+            expect(typeof body.data.html).toBe('string');
+        });
+
+        it('devuelve HTML directo cuando se envía el header Accept: text/html', async () => {
+            const res = await app.inject({
+                method: 'GET',
+                url: `/api/organizations/${orgId}/reports/preview?type=planning`,
+                headers: {
+                    authorization: `Bearer ${member.jwt}`,
+                    accept: 'text/html',
+                },
+            });
+            expect(res.statusCode).toBe(200);
+            expect(res.headers['content-type']).toContain('text/html');
+            expect(res.body).toContain('<!DOCTYPE html>');
+        });
+    });
 });

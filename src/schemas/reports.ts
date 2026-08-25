@@ -75,3 +75,18 @@ export const reportIdParamSchema = z.object({
     id: z.string().uuid('El parámetro id debe ser un UUID válido'),
     reportId: z.string().uuid('El parámetro reportId debe ser un UUID válido'),
 });
+
+export const reportsPreviewQuerySchema = z.object({
+    type: reportTypeEnum.default(REPORT_TYPES.PLANNING),
+});
+export type ReportsPreviewQuery = z.infer<typeof reportsPreviewQuerySchema>;
+
+export const reportsPreviewResponseSchema = z.object({
+    success: z.literal(true),
+    data: z.object({
+        reportType: reportTypeEnum,
+        subject: z.string(),
+        html: z.string(),
+        text: z.string().optional(),
+    }),
+});

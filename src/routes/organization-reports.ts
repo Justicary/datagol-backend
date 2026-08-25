@@ -8,10 +8,13 @@ import {
     reportsConfigResponseSchema,
     organizationReportsUpdateSchema,
     reportIdParamSchema,
+    reportsPreviewQuerySchema,
+    reportsPreviewResponseSchema,
 } from '../schemas/reports.js';
-import type { OrganizationReportsSettings, ReportScheduleSettings } from '../types/reports.js';
+import { REPORT_TYPES, type OrganizationReportsSettings, type ReportScheduleSettings } from '../types/reports.js';
 import { generateReportSignedUrl } from '../services/report-storage-service.js';
 import { getReportsSettings as readReportsSettings } from '../services/report-settings-service.js';
+import { renderWeeklyReportPreview } from '../services/weekly-report-service.js';
 
 /**
  * Rutas de reportes semanales (docs/tasks/reportes-semanales.md, Fase B):
@@ -165,6 +168,38 @@ export async function organizationReportsRoutes(fastify: FastifyInstance) {
 
         return reply.redirect(signedUrl, 302);
     });
+
+    /**
+     * GET /api/organizations/:id/reports/preview
+     * Vista previa renderizada del reporte semanal (planning o executive).
+     */
+    const handlePreview = async (request: FastifyRequest, reply: FastifyReply) => {
+        const ctx = await authorizeMember(request, reply);
+        if (!ctx) return;
+
+        const queryResult = reportsPreviewQuerySchema.safeParse(request.query);
+        const reportType = queryResult.success ? queryResult.data.type : REPORT_TYPES.PLANNING;
+
+        try {
+            const preview = await renderWeeklyReportPreview(fastify, ctx.organizationId, reportType);
+
+            const acceptHeader = request.headers.accept || '';
+            if (acceptHeader.includes('text/html') && !acceptHeader.includes('application/json')) {
+                return reply.type('text/html; charset=utf-8').status(200).send(preview.html);
+            }
+
+            return reply.status(200).send(reportsPreviewResponseSchema.parse({
+                success: true,
+                data: preview,
+            }));
+        } catch (err) {
+            request.log.error({ organizationId: ctx.organizationId, err, msg: 'Error generando preview de reporte semanal' });
+            return reply.status(500).send({ success: false, error: 'No se pudo generar la vista previa del reporte.' });
+        }
+    };
+
+    fastify.get('/api/organizations/:id/reports/preview', handlePreview);
+    fastify.get('/organizations/:id/reports/preview', handlePreview);
 
     /**
      * GET /api/organizations/:id/reports-config
