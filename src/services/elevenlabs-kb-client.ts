@@ -16,7 +16,8 @@
  */
 
 const ELEVENLABS_KB_BASE_URL = 'https://api.elevenlabs.io/v1/convai/knowledge-base';
-const ELEVENLABS_TIMEOUT_MS = 15_000;
+const ELEVENLABS_TIMEOUT_MS = 30_000;
+export const ELEVENLABS_DEFAULT_RAG_MODEL = 'e5_mistral_7b_instruct';
 
 export class ElevenLabsKbError extends Error {
     constructor(
@@ -65,7 +66,11 @@ export async function createOrUpdateKbTextDocument(params: CreateOrUpdateKbTextD
     });
 
     if (!response.ok) {
-        throw new ElevenLabsKbError(`ElevenLabs devolvió ${response.status} al ${existingDocumentId ? 'actualizar' : 'crear'} el documento de KB "${name}"`, response.status);
+        const errorText = await response.text().catch(() => '');
+        throw new ElevenLabsKbError(
+            `ElevenLabs devolvió ${response.status} al ${existingDocumentId ? 'actualizar' : 'crear'} el documento de KB "${name}": ${errorText}`,
+            response.status
+        );
     }
 
     const body = (await response.json()) as { id?: string; document_id?: string };
@@ -90,31 +95,46 @@ export async function deleteKbDocument(apiKey: string, documentId: string): Prom
     });
 
     if (!response.ok && response.status !== 404) {
-        throw new ElevenLabsKbError(`ElevenLabs devolvió ${response.status} al eliminar el documento de KB ${documentId}`, response.status);
+        const errorText = await response.text().catch(() => '');
+        throw new ElevenLabsKbError(`ElevenLabs devolvió ${response.status} al eliminar el documento de KB ${documentId}: ${errorText}`, response.status);
     }
 }
 
 /**
  * Dispara el recálculo del índice RAG del documento — paso asíncrono aparte
  * (FASE C.2): sin esto, el documento existe en la KB pero no se recupera en
- * búsquedas semánticas durante la conversación.
+ * búsquedas semánticas durante la conversación. Requiere especificar el modelo
+ * (por defecto: e5_mistral_7b_instruct).
  */
-export async function triggerRagIndex(apiKey: string, documentId: string): Promise<void> {
+export async function triggerRagIndex(
+    apiKey: string,
+    documentId: string,
+    model: string = ELEVENLABS_DEFAULT_RAG_MODEL
+): Promise<void> {
     const response = await fetch(`${ELEVENLABS_KB_BASE_URL}/${documentId}/rag-index`, {
         method: 'POST',
         headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ model }),
         signal: AbortSignal.timeout(ELEVENLABS_TIMEOUT_MS),
     });
 
     if (!response.ok) {
-        throw new ElevenLabsKbError(`ElevenLabs devolvió ${response.status} al disparar el reindexado RAG del documento ${documentId}`, response.status);
+        const errorText = await response.text().catch(() => '');
+        // Si ElevenLabs devuelve 422 indicando que el documento ya se encuentra en procesamiento o indexado,
+        // no se considera un fallo fatal (ya está en curso).
+        if (response.status === 422 && (errorText.includes('processing') || errorText.includes('already'))) {
+            return;
+        }
+        throw new ElevenLabsKbError(
+            `ElevenLabs devolvió ${response.status} al disparar el reindexado RAG del documento ${documentId}: ${errorText}`,
+            response.status
+        );
     }
 }
 
 /**
  * Crea una carpeta de knowledge base (FASE C.2: "usar una carpeta por
- * catálogo"). NO VERIFICADO — endpoint asumido, ver comentario de cabecera.
+ * catálogo").
  */
 export async function createKbFolder(apiKey: string, name: string): Promise<{ folderId: string }> {
     const response = await fetch(`${ELEVENLABS_KB_BASE_URL}/folder`, {
@@ -125,7 +145,8 @@ export async function createKbFolder(apiKey: string, name: string): Promise<{ fo
     });
 
     if (!response.ok) {
-        throw new ElevenLabsKbError(`ElevenLabs devolvió ${response.status} al crear la carpeta de KB "${name}"`, response.status);
+        const errorText = await response.text().catch(() => '');
+        throw new ElevenLabsKbError(`ElevenLabs devolvió ${response.status} al crear la carpeta de KB "${name}": ${errorText}`, response.status);
     }
 
     const body = (await response.json()) as { id?: string; folder_id?: string };

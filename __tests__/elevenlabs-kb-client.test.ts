@@ -100,16 +100,29 @@ describe('src/services/elevenlabs-kb-client.ts', () => {
     });
 
     describe('triggerRagIndex', () => {
-        it('hace POST a .../rag-index', async () => {
+        it('hace POST a .../rag-index con el modelo e5_mistral_7b_instruct por defecto', async () => {
             const fetchSpy = mockFetchOnce(new Response(JSON.stringify({}), { status: 200 }));
             await triggerRagIndex('key123', 'doc_abc');
             const [url, init] = fetchSpy.mock.calls[0];
             expect(String(url)).toContain('/knowledge-base/doc_abc/rag-index');
             expect((init as RequestInit).method).toBe('POST');
+            expect(JSON.parse((init as RequestInit).body as string)).toEqual({ model: 'e5_mistral_7b_instruct' });
+        });
+
+        it('permite especificar un modelo alternativo', async () => {
+            const fetchSpy = mockFetchOnce(new Response(JSON.stringify({}), { status: 200 }));
+            await triggerRagIndex('key123', 'doc_abc', 'multilingual_e5_large_instruct');
+            const [, init] = fetchSpy.mock.calls[0];
+            expect(JSON.parse((init as RequestInit).body as string)).toEqual({ model: 'multilingual_e5_large_instruct' });
+        });
+
+        it('si ElevenLabs devuelve 422 indicando que el documento ya está en processing no lanza error', async () => {
+            mockFetchOnce(new Response(JSON.stringify({ detail: 'document is currently processing' }), { status: 422 }));
+            await expect(triggerRagIndex('key123', 'doc_abc')).resolves.not.toThrow();
         });
 
         it('respuesta no-ok lanza ElevenLabsKbError', async () => {
-            mockFetchOnce(new Response(null, { status: 429 }));
+            mockFetchOnce(new Response('Rate limit exceeded', { status: 429 }));
             await expect(triggerRagIndex('key123', 'doc_abc')).rejects.toThrow(ElevenLabsKbError);
         });
     });
