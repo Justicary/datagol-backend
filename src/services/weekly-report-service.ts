@@ -461,7 +461,17 @@ export async function renderWeeklyReportPreview(
     fastify: FastifyInstance,
     organizationId: string,
     reportType: ReportType
-): Promise<{ html: string; subject: string; text?: string; reportType: ReportType }> {
+): Promise<{
+    html: string;
+    subject: string;
+    text?: string;
+    reportType: ReportType;
+    hasSufficientData: boolean;
+    periodStart: string;
+    periodEnd: string;
+    weekStart: string;
+    weekEnd: string;
+}> {
     const now = new Date();
     const day = now.getDay();
     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
@@ -469,6 +479,7 @@ export async function renderWeeklyReportPreview(
 
     const data = await collectReportData(fastify, reportType, organizationId, monday);
     const sections = buildReportSections(reportType, data);
+    const hasSufficientData = hasReportActivity(reportType, data);
 
     const emailData: WeeklyReportEmailData = {
         businessName: 'Datagol',
@@ -498,5 +509,10 @@ export async function renderWeeklyReportPreview(
         subject: rendered.subject,
         html: rendered.html,
         text: rendered.text,
+        hasSufficientData,
+        periodStart: data.weekStart,
+        periodEnd: data.weekEnd,
+        weekStart: data.weekStart,
+        weekEnd: data.weekEnd,
     };
 }

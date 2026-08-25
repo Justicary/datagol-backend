@@ -84,9 +84,14 @@ export type ReportsPreviewQuery = z.infer<typeof reportsPreviewQuerySchema>;
 export const reportsPreviewResponseSchema = z.object({
     success: z.literal(true),
     data: z.object({
-        reportType: reportTypeEnum,
+        reportType: reportTypeEnum.optional(),
         subject: z.string(),
         html: z.string(),
         text: z.string().optional(),
+        hasSufficientData: z.boolean(),
+        periodStart: z.string(),
+        periodEnd: z.string(),
+        weekStart: z.string().optional(),
+        weekEnd: z.string().optional(),
     }),
 });

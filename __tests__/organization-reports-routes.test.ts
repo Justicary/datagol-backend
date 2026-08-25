@@ -207,6 +207,9 @@ describe('Rutas HTTP de reportes semanales (organization-reports.ts)', () => {
             const body = res.json();
             expect(body.success).toBe(true);
             expect(body.data.reportType).toBe('planning');
+            expect(typeof body.data.hasSufficientData).toBe('boolean');
+            expect(typeof body.data.periodStart).toBe('string');
+            expect(typeof body.data.periodEnd).toBe('string');
             expect(typeof body.data.subject).toBe('string');
             expect(typeof body.data.html).toBe('string');
             expect(body.data.html).toContain('<!DOCTYPE html>');
@@ -222,6 +225,9 @@ describe('Rutas HTTP de reportes semanales (organization-reports.ts)', () => {
             const body = res.json();
             expect(body.success).toBe(true);
             expect(body.data.reportType).toBe('executive');
+            expect(typeof body.data.hasSufficientData).toBe('boolean');
+            expect(typeof body.data.periodStart).toBe('string');
+            expect(typeof body.data.periodEnd).toBe('string');
             expect(typeof body.data.subject).toBe('string');
             expect(typeof body.data.html).toBe('string');
         });
