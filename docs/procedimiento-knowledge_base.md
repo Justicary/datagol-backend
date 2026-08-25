@@ -79,20 +79,72 @@ Para cada producto del lote:
    - **Nuevo:** Envía `POST /v1/convai/knowledge-base/text` con `{ name, text: content, parent_folder_id: folderId }`.
    - **Existente:** Envía `PATCH /v1/convai/knowledge-base/:documentId` con `{ name, content }`.
    - **Inactivo / Eliminado:** Envía `DELETE /v1/convai/knowledge-base/:documentId` (un error 404 se trata como éxito idempotente).
-4. **Indexación RAG:**
-   - Envía `POST /v1/convai/knowledge-base/:documentId/rag-index` para generar los embeddings vectoriales que permiten al agente recuperar el fragmento durante la llamada.
-5. **Persistencia de Estado:** Guarda el `kb_document_id`, el nuevo `synced_content_hash` y marca el estado como `sincronizado`.
+4. **Indexación RAG Vectorial:**
+   - Envía `POST /v1/convai/knowledge-base/:documentId/rag-index` con el modelo de embedding correspondiente: `{ "model": "e5_mistral_7b_instruct" }` (o `"multilingual_e5_large_instruct"`).
+   - **Tolerancia a estados en procesamiento:** Si ElevenLabs devuelve `422` indicando que el documento ya se encuentra en procesamiento (`processing`), se asume como en curso y se persiste exitosamente el estado para evitar bloqueos.
+5. **Persistencia de Estado:** Guarda el `kb_document_id`, el nuevo `synced_content_hash`, actualiza `rag_indexed_at` y marca el estado como `sincronizado`.
 
 ---
 
-## 4. Resiliencia, Backoff y Control de Límites
+## 4. Resiliencia, Algoritmo de Backoff y Reintentos Automáticos
 
-* **Manejo de Errores Aislado:** El fallo de sincronización de un producto particular no detiene el lote. El producto fallido se marca como `error` con incremento de `attempts` y entra en un esquema de **backoff exponencial** ($2^{attempts}$ minutos, tope 64 minutos).
-* **Monitoreo de Capacidad de KB (`getKbUsage`):** Antes de cada lote se consulta `GET /v1/convai/knowledge-base`. Si el número de documentos supera el 80% del límite del plan de ElevenLabs, se registra una advertencia en los logs estructurados para alertar al administrador.
+### ⏱️ Ciclo de Barrido y Detección
+- **Frecuencia del Cron:** Un scheduler en `pg-boss` ejecuta `sync-catalog-kb-sweep` **cada 5 minutos** (`*/5 * * * *`).
+- **Filtrado de Registros:** El barrido busca todas las filas con estado `pendiente` y `error`.
+
+### 📈 Escala de Backoff Exponencial (`isDueForRetry`)
+Para evitar saturar la API de ElevenLabs o caer en bloqueos por *Rate Limit* ante problemas temporales de red, cada fallo incrementa `attempts` y aplica una ventana de espera:
+$$\text{Minutos de espera} = 2^{\min(\text{attempts}, 6)}$$
+
+| Intento (`attempts`) | Tiempo de Espera Antes del Reintento | Comportamiento del Sweep |
+|:---:|:---:|---|
+| **1** | **2 minutos** | Se reintenta en el siguiente ciclo (~5 min) |
+| **2** | **4 minutos** | Se reintenta en ~5–10 min |
+| **3** | **8 minutos** | Se reintenta en ~10 min |
+| **4** | **16 minutos** | Se reintenta en ~15–20 min |
+| **5** | **32 minutos** | Se reintenta en ~30–35 min |
+| **6+** | **64 minutos** | Tope máximo de espera |
+
+* **Aislamiento por Producto:** Un producto individual que falle nunca detiene el procesamiento del resto del lote.
+* **Monitoreo de Capacidad de KB (`getKbUsage`):** Antes de cada lote se consulta `GET /v1/convai/knowledge-base`. Si el número de documentos supera el 80% del límite del plan de ElevenLabs, se registra una advertencia estructurada en logs.
 
 ---
 
-## 5. Consulta en Vivo durante la Conversación Telefónica
+## 5. Recetas Operativas y Diagnóstico SQL (Supabase)
+
+### Consultar Estado Agregado del HUD
+```sql
+SELECT * FROM v_kb_sync_status;
+```
+
+### Consultar Productos con Fallos de Sincronización
+```sql
+SELECT 
+  p.name AS producto,
+  s.product_id,
+  s.kb_document_id,
+  s.status,
+  s.attempts,
+  s.error,
+  s.updated_at
+FROM product_kb_sync s
+JOIN products p ON p.id = s.product_id
+WHERE s.status = 'error';
+```
+
+### Forzar Reintento Inmediato de Errores (Reseteo de Backoff)
+```sql
+UPDATE product_kb_sync
+SET 
+  status = 'pendiente',
+  error = NULL,
+  attempts = 0
+WHERE status = 'error';
+```
+
+---
+
+## 6. Consulta en Vivo durante la Conversación Telefónica
 
 Durante el turno de conversación:
 1. El interlocutor menciona un producto (ej. *"¿Tienen gel de árnica para dolor muscular?"*).
@@ -112,7 +164,7 @@ Durante el turno de conversación:
 
 ---
 
-## 6. Mapeo de Archivos del Proyecto
+## 7. Mapeo de Archivos del Proyecto
 
 | Componente | Archivo | Responsabilidad |
 |---|---|---|
