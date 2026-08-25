@@ -773,6 +773,7 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `image_mime_type` | `text` |  Nullable |
 | `image_size_bytes` | `int8` |  Nullable |
 | `image_uploaded_at` | `timestamptz` |  Nullable |
+| `custom_fields` | `jsonb` | Default: '{}'::jsonb |
 
 ## Table `product_variants`
 
@@ -796,6 +797,7 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `price_changed_at` | `timestamptz` |  Nullable |
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
+| `custom_fields` | `jsonb` | Default: '{}'::jsonb |
 
 ## Table `variant_price_history`
 
@@ -862,6 +864,26 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `created_by` | `uuid` |  Nullable |
 | `created_at` | `timestamptz` |  |
 | `completed_at` | `timestamptz` |  Nullable |
+
+## Table `catalog_custom_fields`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `catalog_id` | `uuid` |  |
+| `entity_type` | `text` |  |
+| `name` | `text` |  |
+| `key` | `text` |  |
+| `field_type` | `text` |  |
+| `options` | `jsonb` | Default: '[]'::jsonb |
+| `description` | `text` |  Nullable |
+| `is_required` | `bool` | Default: false |
+| `include_in_rag` | `bool` | Default: true |
+| `order_index` | `int4` | Default: 0 |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
 
 ## Table `concurrency_quota_alerts`
 
@@ -1139,4 +1161,11 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 |--------|---------|-------|--------|-------|------------|
 | `products_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
 | `products_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+
+### `catalog_custom_fields`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `catalog_custom_fields_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+| `catalog_custom_fields_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
 

@@ -14,6 +14,7 @@ export interface CatalogProductForKb {
     suggestedUse: string | null;
     description: string | null;
     contraindications: string | null;
+    customFields?: Array<{ name: string; value: unknown }> | null;
 }
 
 export interface CatalogVariantForKb {
@@ -66,6 +67,13 @@ export function generateProductKbDocument(product: CatalogProductForKb, variants
     if (product.suggestedUse) bodyLines.push(`Uso sugerido: ${product.suggestedUse}`);
     if (product.description) bodyLines.push(product.description);
     if (product.contraindications) bodyLines.push(`Contraindicaciones: ${product.contraindications}`);
+    if (product.customFields && product.customFields.length > 0) {
+        for (const cf of product.customFields) {
+            if (cf.value !== null && cf.value !== undefined && cf.value !== '') {
+                bodyLines.push(`${cf.name}: ${cf.value}`);
+            }
+        }
+    }
     if (presentations.length > 0) bodyLines.push(`Presentaciones: ${presentations.join(', ')}.`);
 
     return [

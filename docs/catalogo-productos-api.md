@@ -204,15 +204,100 @@ Degradación: feature deshabilitada o error inesperado → `200 { results: [], m
 
 ---
 
+## 5.1 Campos personalizados (`catalog_custom_fields`)
+
+Permite a los usuarios definir columnas y atributos dinámicos adicionales en el catálogo (ej. "Puntos", "Sabor", "Laboratorio", "Talla", "Material", "Requiere Receta") con tipos de dato tipados (`text`, `number`, `boolean`, `select`), tanto a nivel de producto general (`entity_type: 'product'`) como a nivel de variante o SKU (`entity_type: 'variant'`).
+
+### `GET /api/organizations/:id/catalogs/:catalogId/custom-fields`
+Lista todos los campos personalizados definidos en el catálogo, ordenados por `order_index ASC`. Permiso: `view_catalog`.
+
+`200 { success: true, data: CatalogCustomFieldDTO[] }`
+
+```typescript
+interface CatalogCustomFieldDTO {
+    id: string;
+    catalogId: string;
+    entityType: 'product' | 'variant';
+    name: string;
+    key: string;              // slug único por catálogo y entityType (ej. "puntos_de_lealtad")
+    fieldType: 'text' | 'number' | 'boolean' | 'select';
+    options: string[];        // obligatorio cuando fieldType = 'select'
+    description: string | null;
+    isRequired: boolean;      // default: false
+    includeInRag: boolean;    // default: true (se inyecta en el documento RAG de ElevenLabs)
+    orderIndex: number;       // default: 0
+    createdAt: string;
+    updatedAt: string;
+}
+```
+
+### `POST /api/organizations/:id/catalogs/:catalogId/custom-fields`
+Crea una nueva definición de campo personalizado. Permiso: `manage_catalog`.
+
+Body:
+```json
+{
+  "entityType": "product",
+  "name": "Puntos de Lealtad",
+  "key": "puntos",
+  "fieldType": "number",
+  "options": [],
+  "description": "Puntos acumulables en la compra",
+  "isRequired": false,
+  "includeInRag": true,
+  "orderIndex": 0
+}
+```
+*Nota:* `key` es opcional; si no se envía, el backend lo genera automáticamente a partir de `name` mediante slugificación.
+
+`201 { success: true, data: CatalogCustomFieldDTO }`
+
+### `PATCH /api/organizations/:id/catalogs/:catalogId/custom-fields/:fieldId`
+Actualiza propiedades de un campo personalizado (nombre, tipo, opciones, descripción, obligatoriedad, RAG, orden). Permiso: `manage_catalog`.
+
+Body (parcial): `{ name?, fieldType?, options?, description?, isRequired?, includeInRag?, orderIndex? }`
+
+`200 { success: true, data: CatalogCustomFieldDTO }`
+
+### `DELETE /api/organizations/:id/catalogs/:catalogId/custom-fields/:fieldId`
+Elimina la definición del campo personalizado. Permiso: `manage_catalog`.
+
+`200 { success: true, message: 'Campo personalizado eliminado correctamente.' }`
+
+### Mapeo en importaciones masivas (`ColumnMapping.customFields`)
+El wizard de importación permite mapear columnas del archivo Excel/CSV a los campos personalizados configurados:
+```json
+{
+  "sku": "Código",
+  "name": "Producto",
+  "price": "Precio",
+  "customFields": {
+    "puntos": "Puntos",
+    "talla": "Talla"
+  }
+}
+```
+El backend valida y castea los valores según su `fieldType`:
+- `number`: limpia comas y convierte a número finito.
+- `boolean`: reconoce `"si"`, `"sí"`, `"true"`, `"1"` como `true`; `"no"`, `"false"`, `"0"` como `false`.
+- `select`: valida contra la lista de `options` (coincidencia insensible a mayúsculas).
+- `text`: texto plano trimmed.
+
+Si `includeInRag` es `true`, los campos de nivel de producto se inyectan automáticamente en el documento descriptivo del producto para la Knowledge Base de ElevenLabs (ej. `Puntos de Lealtad: 50`).
+
+---
+
 ## 6. Enums / constraints (única fuente de verdad en código)
 
 - `product_variants.stock_status` / `organization_variant_overrides.stock_status` → `src/types/stock-status.ts` (`disponible`, `bajo`, `agotado`, `bajo_pedido`, `sin_dato`)
+- `catalog_custom_fields.entity_type` → `src/types/catalog-custom-fields.ts` (`product`, `variant`)
+- `catalog_custom_fields.field_type` → `src/types/catalog-custom-fields.ts` (`text`, `number`, `boolean`, `select`)
 - `catalog_imports.mode` → `src/types/catalog-import.ts` (`completo`, `solo_precios`)
 - `catalog_imports.status` → `procesando`, `completado`, `fallido`, `revertido`
 - Permisos → `src/types/permission-keys.ts` (`view_catalog`, `manage_catalog`)
 - Feature → `src/types/feature-taxonomy.ts` (`product_rag`)
 
-Verificados por inserción directa contra la base real en `__tests__/catalog-enums.test.ts` — si un valor de esta lista se desincroniza del `CHECK` constraint real, esa prueba falla.
+Verificados por inserción directa contra la base real en `__tests__/catalog-enums.test.ts` y `__tests__/catalog-custom-fields-routes.test.ts`.
 
 ---
 
@@ -227,6 +312,7 @@ Verificados por inserción directa contra la base real en `__tests__/catalog-enu
 | `60_product_image.sql` | `products.image_path`, `image_mime_type`, `image_size_bytes`, `image_uploaded_at` — soporte de imagen de producto (bucket `product-images`). |
 | `61_catalog_import_mappings.sql` | Tabla `catalog_import_mappings` (mapeos de columnas guardados, §3.2). RLS de solo lectura — la escritura pasa exclusivamente por la API con `supabaseAdmin` + verificación explícita de `manage_catalog`, igual que `catalog_imports`. |
 | `62_resolve_variant_image.sql` | `create or replace function resolve_variant_for_org(...)` — agrega `image_path` al `returns table`, para que el tool de productos (§5) pueda construir `imageUrl`. No modifica la 56 ya aplicada (regla de proyecto: nunca tocar una migración aplicada). |
+| `63_catalog_custom_fields.sql` | `catalog_custom_fields` (definiciones de atributos dinámicos tipados); `products.custom_fields` (jsonb + GIN) y `product_variants.custom_fields` (jsonb + GIN); políticas RLS y triggers de actualización. |
 
 Las migraciones de este proyecto se aplican **a mano** contra el proyecto Supabase real (no hay script de `migrate`) — antes de asumir que un endpoint de este documento funciona en un ambiente dado, confirmar que su migración correspondiente ya se aplicó ahí.
 
@@ -234,4 +320,5 @@ Las migraciones de este proyecto se aplican **a mano** contra el proyecto Supaba
 
 ## 8. Historial de descubrimiento (contexto, no contrato)
 
-Los endpoints de §3.2, §4 (`.../images/batch`), §2 (`credential-group/organizations`) y el paso `/import/inspect` de §3 no estaban en el diseño original de FASE A–G (`docs/tasks/catalogo-productos-grupos-cred.md`) — surgieron durante la implementación del frontend (`docs/manual-catalogo-productos.md`, `datagol-frontend`) como huecos de contrato entre lo que el wizard/UI necesitaba y lo que ya existía. Se documentan aquí como parte normal del contrato, no como un anexo aparte, porque ya están implementados, probados y en uso.
+Los endpoints de §3.2, §4 (`.../images/batch`), §2 (`credential-group/organizations`), el paso `/import/inspect` de §3 y los campos personalizados de §5.1 no estaban en el diseño original de FASE A–G (`docs/tasks/catalogo-productos-grupos-cred.md`) — surgieron durante la implementación del frontend (`docs/manual-catalogo-productos.md`, `datagol-frontend`) como huecos de contrato entre lo que el wizard/UI y los usuarios de negocio necesitaban y lo que ya existía. Se documentan aquí como parte normal del contrato, no como un anexo aparte, porque ya están implementados, probados y en uso.
+

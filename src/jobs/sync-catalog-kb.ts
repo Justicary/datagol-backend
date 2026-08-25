@@ -56,6 +56,7 @@ interface ProductRow {
     description: string | null;
     contraindications: string | null;
     is_active: boolean;
+    custom_fields?: Record<string, unknown>;
 }
 
 /**
@@ -106,17 +107,12 @@ export function isDueForRetry(row: PendingSyncRow): boolean {
 }
 
 async function resolveCatalogFolderId(fastify: FastifyInstance, apiKey: string, catalogId: string): Promise<string | null> {
-    const { data: catalog, error } = await fastify.supabaseAdmin
-        .from('catalogs')
-        .select('id, name, kb_folder_id')
-        .eq('id', catalogId)
-        .maybeSingle();
-
-    if (error || !catalog) return null;
-    if (catalog.kb_folder_id) return catalog.kb_folder_id as string;
+    const { data: cat } = await fastify.supabaseAdmin.from('catalogs').select('name, kb_folder_id').eq('id', catalogId).maybeSingle();
+    if (cat?.kb_folder_id) return cat.kb_folder_id;
 
     try {
-        const { folderId } = await createKbFolder(apiKey, catalog.name);
+        const folderName = cat?.name || 'Catálogo';
+        const { folderId } = await createKbFolder(apiKey, folderName);
         await fastify.supabaseAdmin.from('catalogs').update({ kb_folder_id: folderId }).eq('id', catalogId);
         return folderId;
     } catch (err) {
@@ -166,12 +162,20 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
     const productIds = dueRows.map((row) => row.product_id as string);
     const { data: products, error: productsError } = await fastify.supabaseAdmin
         .from('products')
-        .select('id, catalog_id, name, category, active_components, suggested_use, description, contraindications, is_active')
+        .select('id, catalog_id, name, category, active_components, suggested_use, description, contraindications, is_active, custom_fields')
         .in('id', productIds);
 
     if (productsError) {
         throw new Error(`No se pudo leer productos del grupo ${credentialGroupId}: ${productsError.message}`);
     }
+
+    const catalogIds = Array.from(new Set((products ?? []).map((p) => p.catalog_id as string)));
+    const { data: customFieldDefs } = await fastify.supabaseAdmin
+        .from('catalog_custom_fields')
+        .select('catalog_id, key, name, include_in_rag')
+        .in('catalog_id', catalogIds)
+        .eq('entity_type', 'product')
+        .eq('include_in_rag', true);
 
     const productsById = new Map((products ?? []).map((p) => [p.id as string, p as ProductRow]));
     let processed = 0;
@@ -201,6 +205,12 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
 
             if (variantsError) throw new Error(variantsError.message);
 
+            const productCustomFieldsMap = (product.custom_fields as Record<string, unknown>) ?? {};
+            const productDefs = (customFieldDefs ?? []).filter((d) => d.catalog_id === product.catalog_id);
+            const customFieldsForKb = productDefs
+                .filter((d) => productCustomFieldsMap[d.key] !== undefined && productCustomFieldsMap[d.key] !== null && productCustomFieldsMap[d.key] !== '')
+                .map((d) => ({ name: d.name as string, value: productCustomFieldsMap[d.key] }));
+
             const productForKb: CatalogProductForKb = {
                 name: product.name,
                 category: product.category,
@@ -208,6 +218,7 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
                 suggestedUse: product.suggested_use,
                 description: product.description,
                 contraindications: product.contraindications,
+                customFields: customFieldsForKb.length > 0 ? customFieldsForKb : null,
             };
             const variantsForKb: CatalogVariantForKb[] = (variants ?? []).map((v) => ({
                 sku: v.sku as string,

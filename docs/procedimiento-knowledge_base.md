@@ -30,6 +30,8 @@ Categoría: Cuidado Personal
 Componentes activos: Extracto de árnica 10%, caléndula.
 Uso sugerido: Aplicar en la zona afectada 3 veces al día.
 Contraindicaciones: No aplicar sobre heridas abiertas.
+Puntos de Lealtad: 50
+Sabor: Menta Suave
 Presentaciones: Tubo 60g, Tubo 120g.
 
 Para precio y disponibilidad, consultar SKU ARN-GEL-060.
@@ -37,8 +39,9 @@ Para precio y disponibilidad, consultar SKU ARN-GEL-060.
 
 ### Características Clave
 1. **SKU Canónico:** Corresponde a la variante activa con el SKU alfabéticamente menor. Las demás presentaciones se describen como texto informativo.
-2. **Instrucción de Cierre:** La última línea indica explícitamente al agente que debe consultar el SKU mediante la herramienta disponible, evitando alucinaciones de costo.
-3. **Hash SHA-256 (`synced_content_hash`):** Se calcula sobre el texto generado. Si un producto se reprocesa pero su hash no ha cambiado, el sistema salta la llamada a la API de ElevenLabs.
+2. **Campos Personalizados (`customFields`):** Si el catálogo tiene configurados campos personalizados con `include_in_rag: true` a nivel de producto (ej. "Puntos", "Sabor", "Laboratorio"), sus valores se inyectan automáticamente en el cuerpo descriptivo sin exponer precios ni existencias.
+3. **Instrucción de Cierre:** La última línea indica explícitamente al agente que debe consultar el SKU mediante la herramienta disponible, evitando alucinaciones de costo.
+4. **Hash SHA-256 (`synced_content_hash`):** Se calcula sobre el texto generado. Si un producto se reprocesa pero su hash no ha cambiado, el sistema salta la llamada a la API de ElevenLabs.
 
 ---
 

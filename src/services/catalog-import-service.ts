@@ -65,18 +65,45 @@ export const REQUIRED_FIELDS_BY_MODE: Record<CatalogImportMode, (keyof ColumnMap
     [CATALOG_IMPORT_MODES.SOLO_PRECIOS]: ['sku', 'price'],
 };
 
-export function validateColumnMapping(mapping: ColumnMapping, headers: string[], mode: CatalogImportMode): string[] {
+export interface CustomFieldDefinitionForImport {
+    id: string;
+    key: string;
+    name: string;
+    entity_type: 'product' | 'variant' | string;
+    field_type: 'text' | 'number' | 'boolean' | 'select' | string;
+    options: string[];
+    is_required: boolean;
+}
+
+export function validateColumnMapping(
+    mapping: ColumnMapping,
+    headers: string[],
+    mode: CatalogImportMode,
+    customFieldDefs?: CustomFieldDefinitionForImport[]
+): string[] {
     const errors: string[] = [];
     const headerSet = new Set(headers);
 
     for (const field of REQUIRED_FIELDS_BY_MODE[mode]) {
-        const mappedHeader = mapping[field];
+        const mappedHeader = mapping[field as keyof ColumnMapping] as string | undefined;
         if (!mappedHeader) {
             errors.push(`El mapeo de columnas no incluye el campo obligatorio "${field}" para el modo "${mode}".`);
             continue;
         }
         if (!headerSet.has(mappedHeader)) {
             errors.push(`La columna "${mappedHeader}" mapeada a "${field}" no existe en el archivo (encabezados: ${headers.join(', ')}).`);
+        }
+    }
+
+    if (mapping.customFields) {
+        const defsByKey = new Map((customFieldDefs ?? []).map((d) => [d.key, d]));
+        for (const [key, header] of Object.entries(mapping.customFields)) {
+            if (!headerSet.has(header)) {
+                errors.push(`La columna "${header}" mapeada al campo personalizado "${key}" no existe en el archivo (encabezados: ${headers.join(', ')}).`);
+            }
+            if (customFieldDefs && !defsByKey.has(key)) {
+                errors.push(`El campo personalizado "${key}" no está configurado en este catálogo.`);
+            }
         }
     }
 
@@ -105,6 +132,8 @@ export interface ImportPlanRow {
         stockStatus?: string;
         stockNote?: string;
         imageUrl?: string;
+        productCustomFields?: Record<string, unknown>;
+        variantCustomFields?: Record<string, unknown>;
     };
 }
 
@@ -208,6 +237,50 @@ function parsePrice(raw: string | undefined): number | null {
     return Number.isFinite(value) ? value : null;
 }
 
+export function parseCustomFieldValue(
+    raw: string | undefined,
+    fieldDef: CustomFieldDefinitionForImport
+): { value: unknown; error?: string } {
+    const trimmed = (raw ?? '').trim();
+    if (!trimmed) {
+        if (fieldDef.is_required) {
+            return { value: undefined, error: `El campo personalizado obligatorio "${fieldDef.name}" está vacío.` };
+        }
+        return { value: null };
+    }
+
+    switch (fieldDef.field_type) {
+        case 'number': {
+            const cleaned = trimmed.replace(/[^0-9.,-]/g, '').replace(/,/g, '');
+            if (cleaned === '') {
+                return { value: undefined, error: `El valor "${trimmed}" para el campo "${fieldDef.name}" no es un número válido.` };
+            }
+            const num = Number(cleaned);
+            if (!Number.isFinite(num)) {
+                return { value: undefined, error: `El valor "${trimmed}" para el campo "${fieldDef.name}" no es un número válido.` };
+            }
+            return { value: num };
+        }
+        case 'boolean': {
+            const lower = trimmed.toLowerCase();
+            if (['si', 'sí', 'true', '1', 'yes'].includes(lower)) return { value: true };
+            if (['no', 'false', '0'].includes(lower)) return { value: false };
+            return { value: undefined, error: `El valor "${trimmed}" para el campo "${fieldDef.name}" no es un booleano válido (use 'si' o 'no').` };
+        }
+        case 'select': {
+            const options = fieldDef.options || [];
+            const match = options.find((opt) => opt.toLowerCase() === trimmed.toLowerCase());
+            if (!match) {
+                return { value: undefined, error: `El valor "${trimmed}" para el campo "${fieldDef.name}" no es una opción válida (opciones: ${options.join(', ')}).` };
+            }
+            return { value: match };
+        }
+        case 'text':
+        default:
+            return { value: trimmed };
+    }
+}
+
 /**
  * Construye el plan de importación (altas/cambios/errores) SIN tocar la base
  * de datos — función pura para que preview y apply compartan exactamente la
@@ -224,12 +297,14 @@ export function buildImportPlan(
     rows: Record<string, string>[],
     mapping: ColumnMapping,
     mode: CatalogImportMode,
-    existingSkusUpper: ReadonlySet<string>
+    existingSkusUpper: ReadonlySet<string>,
+    customFieldDefs: CustomFieldDefinitionForImport[] = []
 ): ImportPlan {
     const errors: ImportRowError[] = [];
     const validRows: ImportPlanRow[] = [];
     const seenInFile = new Set<string>();
     const duplicateSkusInFile = new Set<string>();
+    const defsByKey = new Map(customFieldDefs.map((d) => [d.key, d]));
     let toCreate = 0;
     let toUpdate = 0;
 
@@ -293,6 +368,36 @@ export function buildImportPlan(
             return;
         }
 
+        // Procesar campos personalizados mapeados
+        const productCustomFields: Record<string, unknown> = {};
+        const variantCustomFields: Record<string, unknown> = {};
+        let customFieldError: string | undefined;
+
+        if (mapping.customFields) {
+            for (const [fieldKey, headerName] of Object.entries(mapping.customFields)) {
+                const def = defsByKey.get(fieldKey);
+                if (!def) continue;
+                const cellVal = row[headerName];
+                const parsed = parseCustomFieldValue(cellVal, def);
+                if (parsed.error) {
+                    customFieldError = parsed.error;
+                    break;
+                }
+                if (parsed.value !== null && parsed.value !== undefined) {
+                    if (def.entity_type === 'variant') {
+                        variantCustomFields[def.key] = parsed.value;
+                    } else {
+                        productCustomFields[def.key] = parsed.value;
+                    }
+                }
+            }
+        }
+
+        if (customFieldError) {
+            errors.push({ row: rowNumber, message: `${customFieldError} (SKU "${skuRaw}").` });
+            return;
+        }
+
         validRows.push({
             row: rowNumber,
             sku: skuRaw,
@@ -310,6 +415,8 @@ export function buildImportPlan(
                 stockStatus,
                 stockNote: mapping.stockNote ? row[mapping.stockNote]?.trim() || undefined : undefined,
                 imageUrl: mapping.imageUrl ? row[mapping.imageUrl]?.trim() || undefined : undefined,
+                productCustomFields: Object.keys(productCustomFields).length > 0 ? productCustomFields : undefined,
+                variantCustomFields: Object.keys(variantCustomFields).length > 0 ? variantCustomFields : undefined,
             },
         });
         if (isUpdate) toUpdate++;
@@ -373,7 +480,10 @@ export async function applyImportPlan(
     // Modo completo: resolver/crear producto por nombre, cacheado dentro de
     // esta corrida para que filas con el mismo nombre no creen productos duplicados.
     const productIdByNameUpper = new Map<string, string>();
-    const { data: existingProducts } = await fastify.supabaseAdmin.from('products').select('id, name').eq('catalog_id', catalogId);
+    const { data: existingProducts } = await fastify.supabaseAdmin
+        .from('products')
+        .select('id, name, custom_fields')
+        .eq('catalog_id', catalogId);
     for (const p of existingProducts ?? []) {
         productIdByNameUpper.set((p.name as string).toUpperCase(), p.id as string);
     }
@@ -394,16 +504,28 @@ export async function applyImportPlan(
                         suggested_use: row.fields.suggestedUse ?? null,
                         description: row.fields.description ?? null,
                         contraindications: row.fields.contraindications ?? null,
+                        custom_fields: row.fields.productCustomFields || {},
                     })
                     .select('id')
                     .single();
                 if (createErr || !created) throw new Error(createErr?.message ?? 'No se pudo crear el producto');
                 productId = created.id as string;
                 productIdByNameUpper.set(nameUpper, productId);
+            } else if (row.fields.productCustomFields && Object.keys(row.fields.productCustomFields).length > 0) {
+                // Actualizar custom_fields en producto existente si se especificaron
+                const existingProd = (existingProducts ?? []).find((p) => p.id === productId);
+                const existingCustomFields = (existingProd?.custom_fields as Record<string, unknown>) ?? {};
+                await fastify.supabaseAdmin
+                    .from('products')
+                    .update({
+                        custom_fields: { ...existingCustomFields, ...row.fields.productCustomFields },
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', productId);
             }
 
             const existingVariant = existingVariantsBySkuUpper.get(row.skuUpper);
-            const variantPayload = {
+            const variantPayload: Record<string, unknown> = {
                 product_id: productId,
                 catalog_id: catalogId,
                 sku: row.sku,
@@ -411,6 +533,7 @@ export async function applyImportPlan(
                 price: row.fields.price ?? null,
                 stock_status: row.fields.stockStatus ?? STOCK_STATUSES.SIN_DATO,
                 stock_note: row.fields.stockNote ?? null,
+                custom_fields: row.fields.variantCustomFields || {},
             };
 
             if (existingVariant) {
@@ -462,4 +585,30 @@ export async function loadExistingCatalogVariants(
         bySkuUpper.set(upper, { id: row.id as string, productId: row.product_id as string });
     }
     return { skusUpper, bySkuUpper };
+}
+
+/** Carga las definiciones de campos personalizados configuradas para un catálogo. */
+export async function loadCatalogCustomFieldDefs(
+    fastify: FastifyInstance,
+    catalogId: string
+): Promise<CustomFieldDefinitionForImport[]> {
+    const { data, error } = await fastify.supabaseAdmin
+        .from('catalog_custom_fields')
+        .select('id, key, name, entity_type, field_type, options, is_required')
+        .eq('catalog_id', catalogId)
+        .order('order_index', { ascending: true });
+
+    if (error) {
+        throw new Error(`No se pudieron leer los campos personalizados del catálogo: ${error.message}`);
+    }
+
+    return (data ?? []).map((row) => ({
+        id: row.id as string,
+        key: row.key as string,
+        name: row.name as string,
+        entity_type: row.entity_type as string,
+        field_type: row.field_type as string,
+        options: (row.options as string[]) ?? [],
+        is_required: Boolean(row.is_required),
+    }));
 }

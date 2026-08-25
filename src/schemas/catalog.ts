@@ -77,6 +77,8 @@ export const columnMappingSchema = z.object({
     stockStatus: z.string().min(1).optional(),
     stockNote: z.string().min(1).optional(),
     imageUrl: z.string().min(1).optional(),
+    /** Mapeo de campos personalizados: key del campo -> encabezado de columna en Excel/CSV */
+    customFields: z.record(z.string(), z.string()).optional(),
 });
 export type ColumnMapping = z.infer<typeof columnMappingSchema>;
 

@@ -26,11 +26,20 @@ import {
     listImportMappingsResponseSchema,
 } from '../schemas/catalog.js';
 import {
+    customFieldParamsSchema,
+    createCustomFieldBodySchema,
+    updateCustomFieldBodySchema,
+    customFieldResponseSchema,
+    listCustomFieldsResponseSchema,
+    slugifyKey,
+} from '../schemas/catalog-custom-fields.js';
+import {
     parseCatalogFile,
     validateColumnMapping,
     buildImportPlan,
     applyImportPlan,
     loadExistingCatalogVariants,
+    loadCatalogCustomFieldDefs,
 } from '../services/catalog-import-service.js';
 import { uploadProductImage, getProductImageSignedUrl, deleteProductImage, getProductImagesBatch } from '../services/product-image-service.js';
 
@@ -230,13 +239,14 @@ export async function catalogRoutes(fastify: FastifyInstance) {
 
         const { mode, mapping, file } = parsed;
         const parsedFile = await parseCatalogFile(file.buffer, file.filename, file.mimetype);
-        const mappingErrors = validateColumnMapping(mapping, parsedFile.headers, mode);
+        const customFieldDefs = await loadCatalogCustomFieldDefs(fastify, ctx.catalogId);
+        const mappingErrors = validateColumnMapping(mapping, parsedFile.headers, mode, customFieldDefs);
         if (mappingErrors.length > 0) {
             return reply.status(400).send({ success: false, error: mappingErrors.join(' ') });
         }
 
         const { skusUpper } = await loadExistingCatalogVariants(fastify, ctx.catalogId);
-        const plan = buildImportPlan(parsedFile.rows, mapping, mode, skusUpper);
+        const plan = buildImportPlan(parsedFile.rows, mapping, mode, skusUpper, customFieldDefs);
 
         return reply.status(200).send(
             importPreviewResponseSchema.parse({
@@ -265,13 +275,14 @@ export async function catalogRoutes(fastify: FastifyInstance) {
 
         const { mode, mapping, file } = parsed;
         const parsedFile = await parseCatalogFile(file.buffer, file.filename, file.mimetype);
-        const mappingErrors = validateColumnMapping(mapping, parsedFile.headers, mode);
+        const customFieldDefs = await loadCatalogCustomFieldDefs(fastify, ctx.catalogId);
+        const mappingErrors = validateColumnMapping(mapping, parsedFile.headers, mode, customFieldDefs);
         if (mappingErrors.length > 0) {
             return reply.status(400).send({ success: false, error: mappingErrors.join(' ') });
         }
 
         const { skusUpper, bySkuUpper } = await loadExistingCatalogVariants(fastify, ctx.catalogId);
-        const plan = buildImportPlan(parsedFile.rows, mapping, mode, skusUpper);
+        const plan = buildImportPlan(parsedFile.rows, mapping, mode, skusUpper, customFieldDefs);
 
         const { data: importRow, error: insertErr } = await fastify.supabaseAdmin
             .from('catalog_imports')
@@ -625,6 +636,218 @@ export async function catalogRoutes(fastify: FastifyInstance) {
             })
         );
     });
+
+    /**
+     * GET /api/organizations/:id/catalogs/:catalogId/custom-fields
+     */
+    fastify.get('/api/organizations/:id/catalogs/:catalogId/custom-fields', async (request, reply) => {
+        const ctx = await authorizeCatalog(request, reply, PERMISSION_KEYS.VIEW_CATALOG, false);
+        if (!ctx) return;
+
+        const { data, error } = await fastify.supabaseAdmin
+            .from('catalog_custom_fields')
+            .select('id, catalog_id, entity_type, name, key, field_type, options, description, is_required, include_in_rag, order_index, created_at, updated_at')
+            .eq('catalog_id', ctx.catalogId)
+            .order('order_index', { ascending: true })
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            request.log.error({ catalogId: ctx.catalogId, err: error.message, msg: 'Error listando catalog_custom_fields' });
+            return reply.status(500).send({ success: false, error: 'No se pudieron listar los campos personalizados.' });
+        }
+
+        return reply.status(200).send(
+            listCustomFieldsResponseSchema.parse({
+                success: true,
+                data: (data ?? []).map(mapCustomFieldToDTO),
+            })
+        );
+    });
+
+    /**
+     * POST /api/organizations/:id/catalogs/:catalogId/custom-fields
+     */
+    fastify.post('/api/organizations/:id/catalogs/:catalogId/custom-fields', async (request, reply) => {
+        const ctx = await authorizeCatalog(request, reply, PERMISSION_KEYS.MANAGE_CATALOG, true);
+        if (!ctx) return;
+
+        const bodyResult = createCustomFieldBodySchema.safeParse(request.body);
+        if (!bodyResult.success) {
+            return reply.status(400).send({ success: false, error: `Cuerpo de la petición inválido: ${bodyResult.error.message}` });
+        }
+
+        const { entityType, name, fieldType, options, description, isRequired, includeInRag, orderIndex } = bodyResult.data;
+        const key = bodyResult.data.key || slugifyKey(name);
+        if (!key) {
+            return reply.status(400).send({ success: false, error: 'El nombre del campo debe contener al menos un caracter alfanumérico.' });
+        }
+
+        const { data: existing } = await fastify.supabaseAdmin
+            .from('catalog_custom_fields')
+            .select('id')
+            .eq('catalog_id', ctx.catalogId)
+            .eq('entity_type', entityType)
+            .eq('key', key)
+            .maybeSingle();
+
+        if (existing) {
+            return reply.status(409).send({
+                success: false,
+                error: `Ya existe un campo con la clave "${key}" para ${entityType === 'product' ? 'productos' : 'variantes'} en este catálogo.`,
+            });
+        }
+
+        const { data, error } = await fastify.supabaseAdmin
+            .from('catalog_custom_fields')
+            .insert({
+                catalog_id: ctx.catalogId,
+                entity_type: entityType,
+                name,
+                key,
+                field_type: fieldType,
+                options: options || [],
+                description: description ?? null,
+                is_required: isRequired,
+                include_in_rag: includeInRag,
+                order_index: orderIndex,
+            })
+            .select('id, catalog_id, entity_type, name, key, field_type, options, description, is_required, include_in_rag, order_index, created_at, updated_at')
+            .single();
+
+        if (error || !data) {
+            request.log.error({ catalogId: ctx.catalogId, err: error?.message, msg: 'Error creando catalog_custom_fields' });
+            return reply.status(500).send({ success: false, error: 'No se pudo crear el campo personalizado.' });
+        }
+
+        return reply.status(201).send(
+            customFieldResponseSchema.parse({
+                success: true,
+                data: mapCustomFieldToDTO(data),
+            })
+        );
+    });
+
+    /**
+     * PATCH /api/organizations/:id/catalogs/:catalogId/custom-fields/:fieldId
+     */
+    fastify.patch('/api/organizations/:id/catalogs/:catalogId/custom-fields/:fieldId', async (request, reply) => {
+        const ctx = await authorizeCatalog(request, reply, PERMISSION_KEYS.MANAGE_CATALOG, true);
+        if (!ctx) return;
+
+        const paramsResult = customFieldParamsSchema.safeParse(request.params);
+        if (!paramsResult.success) {
+            return reply.status(400).send({ success: false, error: `Parámetros inválidos: ${paramsResult.error.message}` });
+        }
+
+        const bodyResult = updateCustomFieldBodySchema.safeParse(request.body);
+        if (!bodyResult.success) {
+            return reply.status(400).send({ success: false, error: `Cuerpo de la petición inválido: ${bodyResult.error.message}` });
+        }
+
+        const updatePayload: Record<string, unknown> = {};
+        if (bodyResult.data.name !== undefined) updatePayload.name = bodyResult.data.name;
+        if (bodyResult.data.fieldType !== undefined) updatePayload.field_type = bodyResult.data.fieldType;
+        if (bodyResult.data.options !== undefined) updatePayload.options = bodyResult.data.options;
+        if (bodyResult.data.description !== undefined) updatePayload.description = bodyResult.data.description;
+        if (bodyResult.data.isRequired !== undefined) updatePayload.is_required = bodyResult.data.isRequired;
+        if (bodyResult.data.includeInRag !== undefined) updatePayload.include_in_rag = bodyResult.data.includeInRag;
+        if (bodyResult.data.orderIndex !== undefined) updatePayload.order_index = bodyResult.data.orderIndex;
+
+        if (Object.keys(updatePayload).length === 0) {
+            return reply.status(400).send({ success: false, error: 'No se enviaron campos para actualizar.' });
+        }
+
+        const { data, error } = await fastify.supabaseAdmin
+            .from('catalog_custom_fields')
+            .update(updatePayload)
+            .eq('id', paramsResult.data.fieldId)
+            .eq('catalog_id', ctx.catalogId)
+            .select('id, catalog_id, entity_type, name, key, field_type, options, description, is_required, include_in_rag, order_index, created_at, updated_at')
+            .maybeSingle();
+
+        if (error) {
+            request.log.error({ fieldId: paramsResult.data.fieldId, err: error.message, msg: 'Error actualizando catalog_custom_fields' });
+            return reply.status(500).send({ success: false, error: 'No se pudo actualizar el campo personalizado.' });
+        }
+
+        if (!data) {
+            return reply.status(404).send({ success: false, error: 'Campo personalizado no encontrado en este catálogo.' });
+        }
+
+        return reply.status(200).send(
+            customFieldResponseSchema.parse({
+                success: true,
+                data: mapCustomFieldToDTO(data),
+            })
+        );
+    });
+
+    /**
+     * DELETE /api/organizations/:id/catalogs/:catalogId/custom-fields/:fieldId
+     */
+    fastify.delete('/api/organizations/:id/catalogs/:catalogId/custom-fields/:fieldId', async (request, reply) => {
+        const ctx = await authorizeCatalog(request, reply, PERMISSION_KEYS.MANAGE_CATALOG, true);
+        if (!ctx) return;
+
+        const paramsResult = customFieldParamsSchema.safeParse(request.params);
+        if (!paramsResult.success) {
+            return reply.status(400).send({ success: false, error: `Parámetros inválidos: ${paramsResult.error.message}` });
+        }
+
+        const { data, error } = await fastify.supabaseAdmin
+            .from('catalog_custom_fields')
+            .delete()
+            .eq('id', paramsResult.data.fieldId)
+            .eq('catalog_id', ctx.catalogId)
+            .select('id')
+            .maybeSingle();
+
+        if (error) {
+            request.log.error({ fieldId: paramsResult.data.fieldId, err: error.message, msg: 'Error eliminando catalog_custom_fields' });
+            return reply.status(500).send({ success: false, error: 'No se pudo eliminar el campo personalizado.' });
+        }
+
+        if (!data) {
+            return reply.status(404).send({ success: false, error: 'Campo personalizado no encontrado en este catálogo.' });
+        }
+
+        return reply.status(200).send({
+            success: true,
+            message: 'Campo personalizado eliminado correctamente.',
+        });
+    });
+}
+
+function mapCustomFieldToDTO(row: {
+    id: string;
+    catalog_id: string;
+    entity_type: string;
+    name: string;
+    key: string;
+    field_type: string;
+    options: unknown;
+    description: string | null;
+    is_required: boolean;
+    include_in_rag: boolean;
+    order_index: number;
+    created_at: string;
+    updated_at: string;
+}) {
+    return {
+        id: row.id,
+        catalogId: row.catalog_id,
+        entityType: row.entity_type as 'product' | 'variant',
+        name: row.name,
+        key: row.key,
+        fieldType: row.field_type as 'text' | 'number' | 'boolean' | 'select',
+        options: Array.isArray(row.options) ? (row.options as string[]) : [],
+        description: row.description,
+        isRequired: Boolean(row.is_required),
+        includeInRag: Boolean(row.include_in_rag),
+        orderIndex: row.order_index ?? 0,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+    };
 }
 
 /** Filas de ejemplo devueltas por /import/inspect para armar el mapeo de columnas en el frontend. */
