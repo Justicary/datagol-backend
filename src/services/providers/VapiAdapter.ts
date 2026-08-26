@@ -21,7 +21,7 @@ export class VapiAdapter implements IVoiceProvider {
     orgConfig: Record<string, unknown>
   ): Promise<OutboundCallResult> {
     const apiKey = (orgConfig.vapi_private_key as string) || this.defaultApiKey;
-    const agentId = (orgConfig.vapi_agent_id as string) || this.defaultAgentId;
+    const agentId = params.agentId || (orgConfig.vapi_agent_id as string) || this.defaultAgentId;
     const phoneNumberId = (orgConfig.vapi_phone_number_id as string) || this.defaultPhoneNumberId;
 
     if (!apiKey || !agentId) {

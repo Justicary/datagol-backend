@@ -1,12 +1,13 @@
 export interface OutboundCallParams {
   organizationId: string;
+  agentId?: string;
   customerPhone: string;
   customerName: string;
   customerEmail?: string;
   companyName: string;
   businessSector?: string;
   demoObjective: string;
-  customVariables?: Record<string, string>;
+  customVariables?: Record<string, unknown>;
 }
 
 export interface OutboundCallResult {

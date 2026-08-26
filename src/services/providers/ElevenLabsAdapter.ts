@@ -30,9 +30,13 @@ export class ElevenLabsAdapter implements IVoiceProvider {
     // datagol-frontend/src/app/api/voice/agent/route.ts) — nunca existen en
     // ElevenLabs, así que se tratan como ausentes en vez de intentar marcar
     // con ellos.
-    const dbAgentId = orgConfig.elevenlabs_agent_id as string | undefined;
+    const rawRequestedAgentId = params.agentId?.trim();
+    const dbAgentId = (orgConfig.elevenlabs_agent_id as string)?.trim();
     const isDummyAgent = !dbAgentId || dbAgentId === 'agent_test_widget' || dbAgentId === 'test_agent';
-    const agentId = isDummyAgent ? this.defaultAgentId : dbAgentId;
+    const fallbackAgentId = isDummyAgent ? this.defaultAgentId : dbAgentId;
+    const isRequestedDummy = !rawRequestedAgentId || rawRequestedAgentId === 'agent_test_widget' || rawRequestedAgentId === 'test_agent';
+    const effectiveAgentId = isRequestedDummy ? fallbackAgentId : rawRequestedAgentId;
+    const agentId = effectiveAgentId;
     const callerNumber =
       (orgConfig.phone_number as string) ||
       (orgConfig.telnyx_phone_number as string) ||
@@ -67,6 +71,15 @@ export class ElevenLabsAdapter implements IVoiceProvider {
 
     const disclaimerGreeting = `Hola ${params.customerName}, le saluda Sofía de ${params.companyName}, un asistente virtual con Inteligencia Artificial. ${params.demoObjective}`;
 
+    const dynamicVariables: Record<string, unknown> = {
+      customer_name: params.customerName,
+      company_name: params.companyName,
+      demo_objective: params.demoObjective,
+      custom_greeting: disclaimerGreeting,
+      caller_phone: callerNumber,
+      ...(params.customVariables || {}),
+    };
+
     // Estructura oficial según la documentación de ElevenLabs Agents Skill
     const payload: Record<string, unknown> = {
       agent_id: agentId,
@@ -74,19 +87,13 @@ export class ElevenLabsAdapter implements IVoiceProvider {
       phone_number_id: targetPhoneNumberId,
       to_number: params.customerPhone,
       recipient_phone_number: params.customerPhone,
+      dynamic_variables: dynamicVariables,
       conversation_initiation_client_data: {
-        dynamic_variables: {
-          customer_name: params.customerName,
-          company_name: params.companyName,
-          demo_objective: params.demoObjective,
-          custom_greeting: disclaimerGreeting,
-          caller_phone: callerNumber,
-          ...params.customVariables,
-        },
+        dynamic_variables: dynamicVariables,
       },
     };
 
-    logger.info({ customerPhone: params.customerPhone }, 'Disparando llamada SIP Trunk vía ElevenLabs ConvAI');
+    logger.info({ customerPhone: params.customerPhone, agentId }, 'Disparando llamada SIP Trunk vía ElevenLabs ConvAI');
 
     let response = await fetch('https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call', {
       method: 'POST',

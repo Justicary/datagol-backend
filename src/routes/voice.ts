@@ -31,12 +31,14 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
   const handleVoiceOutbound = async (request: any, reply: any) => {
     const body = (request.body || {}) as any;
     const organizationId = body.organizationId || body.orgId;
+    const rawAgentId = body.agentId || body.agent_id;
     const rawPhone = body.customerPhone || body.phone || body.number || body.customer?.number;
     const customerName = body.customerName || body.name || body.customer?.name || 'Cliente Prospecto';
     const customerEmail = body.customerEmail || body.email || body.customer?.email;
     const companyName = body.companyName || 'Empresa Prospecto';
     const businessSector = body.industry || body.businessSector;
     const demoObjective = body.demoObjective || 'Probar agente de voz en vivo';
+    const customVariables = body.customVariables || body.assistantOverrides?.variableValues || body.dynamic_variables;
 
     if (!rawPhone) {
       return reply.status(400).send({
@@ -108,13 +110,14 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
       const result = await provider.triggerOutboundCall(
         {
           organizationId: organizationId || 'default',
+          agentId: rawAgentId ? String(rawAgentId) : undefined,
           customerPhone: phone,
           customerName: String(customerName),
           customerEmail: customerEmail ? String(customerEmail) : undefined,
           companyName: String(companyName),
           businessSector: businessSector ? String(businessSector) : undefined,
           demoObjective: String(demoObjective),
-          customVariables: body.customVariables || body.assistantOverrides?.variableValues,
+          customVariables: typeof customVariables === 'object' && customVariables !== null ? customVariables : undefined,
         },
         orgConfig
       );

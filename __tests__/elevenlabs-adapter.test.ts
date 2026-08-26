@@ -68,6 +68,49 @@ describe('ElevenLabsAdapter.triggerOutboundCall', () => {
             /no devolvió conversation_id ni call_id/
         );
     });
+
+    it('utiliza params.agentId como effectiveAgentId si viene especificado, en lugar del agent_id de la organización', async () => {
+        let sentBody: any = null;
+        vi.spyOn(global, 'fetch').mockImplementation(async (_input, init) => {
+            sentBody = JSON.parse((init as any).body);
+            return new Response(JSON.stringify({ conversation_id: 'conv_custom_agent_123' }), { status: 200 });
+        });
+
+        const adapter = new ElevenLabsAdapter();
+        const result = await adapter.triggerOutboundCall(
+            { ...baseParams, agentId: 'agent_override_789' },
+            orgConfig
+        );
+
+        expect(result.callId).toBe('conv_custom_agent_123');
+        expect(sentBody.agent_id).toBe('agent_override_789');
+    });
+
+    it('reenvía customVariables tanto en dynamic_variables de primer nivel como dentro de conversation_initiation_client_data', async () => {
+        let sentBody: any = null;
+        vi.spyOn(global, 'fetch').mockImplementation(async (_input, init) => {
+            sentBody = JSON.parse((init as any).body);
+            return new Response(JSON.stringify({ conversation_id: 'conv_custom_vars_123' }), { status: 200 });
+        });
+
+        const adapter = new ElevenLabsAdapter();
+        await adapter.triggerOutboundCall(
+            {
+                ...baseParams,
+                customVariables: {
+                    lead_source: 'campaña_meta',
+                    score: 95 as any,
+                },
+            },
+            orgConfig
+        );
+
+        expect(sentBody.dynamic_variables.lead_source).toBe('campaña_meta');
+        expect(sentBody.dynamic_variables.score).toBe(95);
+        expect(sentBody.conversation_initiation_client_data.dynamic_variables.lead_source).toBe('campaña_meta');
+        expect(sentBody.conversation_initiation_client_data.dynamic_variables.score).toBe(95);
+        expect(sentBody.agent_id).toBe('agent-test-123');
+    });
 });
 
 /**

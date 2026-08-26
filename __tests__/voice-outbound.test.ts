@@ -282,4 +282,88 @@ describe('POST /api/voice/outbound', () => {
             }
         });
     });
+
+    describe('Extracción de agentId / agent_id y customVariables de req.body', () => {
+        it('extrae agentId y customVariables de req.body y los pasa al proveedor de voz', async () => {
+            const runId = Date.now();
+            const ip = `10.6.${runId % 200}.1`;
+            const phone = `+52224${String(runId % 10000000).padStart(7, '0')}`;
+            let capturedParams: any = null;
+
+            mockTriggerOutboundCall(async (params) => {
+                capturedParams = params;
+                return { callId: `conv_agentid_${runId}` };
+            });
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/voice/outbound',
+                    headers: { 'x-forwarded-for': ip },
+                    payload: {
+                        organizationId: REAL_ORG_ID,
+                        agentId: 'agent_override_abc',
+                        customerPhone: phone,
+                        customerName: 'Cliente Test',
+                        customVariables: {
+                            origen: 'landing_demo',
+                            prioridad: 'alta',
+                        },
+                    },
+                });
+
+                expect(response.statusCode).toBe(200);
+                expect(capturedParams).not.toBeNull();
+                expect(capturedParams.agentId).toBe('agent_override_abc');
+                expect(capturedParams.customVariables).toEqual({
+                    origen: 'landing_demo',
+                    prioridad: 'alta',
+                });
+            } finally {
+                await app.close();
+                await cleanupAttempts([ip], [phone]);
+                await supabaseAdmin.from('leads').delete().eq('conversation_id', `conv_agentid_${runId}`);
+                await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', `conv_agentid_${runId}`);
+                await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
+            }
+        });
+
+        it('extrae agent_id (formato snake_case) cuando viene en req.body y lo pasa como agentId', async () => {
+            const runId = Date.now();
+            const ip = `10.6.${runId % 200}.2`;
+            const phone = `+52224${String((runId + 1) % 10000000).padStart(7, '0')}`;
+            let capturedParams: any = null;
+
+            mockTriggerOutboundCall(async (params) => {
+                capturedParams = params;
+                return { callId: `conv_agent_snake_${runId}` };
+            });
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/voice/outbound',
+                    headers: { 'x-forwarded-for': ip },
+                    payload: {
+                        organizationId: REAL_ORG_ID,
+                        agent_id: 'agent_snake_case_xyz',
+                        customerPhone: phone,
+                        customerName: 'Cliente Snake',
+                    },
+                });
+
+                expect(response.statusCode).toBe(200);
+                expect(capturedParams).not.toBeNull();
+                expect(capturedParams.agentId).toBe('agent_snake_case_xyz');
+            } finally {
+                await app.close();
+                await cleanupAttempts([ip], [phone]);
+                await supabaseAdmin.from('leads').delete().eq('conversation_id', `conv_agent_snake_${runId}`);
+                await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', `conv_agent_snake_${runId}`);
+                await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
+            }
+        });
+    });
 });
