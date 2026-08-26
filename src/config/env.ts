@@ -35,6 +35,15 @@ const envSchema = z.object({
     // si no está configurada, el correo de recordatorio omite el enlace
     // directo en vez de inventar un dominio.
     FRONTEND_APP_URL: z.string().url('FRONTEND_APP_URL debe ser una URL válida.').optional(),
+    // URL pública de ESTE backend (docs/tasks/waitlist_confirmacion_masiva.md,
+    // Tarea B3/endpoint público de confirmación) — a diferencia de
+    // FRONTEND_APP_URL, aquí el enlace de un clic del WhatsApp de oferta de
+    // lista de espera apunta al propio datagol-backend
+    // (src/routes/public/waitlist-confirmation.ts), no al dashboard.
+    // Opcional a propósito: si falta, waitlist-engine.ts no puede construir
+    // un enlace válido y se degrada directamente a la llamada de voz de
+    // respaldo en vez de enviar un link roto.
+    BACKEND_WEBHOOK_URL: z.string().url('BACKEND_WEBHOOK_URL debe ser una URL válida.').optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

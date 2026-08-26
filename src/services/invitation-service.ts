@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { logger } from '../lib/logger.js';
 import { sendOrganizationInvitationEmail } from './email.js';
 import { clearPermissionsCache } from './permission-service.js';
+import { hashToken } from '../lib/token-hash.js';
 import type { OrganizationRole } from '../types/organization-roles.js';
 
 export interface ServiceResult<T = undefined> {
@@ -10,10 +11,6 @@ export interface ServiceResult<T = undefined> {
     errorCode?: string;
     error?: string;
     data?: T;
-}
-
-function hashToken(token: string): string {
-    return crypto.createHash('sha256').update(token).digest('hex');
 }
 
 interface RpcJsonResult<T> {

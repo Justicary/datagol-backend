@@ -24,6 +24,11 @@ export const availabilityResponseSchema = z.object({
     available: z.boolean(),
     slots: z.array(z.string()).max(2),
     message: z.string(),
+    // Tarea B2 (docs/tasks/waitlist_confirmacion_masiva.md): true solo cuando
+    // no hay slots Y la organización tiene la feature `waitlist` habilitada.
+    // default(false), no optional, para que el campo siempre esté presente
+    // en la respuesta que consume el LLM del agente.
+    waitlistAvailable: z.boolean().default(false),
 });
 export type AvailabilityResponse = z.infer<typeof availabilityResponseSchema>;
 
@@ -178,6 +183,41 @@ export type AppointmentResponse = z.infer<typeof appointmentResponseSchema>;
 export function isValidDateString(value: string): boolean {
     return !Number.isNaN(new Date(value).getTime());
 }
+
+/**
+ * `routes/tools/waitlist.ts` (docs/tasks/waitlist_confirmacion_masiva.md,
+ * Tarea B2). `conversationId` es obligatorio (no opcional como en
+ * `bookingBodySchema`): es la única defensa de idempotencia contra un
+ * reintento de ElevenLabs por respuesta lenta —
+ * `ux_appointment_waitlist_org_conversation_id`
+ * (db/migrations/65_appointment_waitlist_idempotency.sql).
+ */
+export const waitlistBodySchema = z.object({
+    conversationId: z.string().min(1),
+    customerName: z.string().min(1),
+    // A diferencia de booking.ts, el teléfono aquí no es opcional: es el
+    // canal primario de la oferta posterior (WhatsApp, B3) y no hay
+    // alternativa razonable para contactar a alguien en cola de espera.
+    customerPhone: z.string().min(1),
+    customerEmail: z.preprocess(emptyStringToUndefined, z.string().email().optional()),
+    partySize: z.preprocess(
+        (v) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : v),
+        z.number().int().positive().max(50).default(2)
+    ),
+    preferredDateStart: z.string().min(1),
+    preferredDateEnd: z.string().min(1),
+    preferredTimeStart: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    preferredTimeEnd: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+    notes: z.preprocess(emptyStringToUndefined, z.string().min(1).optional()),
+});
+export type WaitlistBody = z.infer<typeof waitlistBodySchema>;
+
+export const waitlistResponseSchema = z.object({
+    waitlisted: z.boolean(),
+    message: z.string(),
+    waitlistId: z.string().nullish(),
+});
+export type WaitlistResponse = z.infer<typeof waitlistResponseSchema>;
 
 // Integración de correo nativa (docs/tasks/native-mail-integration.md §3) —
 // `emailAccountId` es opcional a propósito: la mayoría de organizaciones

@@ -71,6 +71,12 @@ export const FEATURE_KEYS = {
     // es NULL: la KB usada es la nativa de ElevenLabs, ya cubierta por
     // elevenlabs_api_key, no un proveedor propio de este feature.
     PRODUCT_RAG: 'product_rag',
+    // Lista de espera y confirmación masiva de citas
+    // (docs/tasks/waitlist_confirmacion_masiva.md), exclusiva de planes
+    // elite/enterprise (db/migrations/64_appointment_waitlist.sql).
+    // requires_provider es NULL: el canal WhatsApp ya lo cubre el feature
+    // 'whatsapp' existente, verificado por separado en waitlist-engine.ts.
+    WAITLIST: 'waitlist',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

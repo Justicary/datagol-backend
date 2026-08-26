@@ -210,7 +210,7 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
  * antes no tenía fallback por correo), así que `resolve_contact` es un
  * reemplazo directo, no una regresión.
  */
-async function resolveContactBestEffort(
+export async function resolveContactBestEffort(
     fastify: FastifyInstance,
     organizationId: string,
     fullName: string,

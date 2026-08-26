@@ -32,6 +32,9 @@ import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
 import { elevenLabsPostCallWebhookRoutes } from './routes/webhooks/elevenlabs.js';
 import { toolRoutes } from './routes/tools/index.js';
+import { waitlistConfirmationRoutes } from './routes/public/waitlist-confirmation.js';
+import { appointmentsAdminRoutes } from './routes/appointments-admin.js';
+import { waitlistAdminRoutes } from './routes/waitlist-admin.js';
 import { uploadRoutes } from './routes/upload.js';
 import { registerJobs } from './jobs/index.js';
 
@@ -200,6 +203,10 @@ export async function buildApp() {
     await app.register(contactsRoutes);
     // CRM de contactos: pipeline, direcciones, notas, merge, kanban (docs/tasks/opus.md Fase D)
     await app.register(contactsCrmRoutes);
+    // Confirmación masiva de citas (docs/tasks/waitlist_confirmacion_masiva.md, Tarea B4)
+    await app.register(appointmentsAdminRoutes);
+    // Listado de la cola de espera para el dashboard
+    await app.register(waitlistAdminRoutes);
     // Métricas por canal (docs/tasks/opus.md) — GET /api/organizations/:id/metrics
     await app.register(organizationMetricsRoutes);
     // Plantillas de correo seleccionables (preview y test send)
@@ -223,6 +230,9 @@ export async function buildApp() {
     // Fase 5 — Tool calls en vivo del agente de voz (routes/tools/**)
     await app.register(toolRoutes);
     await app.register(uploadRoutes);
+    // Enlace de confirmación de un clic de la lista de espera — público, sin
+    // sesión ni x-tool-secret (docs/tasks/waitlist_confirmacion_masiva.md)
+    await app.register(waitlistConfirmationRoutes);
 
     return app;
 }

@@ -15,6 +15,9 @@ import { registerNotifyPendingOutcomesWorker } from './notify-pending-outcomes.j
 import { registerSendTemplateEmailWorker } from './send-template-email.js';
 import { registerCheckConcurrencyQuotaWorker } from './check-concurrency-quota.js';
 import { registerSyncCatalogKbWorker } from './sync-catalog-kb.js';
+import { registerEvaluateWaitlistForSlotWorker } from './evaluate-waitlist-for-slot.js';
+import { registerCheckWaitlistExpirationsWorker } from './check-waitlist-expirations.js';
+import { registerSendBulkConfirmationRequestWorker } from './send-bulk-confirmation-request.js';
 
 /**
  * Registra todos los workers de pg-boss de la aplicación. Se invoca una vez
@@ -37,4 +40,7 @@ export async function registerJobs(fastify: FastifyInstance): Promise<void> {
     await registerSendTemplateEmailWorker(fastify);
     await registerCheckConcurrencyQuotaWorker(fastify);
     await registerSyncCatalogKbWorker(fastify);
+    await registerEvaluateWaitlistForSlotWorker(fastify);
+    await registerCheckWaitlistExpirationsWorker(fastify);
+    await registerSendBulkConfirmationRequestWorker(fastify);
 }

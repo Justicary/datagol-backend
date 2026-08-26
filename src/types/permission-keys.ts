@@ -40,6 +40,11 @@ export const PERMISSION_KEYS = {
     // catalogos/precios no expone datos de clientes ni credenciales.
     VIEW_CATALOG: 'view_catalog',
     MANAGE_CATALOG: 'manage_catalog',
+    // Lista de espera (docs/tasks/waitlist_confirmacion_masiva.md,
+    // db/migrations/64_appointment_waitlist.sql). No sensibles: no exponen
+    // credenciales ni datos de facturación.
+    VIEW_WAITLIST: 'view_waitlist',
+    MANAGE_WAITLIST: 'manage_waitlist',
 } as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[keyof typeof PERMISSION_KEYS];

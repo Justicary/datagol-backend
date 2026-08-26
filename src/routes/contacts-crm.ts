@@ -5,6 +5,7 @@ import { PERMISSION_KEYS } from '../types/permission-keys.js';
 import { CONTACT_LIFECYCLE_STAGES, CONTACT_PIPELINE_STAGES, CONTACT_ADDRESS_TYPES, isLifecyclePipelineCoherent } from '../types/contact-enums.js';
 import { APPOINTMENT_STATUSES, type AppointmentStatus } from '../types/appointment-status.js';
 import { isValidStatusTransition, isFutureCompletionAttempt } from '../services/appointment-lifecycle.js';
+import { EVALUATE_WAITLIST_FOR_SLOT_QUEUE } from '../jobs/evaluate-waitlist-for-slot.js';
 import {
     orgContactParamsSchema,
     orgContactAddressParamsSchema,
@@ -485,7 +486,7 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         // de transición y el bloqueo de fecha futura (B.1) dependen de ellos.
         const { data: current, error: currentError } = await scopedClient
             .from('appointments')
-            .select('status, start_time')
+            .select('status, start_time, end_time')
             .eq('id', appointmentId)
             .eq('organization_id', organizationId)
             .maybeSingle();
@@ -534,6 +535,24 @@ export async function contactsCrmRoutes(fastify: FastifyInstance) {
         }
         if (!data) {
             return reply.status(404).send({ success: false, error: 'Cita no encontrada en esta organización.' });
+        }
+
+        // Tarea B3 (docs/tasks/waitlist_confirmacion_masiva.md): liberar el
+        // cupo dispara el matchmaking de la lista de espera. Best-effort — un
+        // fallo al encolar no debe deshacer una cancelación ya confirmada al
+        // usuario; el peor caso es que el cupo no se reofrezca automáticamente.
+        if (newStatus === APPOINTMENT_STATUSES.CANCELADA) {
+            try {
+                await fastify.pgBoss.send(EVALUATE_WAITLIST_FOR_SLOT_QUEUE, {
+                    organizationId,
+                    slotStartTime: current.start_time,
+                    slotEndTime: current.end_time,
+                });
+            } catch (err) {
+                request.log.warn(
+                    { organizationId, appointmentId, err: err instanceof Error ? err.message : String(err), msg: 'No se pudo encolar evaluate-waitlist-for-slot tras cancelar' }
+                );
+            }
         }
 
         return reply.send({ success: true, data });

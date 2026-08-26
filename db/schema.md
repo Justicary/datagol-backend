@@ -102,6 +102,7 @@
 | `status_updated_at` | `timestamptz` |  Nullable |
 | `status_updated_by` | `uuid` |  Nullable |
 | `no_show_reason` | `text` |  Nullable |
+| `confirmation_requested_at` | `timestamptz` |  Nullable |
 
 ## Table `organization_members`
 
@@ -901,6 +902,39 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 | `alert_date` | `date` |  |
 | `sent_at` | `timestamptz` |  |
 
+## Table `appointment_waitlist`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `contact_id` | `uuid` |  Nullable |
+| `call_log_id` | `uuid` |  Nullable |
+| `conversation_id` | `text` |  Nullable |
+| `customer_name` | `text` |  |
+| `customer_phone` | `text` |  |
+| `customer_email` | `text` |  Nullable |
+| `party_size` | `int4` | Default: 2 |
+| `preferred_date_start` | `date` |  |
+| `preferred_date_end` | `date` |  |
+| `preferred_time_start` | `time` |  Nullable |
+| `preferred_time_end` | `time` |  Nullable |
+| `status` | `text` | Default: 'pendiente' |
+| `priority` | `text` | Default: 'normal' |
+| `offered_appointment_id` | `uuid` |  Nullable |
+| `offered_at` | `timestamptz` |  Nullable |
+| `offer_expires_at` | `timestamptz` |  Nullable |
+| `offer_token_hash` | `text` |  Nullable, Unique |
+| `offer_viewed_at` | `timestamptz` |  Nullable |
+| `offered_slot_start` | `timestamptz` |  Nullable |
+| `offered_slot_end` | `timestamptz` |  Nullable |
+| `notification_channel` | `text` | Default: 'whatsapp' |
+| `notes` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
 ## RLS Policies
 
 ### `organization_members`
@@ -1168,4 +1202,12 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 |--------|---------|-------|--------|-------|------------|
 | `catalog_custom_fields_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
 | `catalog_custom_fields_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+
+### `appointment_waitlist`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `appointment_waitlist_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_waitlist'::text)` | — |
+| `appointment_waitlist_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_waitlist'::text)` | `has_permission(organization_id, 'manage_waitlist'::text)` |
+
 

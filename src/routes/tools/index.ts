@@ -7,6 +7,7 @@ import { locationsToolRoute } from './locations.js';
 import { appointmentToolRoute } from './appointment.js';
 import { emailToolRoute } from './email.js';
 import { productsToolRoute } from './products.js';
+import { waitlistToolRoute } from './waitlist.js';
 
 /**
  * Registro de `routes/tools/**` (Fase 5). Encapsulado en su propio contexto
@@ -40,6 +41,8 @@ export async function toolRoutes(fastify: FastifyInstance) {
     await fastify.register(emailToolRoute);
     // Precio y disponibilidad de catálogo (docs/tasks/catalogo-productos-grupos-cred.md FASE D)
     await fastify.register(productsToolRoute);
+    // Lista de espera (docs/tasks/waitlist_confirmacion_masiva.md, Tarea B2)
+    await fastify.register(waitlistToolRoute);
 }
 
 export default toolRoutes;

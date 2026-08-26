@@ -5,6 +5,7 @@ import { cancelBooking, CalCredentialsMissingError, CalProviderError } from '../
 import { normalizePhoneE164 } from '../../services/phone-normalization.js';
 import { toolParamsSchema, cancelBodySchema, cancelResponseSchema } from '../../schemas/tool-routes.js';
 import { APPOINTMENT_STATUSES } from '../../types/appointment-status.js';
+import { EVALUATE_WAITLIST_FOR_SLOT_QUEUE } from '../../jobs/evaluate-waitlist-for-slot.js';
 
 const DEGRADED_MESSAGE = 'No puedo cancelar la cita en este momento, ¿te llamo de vuelta?';
 const NOT_FOUND_MESSAGE =
@@ -56,7 +57,7 @@ export async function cancelToolRoute(fastify: FastifyInstance) {
         // llamada. Mismo patrón que reschedule.ts.
         let appointmentQuery = fastify.supabaseAdmin
             .from('appointments')
-            .select('id, cal_booking_id, customer_name, customer_email')
+            .select('id, cal_booking_id, customer_name, customer_email, start_time, end_time')
             .eq('organization_id', auth.organizationId)
             .ilike('customer_name', customerName.trim())
             .neq('status', APPOINTMENT_STATUSES.CANCELADA)
@@ -115,6 +116,22 @@ export async function cancelToolRoute(fastify: FastifyInstance) {
         if (updateError) {
             request.log.error({ organizationId: auth.organizationId, appointmentId: appointment.id, err: updateError.message, msg: 'Error actualizando status a cancelada en appointments' });
             return reply.status(200).send(cancelResponseSchema.parse({ cancelled: false, message: DEGRADED_MESSAGE }));
+        }
+
+        // Tarea B3 (docs/tasks/waitlist_confirmacion_masiva.md): mismo
+        // disparo que la cancelación desde dashboard (contacts-crm.ts).
+        // Best-effort y fuera del presupuesto de latencia del tool solo en
+        // caso de fallo — un pgBoss.send exitoso es una inserción rápida.
+        try {
+            await fastify.pgBoss.send(EVALUATE_WAITLIST_FOR_SLOT_QUEUE, {
+                organizationId: auth.organizationId,
+                slotStartTime: appointment.start_time,
+                slotEndTime: appointment.end_time,
+            });
+        } catch (err) {
+            request.log.warn(
+                { organizationId: auth.organizationId, appointmentId: appointment.id, err: err instanceof Error ? err.message : String(err), msg: 'No se pudo encolar evaluate-waitlist-for-slot tras cancelar por voz' }
+            );
         }
 
         return reply.status(200).send(

@@ -2,6 +2,8 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { resolveToolOrganization } from '../../lib/tool-auth.js';
 import { withToolTimeout, ToolTimeoutError, TOOL_READ_TIMEOUT_MS } from '../../lib/tool-timeout.js';
 import { getAvailableSlots, CalCredentialsMissingError, CalProviderError } from '../../services/cal-com-tool-client.js';
+import { getOrganizationFeatures } from '../../services/entitlements.js';
+import { FEATURE_KEYS } from '../../types/feature-taxonomy.js';
 import {
     toolParamsSchema,
     availabilityBodySchema,
@@ -67,16 +69,25 @@ export async function availabilityToolRoute(fastify: FastifyInstance) {
             );
 
             const topSlots = slots.slice(0, 2).map((s) => s.time);
-            const message =
-                topSlots.length > 0
-                    ? `Horarios disponibles: ${topSlots.join(' y ')}.`
+
+            let waitlistAvailable = false;
+            let message: string;
+            if (topSlots.length > 0) {
+                message = `Horarios disponibles: ${topSlots.join(' y ')}.`;
+            } else {
+                const features = await getOrganizationFeatures(auth.organizationId);
+                waitlistAvailable = features.has(FEATURE_KEYS.WAITLIST);
+                message = waitlistAvailable
+                    ? 'No encontré horarios disponibles en ese rango, pero puedo anotarte en nuestra lista de espera prioritaria y avisarte en cuanto se libere un cupo, ¿deseas que lo haga?'
                     : 'No encontré horarios disponibles en ese rango, ¿probamos con otra fecha?';
+            }
 
             return reply.status(200).send(
                 availabilityResponseSchema.parse({
                     available: topSlots.length > 0,
                     slots: topSlots,
                     message,
+                    waitlistAvailable,
                 })
             );
         } catch (err) {

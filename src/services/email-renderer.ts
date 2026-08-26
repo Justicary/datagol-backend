@@ -13,6 +13,7 @@ import {
     type PendingOutcomeReminderEmailData,
     type CustomTemplateEmailData,
 } from '../types/email-templates.js';
+import { escapeHtml } from '../lib/html-escape.js';
 import { type SafeEmailTheme, DEFAULT_DATAGOL_EMAIL_THEME } from './email-theme.js';
 
 export const MAX_EMAIL_HTML_BYTES = 90 * 1024; // 90 KB
@@ -33,15 +34,6 @@ export interface RenderedEmail {
     type: EmailTypeId;
 }
 
-function escapeHtml(str: unknown): string {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
 
 function formatDuration(seconds: number): string {
     const mins = Math.floor(seconds / 60);
