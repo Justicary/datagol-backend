@@ -71,11 +71,12 @@ export async function getPlansPromptPreview(): Promise<PlansPromptPreviewResult>
  */
 export async function syncPlansToElevenLabsAgent(targetOrgId?: string): Promise<PlansSyncResult> {
     const { plansBlock } = await getPlansPromptPreview();
+    const normalizedOrgId = typeof targetOrgId === 'string' && targetOrgId.trim().length > 0 ? targetOrgId.trim() : undefined;
 
     // 1. Resolver organización
     let orgQuery = supabaseAdmin.from('organizations').select('id, name, elevenlabs_agent_id');
-    if (targetOrgId) {
-        orgQuery = orgQuery.eq('id', targetOrgId);
+    if (normalizedOrgId) {
+        orgQuery = orgQuery.eq('id', normalizedOrgId);
     } else {
         orgQuery = orgQuery.not('elevenlabs_agent_id', 'is', null).limit(1);
     }
@@ -88,8 +89,8 @@ export async function syncPlansToElevenLabsAgent(targetOrgId?: string): Promise<
     const org = orgs?.[0];
     if (!org) {
         throw new Error(
-            targetOrgId
-                ? `Organización con ID '${targetOrgId}' no encontrada.`
+            normalizedOrgId
+                ? `Organización con ID '${normalizedOrgId}' no encontrada.`
                 : 'No se encontró ninguna organización con elevenlabs_agent_id configurado para sincronizar.'
         );
     }

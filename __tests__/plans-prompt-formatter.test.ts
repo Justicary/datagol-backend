@@ -139,5 +139,31 @@ Al hablar de precios, menciona un solo plan a la vez.`;
 
             expect(second).toBe(first);
         });
+
+        it('reemplaza correctamente cuando el encabezado PLANES no lleva dos puntos y la siguiente sección tampoco', () => {
+            const promptNoColons = `QUÉ ES DATAGOL\nAgencia de IA.\n\nPLANES\n- Starter viejo.\n- Pro viejo.\n\nTU TRABAJO\n1. Atender llamadas.`;
+            const updated = injectPlansSectionIntoPrompt(promptNoColons, newBlock);
+
+            expect(updated).toContain('QUÉ ES DATAGOL\nAgencia de IA.');
+            expect(updated).toContain(newBlock.trim());
+            expect(updated).not.toContain('Starter viejo.');
+            expect(updated).toContain('TU TRABAJO\n1. Atender llamadas.');
+        });
+
+        it('depura secciones duplicadas de PLANES si existían múltiples en el prompt', () => {
+            const promptWithDuplicates = `QUÉ ES DATAGOL\nAgencia de IA.\n\nPLANES\n- Starter viejo.\n\nTU TRABAJO\n1. Atender llamadas.\n\nPLANES:\n- Starter duplicado.\n\nLÍMITES\nNo mentir.`;
+            const updated = injectPlansSectionIntoPrompt(promptWithDuplicates, newBlock);
+
+            expect(updated).toContain('QUÉ ES DATAGOL\nAgencia de IA.');
+            expect(updated).toContain(newBlock.trim());
+            expect(updated).not.toContain('Starter viejo.');
+            expect(updated).not.toContain('Starter duplicado.');
+            expect(updated).toContain('TU TRABAJO\n1. Atender llamadas.');
+            expect(updated).toContain('LÍMITES\nNo mentir.');
+
+            // Debe existir exactamente una sola ocurrencia de PLANES:
+            const count = (updated.match(/PLANES:?/g) || []).length;
+            expect(count).toBe(1);
+        });
     });
 });

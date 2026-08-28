@@ -70,7 +70,8 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
      */
     fastify.post<{ Body: SyncPromptBody }>('/api/admin/plans/sync-prompt', async (request, reply) => {
         try {
-            const { organizationId } = request.body || {};
+            const rawOrgId = request.body?.organizationId;
+            const organizationId = typeof rawOrgId === 'string' && rawOrgId.trim().length > 0 ? rawOrgId.trim() : undefined;
             const result = await syncPlansToElevenLabsAgent(organizationId);
             return reply.send({ success: true, data: result });
         } catch (err) {

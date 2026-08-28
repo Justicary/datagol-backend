@@ -166,23 +166,35 @@ export function generatePlansPromptBlock(
 
 /**
  * Inyecta o reemplaza la sección PLANES:... dentro de un System Prompt existente.
- * Si ya existe una sección PLANES:, la reemplaza completamente preservando el resto del prompt.
- * Si no existe, la añade antes de cualquier sección final o al final del prompt.
+ * Si ya existe una sección PLANES (con o sin dos puntos, con o sin formato markdown),
+ * la reemplaza completamente en su posición original preservando el resto del prompt.
+ * Si existen secciones duplicadas de PLANES (ej. añadidas al final previamente),
+ * las depura para dejar una sola sección limpia.
+ * Si no existe ninguna sección de planes, la añade antes de cualquier sección final o al final del prompt.
  */
 export function injectPlansSectionIntoPrompt(currentPrompt: string, newPlansBlock: string): string {
-    const plansSectionRegex = /(?:^|\n\s*)(?:#{1,3}\s*)?PLANES:\s*\n[\s\S]*?(?=(\n\s*(?:[A-ZÁÉÍÓÚÑ\s_]{3,}:|#{1,3}\s+[A-ZÁÉÍÓÚÑ]|$)))/i;
-
     const trimmedBlock = newPlansBlock.trim();
 
+    // Regex para detectar cualquier sección PLANES (con o sin dos puntos, con o sin # markdown)
+    // que termine antes del siguiente encabezado de sección en MAYÚSCULAS o el fin del prompt.
+    const plansSectionRegex = /(?:^|\n\s*)(?:#{1,3}\s*)?PLANES:?\s*\n[\s\S]*?(?=(\n\s*(?:#{1,3}\s+)?[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\s_]{2,}(?::|\s*\n)|$))/gi;
+
     if (plansSectionRegex.test(currentPrompt)) {
-        return currentPrompt
-            .replace(plansSectionRegex, (match) => {
+        let firstReplaced = false;
+        const cleanedPrompt = currentPrompt.replace(plansSectionRegex, (match) => {
+            if (!firstReplaced) {
+                firstReplaced = true;
                 const hasLeadingNewline = match.startsWith('\n');
                 return `${hasLeadingNewline ? '\n\n' : ''}${trimmedBlock}`;
-            })
-            .trim();
+            }
+            // Eliminar ocurrencias duplicadas subsecuentes
+            return '';
+        });
+
+        return cleanedPrompt.trim();
     }
 
-    // Si no existía, concatenar con doble salto de línea
+    // Si no existía ninguna sección de planes previa, concatenar al final
     return `${currentPrompt.trim()}\n\n${trimmedBlock}`.trim();
 }
+
