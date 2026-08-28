@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { supabaseAdmin } from './supabase.js';
+import { verifyAdminSession } from './admin-session.js';
 
 /**
  * Middleware para verificar si el usuario llamador es Administrador de la Plataforma.
@@ -22,6 +23,19 @@ export async function isPlatformAdmin(request: FastifyRequest, reply: FastifyRep
     }
 
     const token = authHeader.substring(7);
+
+    // Pasaporte de superadmin delegado a api.datagol.net
+    // (docs/tasks — SSO delegado): sesión local emitida por ESTA
+    // instalación tras verificar un pase (routes/admin/sso.ts). Verificación
+    // 100% local (HS256, ADMIN_SESSION_SECRET propio de esta instalación),
+    // nunca llama a Supabase Auth. Si el token no es una sesión de este
+    // tipo, se sigue con el camino de Supabase Auth de siempre — nunca se
+    // quita el camino existente, solo se añade uno nuevo.
+    const adminSession = await verifyAdminSession(token);
+    if (adminSession.valid) {
+        request.platformAdminEmail = adminSession.email;
+        return;
+    }
 
     // Verificar el usuario con Supabase Auth
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
@@ -58,6 +72,7 @@ export async function isPlatformAdmin(request: FastifyRequest, reply: FastifyRep
     // autenticar. No se resuelve el nivel aquí mismo para no acoplar este
     // guard genérico a una tabla que la mayoría de rutas admin/** no usa.
     request.platformAdminUserId = user.id;
+    request.platformAdminEmail = user.email ?? undefined;
 }
 
 /**

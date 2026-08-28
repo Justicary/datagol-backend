@@ -49,7 +49,13 @@ describe('POST /api/voice/outbound', () => {
         it('permite hasta 3 llamadas/hora por IP a números distintos, la 4ª recibe 429 (política aprobada por el usuario)', async () => {
             const runId = Date.now();
             const ip = `10.0.${runId % 200}.1`;
-            const phones = [1, 2, 3, 4].map((n) => `+52165100${runId % 1000}${n}`);
+            // Área 225 + 7 dígitos con padding fijo: mismo criterio de
+            // normalizePhoneE164 documentado más abajo (área 222) — un
+            // sufijo sin padding de longitud variable produce números que
+            // libphonenumber-js rechaza silenciosamente, y desde Zero Lead
+            // Loss (§3.1) un teléfono que no normaliza responde 400 antes
+            // de llegar siquiera al límite de tasa.
+            const phones = [1, 2, 3, 4].map((n) => `+52225${String((runId + n) % 10000000).padStart(7, '0')}`);
 
             mockTriggerOutboundCall(async () => ({ callId: `conv_iprate_${runId}` }));
 
@@ -80,7 +86,7 @@ describe('POST /api/voice/outbound', () => {
 
         it('permite hasta 2 llamadas/día al mismo número (aunque vengan de IPs distintas), la 3ª recibe 429', async () => {
             const runId = Date.now();
-            const phone = `+52165200${runId % 10000}`;
+            const phone = `+52226${String(runId % 10000000).padStart(7, '0')}`;
             const ips = [1, 2, 3].map((n) => `10.1.${runId % 200}.${n}`);
 
             mockTriggerOutboundCall(async () => ({ callId: `conv_phonerate_${runId}` }));
@@ -111,7 +117,7 @@ describe('POST /api/voice/outbound', () => {
 
         it('un intento rechazado por límite no llama al proveedor de voz (no genera un lead falso, docs/tasks §Orden de implementación)', async () => {
             const runId = Date.now();
-            const phone = `+52165300${runId % 10000}`;
+            const phone = `+52227${String(runId % 10000000).padStart(7, '0')}`;
             // Mismo número, IPs distintas: agota el límite por teléfono (2/día),
             // no el de IP, para aislar exactamente lo que este test verifica.
             const ips = [`10.2.${runId % 200}.1`, `10.2.${runId % 200}.2`, `10.2.${runId % 200}.3`];
@@ -142,7 +148,7 @@ describe('POST /api/voice/outbound', () => {
         it('cuenta también los intentos fallidos del proveedor (no solo los que conectan)', async () => {
             const runId = Date.now();
             const ip = `10.3.${runId % 200}.1`;
-            const phones = [1, 2, 3, 4].map((n) => `+52165400${runId % 1000}${n}`);
+            const phones = [1, 2, 3, 4].map((n) => `+52228${String((runId + n) % 10000000).padStart(7, '0')}`);
 
             mockTriggerOutboundCall(async () => {
                 throw new Error('Fallo simulado del proveedor de voz');
@@ -175,8 +181,8 @@ describe('POST /api/voice/outbound', () => {
         });
     });
 
-    describe('Problema 1 — siembra inmediata de leads con los datos del formulario', () => {
-        it('crea contacts/call_logs/leads en cuanto el proveedor confirma el conversation_id, con los datos del formulario (customerEmail/industry incluidos)', async () => {
+    describe('Problema 1 — siembra inmediata de leads con los datos del formulario (Store-First)', () => {
+        it('crea contacts/leads ANTES de marcar (store-first) y enlaza call_logs/conversation_id al confirmar el proveedor, con los datos del formulario (customerEmail/industry incluidos)', async () => {
             const runId = Date.now();
             const ip = `10.4.${runId % 200}.1`;
             // Área 222 (Puebla) + 7 dígitos con padding fijo: normalizePhoneE164
@@ -207,19 +213,29 @@ describe('POST /api/voice/outbound', () => {
                 });
 
                 expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(body.data.leadId).toBeTruthy();
+                expect(body.data.contactId).toBeTruthy();
+                expect(body.data.callStatus).toBe('initiated');
 
                 const { data: lead } = await supabaseAdmin
                     .from('leads')
-                    .select('full_name, email, business_name, business_sector, inquiry_reason, contact_phone')
+                    .select('id, full_name, email, business_name, business_sector, inquiry_reason, contact_phone, conversation_id, call_log_id, source')
                     .eq('organization_id', REAL_ORG_ID)
                     .eq('conversation_id', conversationId)
                     .single();
 
+                // La fila es la MISMA que se sembró antes de marcar (mismo id
+                // que trajo la respuesta HTTP) — nunca se duplicó al enlazar
+                // el conversation_id real.
+                expect(lead?.id).toBe(body.data.leadId);
                 expect(lead?.full_name).toBe('Roberto Díaz');
                 expect(lead?.email).toBe('roberto@example.com');
                 expect(lead?.business_name).toBe('Ferretería Díaz');
                 expect(lead?.business_sector).toBe('Ferretería');
                 expect(lead?.inquiry_reason).toBe('Quiere ver el agente en acción');
+                expect(lead?.call_log_id).toBeTruthy();
+                expect(lead?.source).toBe('sitio_web');
 
                 const { data: contact } = await supabaseAdmin
                     .from('contacts')
@@ -241,21 +257,69 @@ describe('POST /api/voice/outbound', () => {
             } finally {
                 await app.close();
                 await cleanupAttempts([ip], [phone]);
+            }
+        });
+
+        it('PRUEBA CENTRAL DEL INCIDENTE: el lead ya existe en la base ANTES de que se invoque al proveedor de voz — no depende de que la llamada conteste', async () => {
+            const runId = Date.now();
+            const ip = `10.4.${runId % 200}.2`;
+            const phone = `+52222${String((runId + 1) % 10000000).padStart(7, '0')}`;
+            const conversationId = `conv_storefirst_order_${runId}`;
+            let leadExistedBeforeDialing = false;
+            let leadHadNullConversationIdBeforeDialing = false;
+
+            mockTriggerOutboundCall(async () => {
+                // Se consulta la base DESDE DENTRO del mock del proveedor —
+                // si store-first funciona, el lead ya debe existir en este
+                // punto exacto, con conversation_id todavía NULL (el
+                // proveedor ni siquiera ha respondido con uno real).
+                const { data: preExisting } = await supabaseAdmin
+                    .from('leads')
+                    .select('conversation_id')
+                    .eq('organization_id', REAL_ORG_ID)
+                    .eq('contact_phone', phone)
+                    .maybeSingle();
+                leadExistedBeforeDialing = !!preExisting;
+                leadHadNullConversationIdBeforeDialing = preExisting?.conversation_id === null;
+                return { callId: conversationId };
+            });
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/voice/outbound',
+                    headers: { 'x-forwarded-for': ip },
+                    payload: {
+                        organizationId: REAL_ORG_ID,
+                        customerPhone: phone,
+                        customerName: 'Prospecto Orden De Persistencia',
+                    },
+                });
+
+                expect(response.statusCode).toBe(200);
+                expect(leadExistedBeforeDialing).toBe(true);
+                expect(leadHadNullConversationIdBeforeDialing).toBe(true);
+            } finally {
+                await app.close();
+                await cleanupAttempts([ip], [phone]);
                 await supabaseAdmin.from('leads').delete().eq('conversation_id', conversationId);
                 await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', conversationId);
                 await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
             }
         });
 
-        it('un fallo al sembrar el lead no tumba la respuesta al frontend: la llamada real ya se disparó y cuesta dinero de cualquier forma', async () => {
+        it('docs/tasks/zero-lead-loss-outbound-persistence.md — si la siembra previa falla, NUNCA se marca (regla de oro store-first)', async () => {
             const runId = Date.now();
             const ip = `10.5.${runId % 200}.1`;
             const phone = `+52223${String(runId % 10000000).padStart(7, '0')}`;
             const conversationId = `conv_seedfail_test_${runId}`;
 
-            mockTriggerOutboundCall(async () => ({ callId: conversationId }));
-            // organizationId inexistente: el RPC falla por la FK de organization_id,
-            // pero la ruta debe seguir respondiendo 200 con el resultado de la llamada.
+            const trigger = mockTriggerOutboundCall(async () => ({ callId: conversationId }));
+            // organizationId inexistente: seed_outbound_lead falla por la FK de
+            // organization_id ANTES de intentar marcar — gastar el minuto de
+            // ElevenLabs por un prospecto que de todas formas no se puede
+            // persistir no tiene sentido (Regla de Oro, §2).
             const fakeOrgId = '00000000-0000-0000-0000-000000000000';
 
             const app = await buildTestApp();
@@ -271,13 +335,78 @@ describe('POST /api/voice/outbound', () => {
                     },
                 });
 
-                expect(response.statusCode).toBe(200);
-                expect(response.json().data.callId).toBe(conversationId);
+                expect(response.statusCode).toBe(500);
+                expect(trigger).not.toHaveBeenCalled();
             } finally {
                 await app.close();
                 await cleanupAttempts([ip], [phone]);
                 await supabaseAdmin.from('leads').delete().eq('conversation_id', conversationId);
                 await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', conversationId);
+                await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
+            }
+        });
+
+        it('contraparte de éxito: si ElevenLabs falla DESPUÉS de la siembra, el lead ya guardado se anota y la ruta responde 200 (callStatus: call_failed_lead_saved)', async () => {
+            const runId = Date.now();
+            const ip = `10.5.${runId % 200}.2`;
+            const phone = `+52223${String((runId + 1) % 10000000).padStart(7, '0')}`;
+
+            mockTriggerOutboundCall(async () => {
+                throw new Error('SIP 500: carrier no disponible');
+            });
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/voice/outbound',
+                    headers: { 'x-forwarded-for': ip },
+                    payload: {
+                        organizationId: REAL_ORG_ID,
+                        customerPhone: phone,
+                        customerName: 'Prospecto Que No Contestó',
+                        customerEmail: 'prospecto-nocontesto@example.com',
+                        companyName: 'Negocio de Prueba',
+                        industry: 'Retail',
+                        demoObjective: 'Quiere una demo',
+                    },
+                });
+
+                expect(response.statusCode).toBe(200);
+                const body = response.json();
+                expect(body.status).toBe('success');
+                expect(body.data.callStatus).toBe('call_failed_lead_saved');
+                expect(body.data.leadId).toBeTruthy();
+                expect(body.data.contactId).toBeTruthy();
+
+                const { data: lead } = await supabaseAdmin
+                    .from('leads')
+                    .select('full_name, email, business_name, needs_followup, followup_status, followup_notes, conversation_id')
+                    .eq('id', body.data.leadId)
+                    .single();
+
+                // El prospecto sigue visible con TODOS los datos del formulario,
+                // aunque la llamada nunca haya conectado — el criterio de
+                // aceptación central de esta tarea.
+                expect(lead?.full_name).toBe('Prospecto Que No Contestó');
+                expect(lead?.email).toBe('prospecto-nocontesto@example.com');
+                expect(lead?.business_name).toBe('Negocio de Prueba');
+                expect(lead?.needs_followup).toBe(true);
+                expect(lead?.followup_status).toBe('pendiente');
+                expect(lead?.followup_notes).toMatch(/SIP 500: carrier no disponible/);
+                expect(lead?.followup_notes).toMatch(/Requiere contacto manual/);
+                expect(lead?.conversation_id).toBeNull();
+
+                const { data: contact } = await supabaseAdmin
+                    .from('contacts')
+                    .select('id')
+                    .eq('id', body.data.contactId)
+                    .maybeSingle();
+                expect(contact).toBeTruthy();
+            } finally {
+                await app.close();
+                await cleanupAttempts([ip], [phone]);
+                await supabaseAdmin.from('leads').delete().eq('contact_phone', phone);
                 await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
             }
         });
@@ -316,9 +445,16 @@ describe('POST /api/voice/outbound', () => {
                 expect(response.statusCode).toBe(200);
                 expect(capturedParams).not.toBeNull();
                 expect(capturedParams.agentId).toBe('agent_override_abc');
-                expect(capturedParams.customVariables).toEqual({
+                // docs/tasks/zero-lead-loss-outbound-persistence.md §3.3 — con
+                // organizationId presente, la ruta mezcla leadId/contactId de
+                // la siembra store-first dentro de customVariables (para que
+                // ElevenLabs los conserve en la metadata de la llamada), sin
+                // perder las variables originales del body.
+                expect(capturedParams.customVariables).toMatchObject({
                     origen: 'landing_demo',
                     prioridad: 'alta',
+                    leadId: expect.any(String),
+                    contactId: expect.any(String),
                 });
             } finally {
                 await app.close();

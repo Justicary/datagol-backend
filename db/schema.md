@@ -157,7 +157,7 @@
 | `contact_id` | `uuid` |  Nullable |
 | `channel` | `text` |  |
 | `call_log_id` | `uuid` |  Nullable |
-| `conversation_id` | `text` |  |
+| `conversation_id` | `text` |  Nullable |
 | `full_name` | `text` |  Nullable |
 | `email` | `text` |  Nullable |
 | `contact_phone` | `text` |  Nullable |
@@ -774,7 +774,7 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `image_mime_type` | `text` |  Nullable |
 | `image_size_bytes` | `int8` |  Nullable |
 | `image_uploaded_at` | `timestamptz` |  Nullable |
-| `custom_fields` | `jsonb` | Default: '{}'::jsonb |
+| `custom_fields` | `jsonb` |  |
 
 ## Table `product_variants`
 
@@ -798,7 +798,7 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `price_changed_at` | `timestamptz` |  Nullable |
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
-| `custom_fields` | `jsonb` | Default: '{}'::jsonb |
+| `custom_fields` | `jsonb` |  |
 
 ## Table `variant_price_history`
 
@@ -866,26 +866,6 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `created_at` | `timestamptz` |  |
 | `completed_at` | `timestamptz` |  Nullable |
 
-## Table `catalog_custom_fields`
-
-### Columns
-
-| Name | Type | Constraints |
-|------|------|-------------|
-| `id` | `uuid` | Primary |
-| `catalog_id` | `uuid` |  |
-| `entity_type` | `text` |  |
-| `name` | `text` |  |
-| `key` | `text` |  |
-| `field_type` | `text` |  |
-| `options` | `jsonb` | Default: '[]'::jsonb |
-| `description` | `text` |  Nullable |
-| `is_required` | `bool` | Default: false |
-| `include_in_rag` | `bool` | Default: true |
-| `order_index` | `int4` | Default: 0 |
-| `created_at` | `timestamptz` |  |
-| `updated_at` | `timestamptz` |  |
-
 ## Table `concurrency_quota_alerts`
 
 Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_quota.soft_limit dentro del pozo compartido del grupo. RLS habilitada sin políticas: solo service_role la escribe/lee, mismo patrón que organization_usage_alerts (migración 31).
@@ -902,7 +882,47 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 | `alert_date` | `date` |  |
 | `sent_at` | `timestamptz` |  |
 
+## Table `catalog_import_mappings`
+
+Mapeos de columnas de importación guardados y reutilizables (src/routes/catalogs.ts, GET/POST .../import-mappings). No participa en la aplicación del import — solo precarga columnMapping en el formulario.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `catalog_id` | `uuid` |  |
+| `name` | `text` |  |
+| `mode` | `text` |  |
+| `column_mapping` | `jsonb` |  |
+| `created_by` | `uuid` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `catalog_custom_fields`
+
+Definiciones de campos personalizados por catálogo para productos y variantes (src/routes/catalogs.ts). Soporta tipos text, number, boolean y select, con bandera include_in_rag para inyección automática en ElevenLabs.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `catalog_id` | `uuid` |  |
+| `entity_type` | `text` |  |
+| `name` | `text` |  |
+| `key` | `text` |  |
+| `field_type` | `text` |  |
+| `options` | `jsonb` |  |
+| `description` | `text` |  Nullable |
+| `is_required` | `bool` |  |
+| `include_in_rag` | `bool` |  |
+| `order_index` | `int4` |  |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
 ## Table `appointment_waitlist`
+
+Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmaking en src/services/waitlist-engine.ts; confirmación por enlace de un clic en src/routes/public/waitlist-confirmation.ts (offer_token_hash), con voz saliente como respaldo.
 
 ### Columns
 
@@ -916,24 +936,227 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 | `customer_name` | `text` |  |
 | `customer_phone` | `text` |  |
 | `customer_email` | `text` |  Nullable |
-| `party_size` | `int4` | Default: 2 |
+| `party_size` | `int4` |  |
 | `preferred_date_start` | `date` |  |
 | `preferred_date_end` | `date` |  |
 | `preferred_time_start` | `time` |  Nullable |
 | `preferred_time_end` | `time` |  Nullable |
-| `status` | `text` | Default: 'pendiente' |
-| `priority` | `text` | Default: 'normal' |
+| `status` | `text` |  |
+| `priority` | `text` |  |
 | `offered_appointment_id` | `uuid` |  Nullable |
 | `offered_at` | `timestamptz` |  Nullable |
 | `offer_expires_at` | `timestamptz` |  Nullable |
-| `offer_token_hash` | `text` |  Nullable, Unique |
+| `offer_token_hash` | `text` |  Nullable Unique |
 | `offer_viewed_at` | `timestamptz` |  Nullable |
-| `offered_slot_start` | `timestamptz` |  Nullable |
-| `offered_slot_end` | `timestamptz` |  Nullable |
-| `notification_channel` | `text` | Default: 'whatsapp' |
+| `notification_channel` | `text` |  |
 | `notes` | `text` |  Nullable |
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
+| `offered_slot_start` | `timestamptz` |  Nullable |
+| `offered_slot_end` | `timestamptz` |  Nullable |
+
+## Table `license_client_state`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `bool` | Primary |
+| `singleton` | `bool` |  Unique |
+| `token` | `text` |  Nullable |
+| `key_version` | `text` |  Nullable |
+| `deployment_id` | `text` |  Nullable |
+| `expires_at` | `timestamptz` |  Nullable |
+| `last_verified_at` | `timestamptz` |  Nullable |
+| `last_verification_ok` | `bool` |  |
+| `last_heartbeat_sent_at` | `timestamptz` |  Nullable |
+| `last_heartbeat_ok` | `bool` |  |
+| `last_heartbeat_error` | `text` |  Nullable |
+| `heartbeat_retry_count` | `int4` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `customers`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `legal_name` | `text` |  |
+| `trade_name` | `text` |  Nullable |
+| `rfc` | `text` |  Nullable |
+| `tax_regime` | `text` |  Nullable |
+| `fiscal_address` | `text` |  Nullable |
+| `fiscal_city` | `text` |  Nullable |
+| `fiscal_state` | `text` |  Nullable |
+| `fiscal_postal_code` | `text` |  Nullable |
+| `contact_name` | `text` |  |
+| `contact_role` | `text` |  Nullable |
+| `contact_email` | `text` |  |
+| `contact_phone_e164` | `text` |  Nullable |
+| `business_sector` | `text` |  Nullable |
+| `notes` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `deployments`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `customer_id` | `uuid` |  |
+| `slug` | `text` |  Unique |
+| `status` | `text` |  |
+| `plan_key` | `text` |  |
+| `setup_fee_mxn` | `numeric` |  Nullable |
+| `retainer_mxn` | `numeric` |  Nullable |
+| `currency` | `text` |  |
+| `billing_period` | `text` |  |
+| `install_url` | `text` |  Nullable |
+| `install_region` | `text` |  Nullable |
+| `contracted_at` | `timestamptz` |  Nullable |
+| `activated_at` | `timestamptz` |  Nullable |
+| `renews_at` | `timestamptz` |  Nullable |
+| `suspended_at` | `timestamptz` |  Nullable |
+| `cancelled_at` | `timestamptz` |  Nullable |
+| `cancellation_reason` | `text` |  Nullable |
+| `status_token` | `text` |  Unique |
+| `internal_notes` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `contracts`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `deployment_id` | `uuid` |  |
+| `template_version` | `text` |  |
+| `document_hash` | `text` |  |
+| `pdf_storage_path` | `text` |  Nullable |
+| `signer_name` | `text` |  |
+| `signer_role` | `text` |  Nullable |
+| `signer_email` | `text` |  |
+| `signer_phone_e164` | `text` |  Nullable |
+| `verification_method` | `text` |  Nullable |
+| `verified_at` | `timestamptz` |  Nullable |
+| `signed_at` | `timestamptz` |  Nullable |
+| `signer_ip` | `text` |  Nullable |
+| `signer_user_agent` | `text` |  Nullable |
+| `signer_geo` | `jsonb` |  Nullable |
+| `timestamp_authority` | `text` |  Nullable |
+| `timestamp_token` | `text` |  Nullable |
+| `evidence` | `jsonb` |  |
+| `voided_at` | `timestamptz` |  Nullable |
+| `void_reason` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `licenses`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `deployment_id` | `uuid` |  |
+| `token` | `text` |  |
+| `key_version` | `text` |  |
+| `fingerprint` | `text` |  Nullable |
+| `issued_at` | `timestamptz` |  |
+| `expires_at` | `timestamptz` |  |
+| `revoked_at` | `timestamptz` |  Nullable |
+| `revocation_reason` | `text` |  Nullable |
+| `warn_after_days` | `int4` |  |
+| `limit_features_after_days` | `int4` |  |
+| `lock_dashboard_after_days` | `int4` |  |
+| `last_heartbeat_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `license_heartbeats`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `license_id` | `uuid` |  |
+| `deployment_id` | `uuid` |  |
+| `received_at` | `timestamptz` |  |
+| `installed_version` | `text` |  Nullable |
+| `source_ip` | `text` |  Nullable |
+| `health` | `jsonb` |  |
+| `metrics` | `jsonb` |  |
+
+## Table `provisioning_tasks`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `deployment_id` | `uuid` |  |
+| `task_key` | `text` |  |
+| `label` | `text` |  |
+| `description` | `text` |  Nullable |
+| `owner` | `text` |  |
+| `status` | `text` |  |
+| `is_blocking` | `bool` |  |
+| `sort_order` | `int4` |  |
+| `blocked_reason` | `text` |  Nullable |
+| `completed_at` | `timestamptz` |  Nullable |
+| `notes` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `provisioning_task_templates`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `task_key` | `text` | Primary |
+| `label` | `text` |  |
+| `description` | `text` |  Nullable |
+| `owner` | `text` |  |
+| `is_blocking` | `bool` |  |
+| `applies_when` | `text` |  Nullable |
+| `sort_order` | `int4` |  |
+
+## Table `deployment_events`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `deployment_id` | `uuid` |  |
+| `event_type` | `text` |  |
+| `description` | `text` |  Nullable |
+| `previous_value` | `text` |  Nullable |
+| `new_value` | `text` |  Nullable |
+| `actor_user_id` | `uuid` |  Nullable |
+| `metadata` | `jsonb` |  |
+| `created_at` | `timestamptz` |  |
+
+## Table `contract_otp_codes`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `contract_id` | `uuid` |  |
+| `code_hash` | `text` |  |
+| `channel` | `text` |  |
+| `sent_to` | `text` |  |
+| `expires_at` | `timestamptz` |  |
+| `consumed_at` | `timestamptz` |  Nullable |
+| `attempts` | `int4` |  |
+| `created_at` | `timestamptz` |  |
 
 ## RLS Policies
 
@@ -985,19 +1208,19 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 |--------|---------|-------|--------|-------|------------|
 | `catalog_read` | SELECT | authenticated | PERMISSIVE | `true` | — |
 
-### `organization_features`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `admin_write_features` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
-| `tenant_read_features` | SELECT | public | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
-
 ### `appointments`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `appointments_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_contacts'::text)` | — |
 | `appointments_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_pipeline'::text)` | `has_permission(organization_id, 'manage_pipeline'::text)` |
+
+### `organization_features`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `admin_write_features` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+| `tenant_read_features` | SELECT | public | PERMISSIVE | `((organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
 
 ### `feature_audit_log`
 
@@ -1163,13 +1386,6 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 |--------|---------|-------|--------|-------|------------|
 | `catalog_access_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
 
-### `product_variants`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `product_variants_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
-| `product_variants_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
-
 ### `variant_price_history`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
@@ -1189,19 +1405,25 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 | `catalogs_read` | SELECT | authenticated | PERMISSIVE | `(id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
 | `catalogs_write` | ALL | authenticated | PERMISSIVE | `has_permission(owner_organization_id, 'manage_catalog'::text)` | `has_permission(owner_organization_id, 'manage_catalog'::text)` |
 
+### `product_variants`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `product_variants_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+| `product_variants_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+
+### `catalog_import_mappings`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `import_mappings_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+
 ### `products`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `products_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
 | `products_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
-
-### `catalog_custom_fields`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `catalog_custom_fields_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
-| `catalog_custom_fields_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
 
 ### `appointment_waitlist`
 
@@ -1210,4 +1432,70 @@ Aviso (no bloqueo) de que una organización rebasó su organization_concurrency_
 | `appointment_waitlist_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_waitlist'::text)` | — |
 | `appointment_waitlist_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_waitlist'::text)` | `has_permission(organization_id, 'manage_waitlist'::text)` |
 
+### `catalog_custom_fields`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `catalog_custom_fields_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
+| `catalog_custom_fields_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+
+### `license_client_state`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `service_role_only` | ALL | service_role | PERMISSIVE | `true` | `true` |
+
+### `customers`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `deployments`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `contracts`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `licenses`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `license_heartbeats`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `provisioning_tasks`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `provisioning_task_templates`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `deployment_events`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `contract_otp_codes`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
 

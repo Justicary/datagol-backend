@@ -5,6 +5,10 @@ export default defineConfig({
         include: ['__tests__/**/*.test.ts'],
         globals: false,
         testTimeout: 30_000,
+        // Genera y expone unas llaves Ed25519 de prueba antes de que
+        // cualquier archivo importe src/lib/supabase.ts (que cachea
+        // validateEnv() en su nivel de módulo) — ver vitest.setup.ts.
+        setupFiles: ['./vitest.setup.ts'],
         // Varios archivos comparten la misma organización real (REAL_ORG_ID) y
         // mutan `organizations.webhook_token` / `organization_secrets` sobre esa
         // fila en beforeAll/afterAll. Con archivos en paralelo, esas escrituras

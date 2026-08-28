@@ -8,6 +8,7 @@ import { appointmentToolRoute } from './appointment.js';
 import { emailToolRoute } from './email.js';
 import { productsToolRoute } from './products.js';
 import { waitlistToolRoute } from './waitlist.js';
+import { recordToolDuration } from '../../lib/tool-latency-tracker.js';
 
 /**
  * Registro de `routes/tools/**` (Fase 5). Encapsulado en su propio contexto
@@ -24,6 +25,9 @@ export async function toolRoutes(fastify: FastifyInstance) {
     fastify.addHook('onResponse', async (request, reply) => {
         const started = (request as FastifyRequest & { toolStartedAt?: bigint }).toolStartedAt;
         const durationMs = started ? Number(process.hrtime.bigint() - started) / 1_000_000 : undefined;
+        if (durationMs !== undefined) {
+            recordToolDuration(durationMs);
+        }
         request.log.info({
             route: request.routeOptions?.url ?? request.url,
             statusCode: reply.statusCode,

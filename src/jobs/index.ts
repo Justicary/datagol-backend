@@ -18,6 +18,7 @@ import { registerSyncCatalogKbWorker } from './sync-catalog-kb.js';
 import { registerEvaluateWaitlistForSlotWorker } from './evaluate-waitlist-for-slot.js';
 import { registerCheckWaitlistExpirationsWorker } from './check-waitlist-expirations.js';
 import { registerSendBulkConfirmationRequestWorker } from './send-bulk-confirmation-request.js';
+import { registerSendLicenseHeartbeatWorker } from './send-license-heartbeat.js';
 
 /**
  * Registra todos los workers de pg-boss de la aplicación. Se invoca una vez
@@ -43,4 +44,7 @@ export async function registerJobs(fastify: FastifyInstance): Promise<void> {
     await registerEvaluateWaitlistForSlotWorker(fastify);
     await registerCheckWaitlistExpirationsWorker(fastify);
     await registerSendBulkConfirmationRequestWorker(fastify);
+    // Plano de control (docs/tasks/control-plane-backend-datagol.md, Fase
+    // B.2) — latido diario, en TODA instalación.
+    await registerSendLicenseHeartbeatWorker(fastify);
 }

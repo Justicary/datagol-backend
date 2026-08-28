@@ -12,6 +12,7 @@ import adminPlansRoutes from './routes/admin/plans.js';
 import adminFactoryResetRoutes from './routes/admin/factory-reset.js';
 import adminReportsRoutes from './routes/admin/reports.js';
 import adminEmailAccountsRoutes from './routes/admin/email-accounts.js';
+import adminSsoRoutes from './routes/admin/sso.js';
 import plansRoutes from './routes/plans.js';
 import organizationRoutes from './routes/organization.js';
 import organizationOnboardingRoutes from './routes/organization-onboarding.js';
@@ -37,6 +38,10 @@ import { appointmentsAdminRoutes } from './routes/appointments-admin.js';
 import { waitlistAdminRoutes } from './routes/waitlist-admin.js';
 import { uploadRoutes } from './routes/upload.js';
 import { registerJobs } from './jobs/index.js';
+import { incrementErrorCount } from './lib/error-counter.js';
+import licensePlugin from './plugins/license.js';
+import { statusRoutes } from './routes/status.js';
+import { controlPlaneRoutes } from './routes/control/index.js';
 
 /**
  * Fabrica y configura la instancia principal de la aplicación Fastify.
@@ -100,6 +105,7 @@ export async function buildApp() {
     app.setErrorHandler((error: any, request, reply) => {
         app.log.error(error);
         const statusCode = error.statusCode || 500;
+        incrementErrorCount(statusCode);
         return reply.status(statusCode).send({
             error: error.name || 'InternalServerError',
             message: error.message || 'Ocurrió un error no controlado en el servidor',
@@ -111,6 +117,9 @@ export async function buildApp() {
     await app.register(supabasePlugin);
     await app.register(pgBossPlugin);
     await app.register(entitlementsPlugin);
+    // Plano de control (docs/tasks/control-plane-backend-datagol.md, Fase B)
+    // — verificación local de licencia, en TODAS las instalaciones.
+    await app.register(licensePlugin);
 
     // Fase 2.2 — Registro de workers de pg-boss (process-call-completed, ...)
     await registerJobs(app);
@@ -190,6 +199,10 @@ export async function buildApp() {
     await app.register(adminReportsRoutes);
     // Vinculación de buzones IMAP/SMTP por organización (integración de correo nativa)
     await app.register(adminEmailAccountsRoutes);
+    // Pasaporte de superadmin — SSO delegado a api.datagol.net. En TODA
+    // instalación (no exclusivo de CONTROL_PLANE): cualquier cliente debe
+    // poder canjear un pase para reconocer al operador en su propio /admin.
+    await app.register(adminSsoRoutes);
 
     // Registro modular de otros plugins y rutas de la API
     await app.register(plansRoutes);
@@ -233,6 +246,22 @@ export async function buildApp() {
     // Enlace de confirmación de un clic de la lista de espera — público, sin
     // sesión ni x-tool-secret (docs/tasks/waitlist_confirmacion_masiva.md)
     await app.register(waitlistConfirmationRoutes);
+
+    // Fase F — aislamiento estricto de la bandera: con CONTROL_PLANE=false
+    // ninguna ruta /control/** se registra siquiera (no solo se rechaza en
+    // runtime). Solo api.datagol.net llega aquí con la bandera en true.
+    //
+    // routes/status.ts (Fase E) viaja fuera del prefijo /control/** a
+    // propósito — es la página pública que un cliente visita directamente,
+    // sin sesión de administrador — pero se registra en el mismo bloque
+    // condicional: `deployments`/`provisioning_tasks` son tablas exclusivas
+    // del plano de control (Fase F), así que en una instalación cliente esta
+    // ruta jamás podría resolver nada de todas formas.
+    const env = validateEnv();
+    if (env.CONTROL_PLANE) {
+        await app.register(controlPlaneRoutes);
+        await app.register(statusRoutes);
+    }
 
     return app;
 }

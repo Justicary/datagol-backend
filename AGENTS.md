@@ -280,6 +280,8 @@ A continuación se indexan los documentos técnicos y manuales operativos que no
 4. [Guía de Tunelado y Pruebas Locales con Webhooks](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/tunneling.md) (`docs/tunneling.md`): Configuración de Cloudflare Tunnel y LocalTunnel para recibir eventos de proveedores durante el desarrollo.
 5. [Catálogo de Precios y Tarifas de Infraestructura](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/listaPrecios2024.md) (`docs/listaPrecios2024.md`): Desglose de costos unitarios de proveedores (ElevenLabs, Telnyx, Meta) para metering y conciliación.
 6. [Manual de Reportes en Lenguaje Natural](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/natural-language-reports.md) (`docs/natural-language-reports.md`): Principio rector ("el LLM traduce, no consulta"), catálogo de 18 intenciones v1, resolución de periodos en zona horaria local y verificación anti-alucinación.
+7. [Manual Técnico del Plano de Control y Licenciamiento](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/control-plane-tech-manual.md) (`docs/control-plane-tech-manual.md`): Bandera `CONTROL_PLANE`, firma/verificación de licencias con Ed25519, degradación por etapas, contrato del latido diario, endpoints de `/control/**` y `/status/:token`.
+8. [Manual Técnico del Pasaporte de Superadmin (SSO delegado)](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/admin-passport-sso-tech-manual.md) (`docs/admin-passport-sso-tech-manual.md`): Pase Ed25519 emitido solo por `api.datagol.net` para entrar a `/admin` en cualquier instalación cliente, sesión local HS256 por instalación, `DEPLOYMENT_ID` como `aud`, endpoints `/control/admin-passport` y `/api/admin/sso/**`.
 
 ---
 
