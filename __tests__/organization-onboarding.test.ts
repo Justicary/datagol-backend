@@ -640,13 +640,17 @@ describe('routes/organization-onboarding.ts', () => {
             // verificar, de forma determinista (sin depender de qué proveedor
             // requiere cada feature).
             await supabaseAdmin.from('organization_features').delete().eq('organization_id', orgId);
-            await supabaseAdmin.from('plan_features').delete().eq('plan_key', 'starter').eq('feature_key', 'whatsapp');
             const planResult = await setOrganizationPlan(orgId, 'starter', 'Prueba readiness ready:true');
             expect(planResult.success).toBe(true);
 
-            const starterFeatures = ['voice_inbound', 'calendar_booking', 'email_summaries', 'lead_capture', 'call_recording'];
-            for (const featureKey of starterFeatures) {
-                const overrideResult = await setFeatureOverride(orgId, featureKey, false, 'Prueba readiness ready:true');
+            const { data: pfRows } = await supabaseAdmin
+                .from('plan_features')
+                .select('feature_key')
+                .eq('plan_key', 'starter')
+                .eq('enabled', true);
+
+            for (const row of pfRows || []) {
+                const overrideResult = await setFeatureOverride(orgId, row.feature_key, false, 'Prueba readiness ready:true');
                 expect(overrideResult.success).toBe(true);
             }
 

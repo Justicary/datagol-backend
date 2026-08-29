@@ -51,31 +51,67 @@ describe('routes/admin/plans.ts', () => {
     });
 
     describe('PATCH /api/admin/plans/:key', () => {
+        let testPlanKey: string;
         let originalPlan: Record<string, unknown>;
 
         beforeAll(async () => {
-            const { data } = await supabaseAdmin.from('plans').select('*').eq('key', TEST_PLAN_KEY).single();
+            testPlanKey = `test_plan_admin_${Date.now()}`;
+            const { data, error } = await supabaseAdmin
+                .from('plans')
+                .insert({
+                    key: testPlanKey,
+                    name: 'Plan de Prueba Admin',
+                    setup_fee_mxn: 1000,
+                    monthly_fee_mxn: 500,
+                    max_concurrent_calls: 5,
+                    sort_order: 999,
+                    is_active: true,
+                    target_audience: 'Audiencia test',
+                    badge: 'TEST',
+                    setup_includes: ['Bullet inicial'],
+                    retainer_includes: ['Retainer inicial'],
+                    cta_text: 'CTA Test',
+                    is_popular: false,
+                    show_retainer: true,
+                })
+                .select('*')
+                .single();
+            if (error || !data) throw new Error(`No se pudo crear plan de prueba: ${error?.message}`);
             originalPlan = data as Record<string, unknown>;
+
+            await supabaseAdmin.from('plan_features').insert([
+                { plan_key: testPlanKey, feature_key: 'voice_inbound', enabled: true },
+                { plan_key: testPlanKey, feature_key: 'calendar_booking', enabled: true },
+            ]);
+        });
+
+        afterAll(async () => {
+            if (testPlanKey) {
+                await supabaseAdmin.from('plan_features').delete().eq('plan_key', testPlanKey);
+                await supabaseAdmin.from('plans').delete().eq('key', testPlanKey);
+            }
         });
 
         afterEach(async () => {
-            await supabaseAdmin
-                .from('plans')
-                .update({
-                    name: originalPlan.name,
-                    setup_fee_mxn: originalPlan.setup_fee_mxn,
-                    monthly_fee_mxn: originalPlan.monthly_fee_mxn,
-                    max_concurrent_calls: originalPlan.max_concurrent_calls,
-                    target_audience: originalPlan.target_audience,
-                    badge: originalPlan.badge,
-                    setup_includes: originalPlan.setup_includes,
-                    retainer_includes: originalPlan.retainer_includes,
-                    cta_text: originalPlan.cta_text,
-                    is_popular: originalPlan.is_popular,
-                    show_retainer: originalPlan.show_retainer,
-                    is_active: originalPlan.is_active,
-                })
-                .eq('key', TEST_PLAN_KEY);
+            if (testPlanKey && originalPlan) {
+                await supabaseAdmin
+                    .from('plans')
+                    .update({
+                        name: originalPlan.name,
+                        setup_fee_mxn: originalPlan.setup_fee_mxn,
+                        monthly_fee_mxn: originalPlan.monthly_fee_mxn,
+                        max_concurrent_calls: originalPlan.max_concurrent_calls,
+                        target_audience: originalPlan.target_audience,
+                        badge: originalPlan.badge,
+                        setup_includes: originalPlan.setup_includes,
+                        retainer_includes: originalPlan.retainer_includes,
+                        cta_text: originalPlan.cta_text,
+                        is_popular: originalPlan.is_popular,
+                        show_retainer: originalPlan.show_retainer,
+                        is_active: originalPlan.is_active,
+                    })
+                    .eq('key', testPlanKey);
+            }
         });
 
         it('contraparte de éxito: actualiza precio, llamadas concurrentes y bullets, y se refleja al releer el plan', async () => {
@@ -83,7 +119,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: {
                         setupFeeMxn: 5555,
@@ -93,7 +129,7 @@ describe('routes/admin/plans.ts', () => {
                 });
                 expect(response.statusCode).toBe(200);
 
-                const { data: updated } = await supabaseAdmin.from('plans').select('*').eq('key', TEST_PLAN_KEY).single();
+                const { data: updated } = await supabaseAdmin.from('plans').select('*').eq('key', testPlanKey).single();
                 expect(Number(updated?.setup_fee_mxn)).toBe(5555);
                 expect(updated?.max_concurrent_calls).toBe(15);
                 expect(updated?.setup_includes).toEqual(['Nuevo bullet de prueba']);
@@ -109,13 +145,13 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: { monthlyFeeMxn: null, badge: null },
                 });
                 expect(response.statusCode).toBe(200);
 
-                const { data: updated } = await supabaseAdmin.from('plans').select('monthly_fee_mxn, badge').eq('key', TEST_PLAN_KEY).single();
+                const { data: updated } = await supabaseAdmin.from('plans').select('monthly_fee_mxn, badge').eq('key', testPlanKey).single();
                 expect(updated?.monthly_fee_mxn).toBeNull();
                 expect(updated?.badge).toBeNull();
             } finally {
@@ -128,7 +164,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: { setupFeeMxn: -100 },
                 });
@@ -143,7 +179,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: { setupIncludes: 'no es un arreglo' },
                 });
@@ -158,7 +194,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: { name: '   ' },
                 });
@@ -173,7 +209,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: {},
                 });
@@ -203,7 +239,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: { features: ['feature_inventada_inexistente'] },
                 });
@@ -218,7 +254,7 @@ describe('routes/admin/plans.ts', () => {
             try {
                 const response = await app.inject({
                     method: 'PATCH',
-                    url: `/api/admin/plans/${TEST_PLAN_KEY}`,
+                    url: `/api/admin/plans/${testPlanKey}`,
                     headers: { 'x-platform-admin': 'true' },
                     payload: { features: ['voice_inbound', 'calendar_booking'] },
                 });
@@ -229,8 +265,8 @@ describe('routes/admin/plans.ts', () => {
                     url: '/api/admin/plans',
                     headers: { 'x-platform-admin': 'true' },
                 });
-                const starter = getRes.json().data.find((p: any) => p.key === TEST_PLAN_KEY);
-                expect(starter.features).toEqual(expect.arrayContaining(['voice_inbound', 'calendar_booking']));
+                const updatedPlan = getRes.json().data.find((p: any) => p.key === testPlanKey);
+                expect(updatedPlan.features).toEqual(expect.arrayContaining(['voice_inbound', 'calendar_booking']));
             } finally {
                 await app.close();
             }

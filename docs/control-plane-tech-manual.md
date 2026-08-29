@@ -164,6 +164,20 @@ Toda operación de escritura inserta en `deployment_events`
 .../tasks/:taskKey`, `GET /control/fleet` (`v_fleet_health`), `GET
 /control/revenue` (`v_recurring_revenue`).
 
+Sub-recursos de solo lectura, añadidos para el detalle de flota del frontend
+(`docs/tasks/control-plane-frontend-datagol.md` §2 en `datagol-frontend`) —
+lecturas directas sin capa de servicio, mismo criterio que `/control/fleet`:
+
+| Método | Ruta | Fuente |
+|---|---|---|
+| `GET` | `/control/deployments/:id/contracts` | `contracts`, más recientes primero |
+| `GET` | `/control/deployments/:id/license` | `licenses`, sin la columna `token` (mismo criterio que `GET /control/licenses/:id`) |
+| `GET` | `/control/deployments/:id/heartbeats` | `license_heartbeats`, `?limit=` opcional (default 50, máx 200) |
+| `GET` | `/control/deployments/:id/events` | `deployment_events`, `?limit=` opcional (default 50, máx 200) |
+
+Ninguno de los cuatro devuelve 404 si el despliegue no tiene historial —
+responden `{ data: [] }`, igual que `.../tasks`.
+
 Al transicionar un despliegue a `aprovisionando`,
 `services/deployment-service.ts#instantiateProvisioningTasks` copia
 `provisioning_task_templates` filtrando por `applies_when`: una plantilla
@@ -377,7 +391,7 @@ en 200), `license-plugin.test.ts`, `license-heartbeat-payload-schema.test.ts`,
 `control-plane-flag-isolation.test.ts` (`CONTROL_PLANE=false` → 404 en
 `/control/**`), `control-licenses-routes.test.ts`, `control-heartbeat-route.test.ts`,
 `control-contracts-flow.test.ts`, `control-customers-deployments.test.ts`,
-`status-route.test.ts`.
+`control-deployment-history-routes.test.ts`, `status-route.test.ts`.
 
 `stryker.config.json` incluye los archivos de firma/degradación/latido/OTP
 en `mutate` — se verifican manualmente en ≥90% (categoría "seguridad y

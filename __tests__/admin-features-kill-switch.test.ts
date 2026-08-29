@@ -5,10 +5,6 @@ import adminFeaturesRoutes from '../src/routes/admin/features.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
 import { getOrganizationFeatures, clearEntitlementsCache } from '../src/services/entitlements.js';
 
-// Organización real existente con plan 'starter' (ver __tests__/entitlements.test.ts).
-// 'calendar_booking' viene de plan_features del plan starter con enabled:true
-// (a diferencia de 'lead_capture', que ese plan tiene con enabled:false).
-const PLAN_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
 const PLAN_FEATURE = 'calendar_booking';
 // Feature que NO viene del plan starter — se concede exclusivamente por override.
 const OVERRIDE_FEATURE = 'sms_agent';
@@ -27,6 +23,7 @@ async function restoreKillSwitch(featureKey: string, originalValue: boolean) {
 }
 
 describe('POST /api/admin/features/:featureKey/kill-switch', () => {
+    let planOrgId: string;
     let overrideOrgId: string;
     let originalGlobalValue: boolean;
 
@@ -34,9 +31,17 @@ describe('POST /api/admin/features/:featureKey/kill-switch', () => {
         const { data: feature } = await supabaseAdmin.from('features').select('globally_disabled').eq('key', PLAN_FEATURE).maybeSingle();
         originalGlobalValue = feature?.globally_disabled ?? false;
 
+        const { data: pOrg, error: pError } = await supabaseAdmin
+            .from('organizations')
+            .insert({ name: 'Org Plan kill-switch test', email: `test-plan-kill-switch-${Date.now()}@example.invalid`, plan_key: 'starter', status: 'active' })
+            .select('id')
+            .single();
+        if (pError || !pOrg) throw new Error(`No se pudo crear la organización de plan: ${pError?.message}`);
+        planOrgId = pOrg.id as string;
+
         const { data: org, error } = await supabaseAdmin
             .from('organizations')
-            .insert({ name: 'Org Pruebas kill-switch', email: `test-kill-switch-${Date.now()}@example.invalid` })
+            .insert({ name: 'Org Pruebas kill-switch', email: `test-kill-switch-${Date.now()}@example.invalid`, status: 'active' })
             .select('id')
             .single();
         if (error || !org) throw new Error(`No se pudo crear la organización de override: ${error?.message}`);
@@ -57,8 +62,14 @@ describe('POST /api/admin/features/:featureKey/kill-switch', () => {
         await restoreKillSwitch(PLAN_FEATURE, originalGlobalValue);
         await restoreKillSwitch(OVERRIDE_FEATURE, false);
         if (overrideOrgId) {
+            await supabaseAdmin.from('feature_audit_log').delete().eq('organization_id', overrideOrgId);
             await supabaseAdmin.from('organization_features').delete().eq('organization_id', overrideOrgId);
             await supabaseAdmin.from('organizations').delete().eq('id', overrideOrgId);
+        }
+        if (planOrgId) {
+            await supabaseAdmin.from('feature_audit_log').delete().eq('organization_id', planOrgId);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', planOrgId);
+            await supabaseAdmin.from('organizations').delete().eq('id', planOrgId);
         }
         clearEntitlementsCache();
     });
@@ -115,7 +126,7 @@ describe('POST /api/admin/features/:featureKey/kill-switch', () => {
         const app = await buildTestApp();
         try {
             clearEntitlementsCache();
-            const beforePlan = await getOrganizationFeatures(PLAN_ORG_ID);
+            const beforePlan = await getOrganizationFeatures(planOrgId);
             const beforeOverride = await getOrganizationFeatures(overrideOrgId);
             expect(beforePlan.has(PLAN_FEATURE)).toBe(true);
             expect(beforeOverride.has(OVERRIDE_FEATURE)).toBe(true);
@@ -136,7 +147,7 @@ describe('POST /api/admin/features/:featureKey/kill-switch', () => {
             });
             expect(responseOverride.statusCode).toBe(200);
 
-            const afterPlan = await getOrganizationFeatures(PLAN_ORG_ID);
+            const afterPlan = await getOrganizationFeatures(planOrgId);
             const afterOverride = await getOrganizationFeatures(overrideOrgId);
             expect(afterPlan.has(PLAN_FEATURE)).toBe(false);
             expect(afterOverride.has(OVERRIDE_FEATURE)).toBe(false);
@@ -177,7 +188,7 @@ describe('POST /api/admin/features/:featureKey/kill-switch', () => {
             });
             expect(responseOverride.statusCode).toBe(200);
 
-            const afterPlan = await getOrganizationFeatures(PLAN_ORG_ID);
+            const afterPlan = await getOrganizationFeatures(planOrgId);
             const afterOverride = await getOrganizationFeatures(overrideOrgId);
             expect(afterPlan.has(PLAN_FEATURE)).toBe(true);
             expect(afterOverride.has(OVERRIDE_FEATURE)).toBe(true);

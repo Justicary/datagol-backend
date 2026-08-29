@@ -115,6 +115,80 @@ export const controlDeploymentsRoutes: FastifyPluginAsync = async (fastify) => {
             return handleDeploymentError(err, reply);
         }
     });
+
+    // ---------------------------------------------------------------------
+    // Sub-recursos de solo lectura para el detalle de flota del frontend
+    // (docs/tasks/control-plane-frontend-datagol.md §2). Lecturas directas,
+    // sin capa de servicio — mismo criterio que /control/fleet.
+    // ---------------------------------------------------------------------
+
+    fastify.get<{ Params: { id: string } }>('/control/deployments/:id/contracts', async (request, reply) => {
+        const { data, error } = await fastify.supabaseAdmin
+            .from('contracts')
+            .select('*')
+            .eq('deployment_id', request.params.id)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+        }
+        return reply.status(200).send({ data });
+    });
+
+    fastify.get<{ Params: { id: string } }>('/control/deployments/:id/license', async (request, reply) => {
+        const { data, error } = await fastify.supabaseAdmin
+            .from('licenses')
+            .select('*')
+            .eq('deployment_id', request.params.id)
+            .order('issued_at', { ascending: false });
+
+        if (error) {
+            return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+        }
+
+        // El token firmado nunca se reexpone fuera de emitir/rotar — mismo
+        // criterio que GET /control/licenses/:id.
+        const withoutTokens = (data ?? []).map(({ token: _token, ...rest }) => rest);
+        return reply.status(200).send({ data: withoutTokens });
+    });
+
+    fastify.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+        '/control/deployments/:id/heartbeats',
+        async (request, reply) => {
+            const limit = Math.min(Math.max(parseInt(request.query.limit ?? '50', 10) || 50, 1), 200);
+
+            const { data, error } = await fastify.supabaseAdmin
+                .from('license_heartbeats')
+                .select('*')
+                .eq('deployment_id', request.params.id)
+                .order('received_at', { ascending: false })
+                .limit(limit);
+
+            if (error) {
+                return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+            }
+            return reply.status(200).send({ data });
+        }
+    );
+
+    fastify.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+        '/control/deployments/:id/events',
+        async (request, reply) => {
+            const limit = Math.min(Math.max(parseInt(request.query.limit ?? '50', 10) || 50, 1), 200);
+
+            const { data, error } = await fastify.supabaseAdmin
+                .from('deployment_events')
+                .select('*')
+                .eq('deployment_id', request.params.id)
+                .order('created_at', { ascending: false })
+                .limit(limit);
+
+            if (error) {
+                return reply.status(500).send({ error: 'InternalServerError', message: error.message });
+            }
+            return reply.status(200).send({ data });
+        }
+    );
 };
 
 function handleDeploymentError(err: unknown, reply: any) {
