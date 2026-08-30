@@ -95,8 +95,9 @@ describe('Fase F — aislamiento de CONTROL_PLANE', () => {
 
     it('CONTROL_PLANE=true sin llaves de firma configuradas falla al arrancar con mensaje claro (Fase F)', async () => {
         process.env.CONTROL_PLANE = 'true';
-        delete process.env.CONTROL_PLANE_SIGNING_KEYS;
-        delete process.env.LICENSE_PUBLIC_KEYS;
+        process.env.CONTROL_PLANE_SIGNING_KEYS = '';
+        process.env.LICENSE_PUBLIC_KEYS = '';
+        process.env.ADMIN_PASSPORT_SIGNING_KEYS = '';
         vi.resetModules();
         // `lib/supabase.ts` llama a validateEnv() en su nivel de módulo, así
         // que el fallo ocurre durante el propio `import()` — no dentro de

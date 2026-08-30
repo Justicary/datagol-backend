@@ -405,3 +405,101 @@ clave de plan inventada y exclusiva del archivo (ver el patrón
 `FAKE_PLAN_KEY` en `control-licenses-routes.test.ts`). Un despiste aquí
 puede borrar una fila de configuración legítima y producir fallas
 intermitentes en pruebas de entitlements sin relación aparente.
+
+---
+
+## 11. Guía Paso a Paso: Habilitación y Puesta en Marcha (api.datagol.net)
+
+Esta guía detalla el procedimiento operativo para activar el Plano de Control en una instancia de producción (`api.datagol.net`) o de desarrollo local.
+
+### Paso 1: Aplicar migraciones en la base de datos de Supabase
+
+Asegurarse de que las migraciones exclusivas del plano de control estén aplicadas en el proyecto Supabase:
+* `db/migrations/55_control_plane_datagol.sql`: Tablas maestras (`customers`, `deployments`, `licenses`, `contracts`, `provisioning_tasks`, vistas de flota).
+* `db/migrations/68_license_client_state.sql`: Tabla `license_client_state` para el seguimiento del cliente de licencias.
+* `db/migrations/69_control_plane_contract_otp.sql`: Tabla `contract_otp_codes` para códigos OTP de firma de contratos.
+* `db/migrations/71_admin_passport_deployment_events.sql`: Eventos de emisión de pases SSO de superadmin.
+
+### Paso 2: Generar los pares de llaves Ed25519
+
+El plano de control requiere **dos pares independientes** de llaves criptográficas asimétricas Ed25519 (uno para licencias comerciales y otro para pases SSO de Superadmin).
+
+Ejecutar el siguiente script en Node.js para generar las llaves en formato PEM y JSON versionado:
+
+```bash
+node -e '
+const { generateKeyPair, exportPKCS8, exportSPKI } = require("jose");
+
+async function generatePair(keyVersion = "v1") {
+    const { privateKey, publicKey } = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
+    const privatePem = await exportPKCS8(privateKey);
+    const publicPem = await exportSPKI(publicKey);
+    return {
+        privateKeyJson: JSON.stringify({ [keyVersion]: privatePem }),
+        publicKeyJson: JSON.stringify({ [keyVersion]: publicPem })
+    };
+}
+
+(async () => {
+    const license = await generatePair("v1");
+    const passport = await generatePair("v1");
+    console.log("\n--- COPIA ESTAS VARIABLES EN TU .env / env-vars.yaml ---\n");
+    console.log(`CONTROL_PLANE=true`);
+    console.log(`CONTROL_PLANE_SIGNING_KEYS=${JSON.stringify(license.privateKeyJson)}`);
+    console.log(`LICENSE_PUBLIC_KEYS=${JSON.stringify(license.publicKeyJson)}`);
+    console.log(`ADMIN_PASSPORT_SIGNING_KEYS=${JSON.stringify(passport.privateKeyJson)}`);
+    console.log(`ADMIN_PASSPORT_PUBLIC_KEYS=${JSON.stringify(passport.publicKeyJson)}`);
+})();
+'
+```
+
+### Paso 3: Configurar las variables de entorno
+
+En el archivo de entorno (`.env` o `env-vars.yaml` para Cloud Run):
+
+```dotenv
+# Activar Plano de Control
+CONTROL_PLANE=true
+
+# Llaves privadas (exclusivas de api.datagol.net)
+CONTROL_PLANE_SIGNING_KEYS="{\"v1\":\"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n\"}"
+ADMIN_PASSPORT_SIGNING_KEYS="{\"v1\":\"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n\"}"
+
+# Llaves públicas (compartidas en todas las instalaciones)
+LICENSE_PUBLIC_KEYS="{\"v1\":\"-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----\\n\"}"
+ADMIN_PASSPORT_PUBLIC_KEYS="{\"v1\":\"-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----\\n\"}"
+```
+
+> [!WARNING]
+> En archivos YAML para Google Cloud Run (`env-vars.yaml`), el valor debe ser explícitamente una cadena entrecomillada en minúsculas (`CONTROL_PLANE: "true"`). Un booleano sin comillas (`TRUE`) será parseado como booleano y `env.ts` lo evaluará como `false`.
+
+### Paso 4: Validar arranque y suite de pruebas
+
+1. Ejecutar las pruebas unitarias y de aislamiento:
+   ```bash
+   pnpm test
+   ```
+2. Arrancar el servidor en modo desarrollo:
+   ```bash
+   pnpm dev
+   ```
+   * Si las llaves faltan o están corruptas, `validateEnv()` lanzará un error *fail-fast* impidiendo el arranque.
+
+### Paso 5: Verificación de endpoints con `curl`
+
+Comprobar que las rutas del Plano de Control responden usando el encabezado de desarrollo `x-platform-admin: true`:
+
+```bash
+# 1. Health check
+curl -i http://localhost:3000/health
+
+# 2. Despliegues registrados
+curl -i -H "x-platform-admin: true" http://localhost:3000/control/deployments
+
+# 3. Monitoreo de salud de la flota
+curl -i -H "x-platform-admin: true" http://localhost:3000/control/fleet
+
+# 4. Portal público de estatus (responde 404 controlado de negocio si el token no existe)
+curl -i http://localhost:3000/status/token-prueba-123
+```
+
