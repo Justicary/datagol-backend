@@ -98,12 +98,35 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
         zip: mapped.zip,
     });
 
+    // Si el contacto ya existe en la base de datos con un nombre completo registrado previamente
+    // (p. ej. capturado en formulario web como "Víctor Eduardo Mancera Gallardo"),
+    // y el webhook post-call de ElevenLabs trae un nombre verbalizado por el agente (p. ej. "Víctor"),
+    // preservamos el nombre completo para no degradarlo.
+    let resolvedFullName = mapped.fullName;
+    if (event.organization_id && (mapped.callerPhoneE164 || mapped.email)) {
+        let contactQuery = fastify.supabaseAdmin
+            .from('contacts')
+            .select('full_name')
+            .eq('organization_id', event.organization_id);
+
+        if (mapped.callerPhoneE164) {
+            contactQuery = contactQuery.eq('phone_e164', mapped.callerPhoneE164);
+        } else if (mapped.email) {
+            contactQuery = contactQuery.ilike('email', mapped.email);
+        }
+
+        const { data: existingContact } = await contactQuery.maybeSingle();
+        if (existingContact?.full_name && existingContact.full_name.trim()) {
+            resolvedFullName = existingContact.full_name;
+        }
+    }
+
     const { data: result, error: rpcError } = await fastify.supabaseAdmin.rpc('process_call_completed', {
         p_organization_id: event.organization_id,
         p_conversation_id: mapped.conversationId,
         p_provider_call_id: mapped.providerCallId,
         p_caller_phone_e164: mapped.callerPhoneE164,
-        p_full_name: mapped.fullName,
+        p_full_name: resolvedFullName,
         p_email: mapped.email,
         p_business_name: mapped.businessName,
         p_business_sector: mapped.businessSector,

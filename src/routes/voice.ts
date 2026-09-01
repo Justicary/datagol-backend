@@ -34,7 +34,22 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
     const organizationId = body.organizationId || body.orgId;
     const rawAgentId = body.agentId || body.agent_id;
     const rawPhone = body.customerPhone || body.phone || body.number || body.customer?.number;
-    const customerName = body.customerName || body.name || body.customer?.name || 'Cliente Prospecto';
+    const customerFullName =
+      body.customerFullName ||
+      body.customer_full_name ||
+      body.fullName ||
+      body.full_name ||
+      body.customerName ||
+      body.name ||
+      body.customer?.name ||
+      'Cliente Prospecto';
+    const customerName =
+      body.customerName ||
+      body.firstName ||
+      body.first_name ||
+      body.name ||
+      body.customer?.name ||
+      customerFullName;
     const customerEmail = body.customerEmail || body.email || body.customer?.email;
     const companyName = body.companyName || 'Empresa Prospecto';
     const businessSector = body.industry || body.businessSector;
@@ -126,7 +141,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
       const { data: seedResult, error: seedError } = await supabaseAdmin.rpc('seed_outbound_lead', {
         p_organization_id: organizationId,
         p_phone_e164: phoneE164,
-        p_full_name: String(customerName),
+        p_full_name: String(customerFullName),
         p_email: customerEmail ? String(customerEmail) : null,
         p_business_name: String(companyName),
         p_business_sector: businessSector ? String(businessSector) : null,
@@ -223,7 +238,7 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
             p_conversation_id: result.callId,
             p_provider_call_id: result.callId,
             p_caller_phone_e164: phoneE164,
-            p_full_name: String(customerName),
+            p_full_name: String(customerFullName),
             p_email: customerEmail ? String(customerEmail) : null,
             p_business_name: String(companyName),
             p_business_sector: businessSector ? String(businessSector) : null,

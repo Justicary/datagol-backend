@@ -565,5 +565,69 @@ describe('POST /api/voice/outbound', () => {
                 if (contact?.id) await supabaseAdmin.from('contacts').delete().eq('id', contact.id);
             }
         });
+
+        it('cuando viene customerFullName y customerName distintos, persiste customerFullName en contacts y leads', async () => {
+            const runId = Date.now();
+            const ip = `10.6.${runId % 200}.4`;
+            const phone = `+52225${String((runId + 3) % 10000000).padStart(7, '0')}`;
+            const fullName = 'Víctor Eduardo Mancera Gallardo';
+            const firstName = 'Víctor';
+
+            let capturedVoiceParams: any = null;
+            mockTriggerOutboundCall(async (params) => {
+                capturedVoiceParams = params;
+                return { callId: `conv_fullname_${runId}` };
+            });
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/voice/outbound',
+                    headers: { 'x-forwarded-for': ip },
+                    payload: {
+                        organizationId: REAL_ORG_ID,
+                        customerPhone: phone,
+                        customerName: firstName,
+                        customerFullName: fullName,
+                        customerEmail: `victor_${runId}@example.invalid`,
+                        companyName: 'Datagol Test Corp',
+                        demoObjective: 'Demostración de voz',
+                    },
+                });
+
+                expect(response.statusCode).toBe(200);
+
+                // 1. Verificar que el provider de voz recibió customerName para el saludo
+                expect(capturedVoiceParams).not.toBeNull();
+                expect(capturedVoiceParams.customerName).toBe(firstName);
+
+                // 2. Verificar que en contacts se guardó el nombre completo
+                const { data: contact } = await supabaseAdmin
+                    .from('contacts')
+                    .select('id, full_name')
+                    .eq('organization_id', REAL_ORG_ID)
+                    .eq('phone_e164', phone)
+                    .single();
+
+                expect(contact?.full_name).toBe(fullName);
+
+                // 3. Verificar que en leads se guardó el nombre completo
+                const { data: lead } = await supabaseAdmin
+                    .from('leads')
+                    .select('id, full_name')
+                    .eq('organization_id', REAL_ORG_ID)
+                    .eq('conversation_id', `conv_fullname_${runId}`)
+                    .single();
+
+                expect(lead?.full_name).toBe(fullName);
+            } finally {
+                await app.close();
+                await cleanupAttempts([ip], [phone]);
+                await supabaseAdmin.from('leads').delete().eq('conversation_id', `conv_fullname_${runId}`);
+                await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', `conv_fullname_${runId}`);
+                await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
+            }
+        });
     });
 });

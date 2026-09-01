@@ -225,4 +225,60 @@ describe('2.2/4 — process-call-completed: condiciones de disparo de las notifi
             if (contact?.id) await supabaseAdmin.from('contacts').delete().eq('id', contact.id);
         }
     });
+
+    it('no sobreescribe el full_name existente del contacto con el nombre verbalizado o parcial que entrega el análisis de ElevenLabs', async () => {
+        const runId = Date.now();
+        const conversationId = `notif-trigger:${runId}:preserve-fullname`;
+        const testPhone = `+52226${String(runId % 10000000).padStart(7, '0')}`;
+        const existingFullName = 'Víctor Eduardo Mancera Gallardo';
+        const verbalizedShortName = 'Víctor';
+        createdConversationIds.push(conversationId);
+
+        // 1. Crear contacto previo con el nombre completo
+        const { data: contact } = await supabaseAdmin
+            .from('contacts')
+            .insert({
+                organization_id: REAL_ORG_ID,
+                phone_e164: testPhone,
+                full_name: existingFullName,
+            })
+            .select('id')
+            .single();
+
+        try {
+            // 2. Simular webhook post-call donde el análisis de ElevenLabs extrajo solo "Víctor"
+            const webhookEventId = await insertWebhookEvent(conversationId, {
+                telefono_contacto_prospecto: { value: testPhone },
+                nombre_completo_prospecto: { value: verbalizedShortName },
+                motivo_consulta: { value: 'Demostración de producto' },
+                requiere_seguimiento: { value: false },
+            });
+
+            const { fastify } = buildFakeFastify();
+            await processCallCompletedHandler(fastify, buildJob(webhookEventId));
+
+            // 3. Verificar que contacts.full_name NO se sobreescribió
+            const { data: updatedContact } = await supabaseAdmin
+                .from('contacts')
+                .select('full_name')
+                .eq('id', contact?.id)
+                .single();
+
+            expect(updatedContact?.full_name).toBe(existingFullName);
+
+            // 4. Verificar que el lead asociado al conversationId también preserva el full_name completo
+            const { data: lead } = await supabaseAdmin
+                .from('leads')
+                .select('full_name')
+                .eq('organization_id', REAL_ORG_ID)
+                .eq('conversation_id', conversationId)
+                .single();
+
+            expect(lead?.full_name).toBe(existingFullName);
+        } finally {
+            await supabaseAdmin.from('leads').delete().eq('conversation_id', conversationId);
+            await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', conversationId);
+            if (contact?.id) await supabaseAdmin.from('contacts').delete().eq('id', contact.id);
+        }
+    });
 });
