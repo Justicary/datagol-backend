@@ -501,5 +501,69 @@ describe('POST /api/voice/outbound', () => {
                 await supabaseAdmin.from('contacts').delete().eq('phone_e164', phone);
             }
         });
+
+        it('cuando action es confirm_appointment y viene appointmentId, actualiza confirmation_requested_at en la cita', async () => {
+            const runId = Date.now();
+            const ip = `10.6.${runId % 200}.3`;
+            const phone = `+52224${String((runId + 2) % 10000000).padStart(7, '0')}`;
+
+            mockTriggerOutboundCall(async () => {
+                return { callId: `conv_confirm_appt_${runId}` };
+            });
+
+            const { data: contact } = await supabaseAdmin
+                .from('contacts')
+                .insert({ organization_id: REAL_ORG_ID, phone_e164: phone, full_name: 'Cliente Confirmación' })
+                .select('id')
+                .single();
+
+            const { data: appt } = await supabaseAdmin
+                .from('appointments')
+                .insert({
+                    organization_id: REAL_ORG_ID,
+                    contact_id: contact?.id,
+                    customer_name: 'Cliente Confirmación',
+                    customer_phone: phone,
+                    start_time: new Date(Date.now() + 86400000).toISOString(),
+                    end_time: new Date(Date.now() + 86400000 + 1800000).toISOString(),
+                    status: 'programada',
+                })
+                .select('id')
+                .single();
+
+            const app = await buildTestApp();
+            try {
+                const response = await app.inject({
+                    method: 'POST',
+                    url: '/api/voice/outbound',
+                    headers: { 'x-forwarded-for': ip },
+                    payload: {
+                        organizationId: REAL_ORG_ID,
+                        customerPhone: phone,
+                        customerName: 'Cliente Confirmación',
+                        action: 'confirm_appointment',
+                        appointmentId: appt?.id,
+                        demoObjective: 'Confirmación de cita agendada',
+                    },
+                });
+
+                expect(response.statusCode).toBe(200);
+
+                const { data: updatedAppt } = await supabaseAdmin
+                    .from('appointments')
+                    .select('confirmation_requested_at')
+                    .eq('id', appt?.id)
+                    .single();
+
+                expect(updatedAppt?.confirmation_requested_at).toBeTruthy();
+            } finally {
+                await app.close();
+                await cleanupAttempts([ip], [phone]);
+                if (appt?.id) await supabaseAdmin.from('appointments').delete().eq('id', appt.id);
+                await supabaseAdmin.from('leads').delete().eq('conversation_id', `conv_confirm_appt_${runId}`);
+                await supabaseAdmin.from('call_logs').delete().eq('provider_call_id', `conv_confirm_appt_${runId}`);
+                if (contact?.id) await supabaseAdmin.from('contacts').delete().eq('id', contact.id);
+            }
+        });
     });
 });

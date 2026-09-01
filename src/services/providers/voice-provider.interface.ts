@@ -7,6 +7,8 @@ export interface OutboundCallParams {
   companyName: string;
   businessSector?: string;
   demoObjective: string;
+  leadSource?: string;
+  sourceDetail?: string;
   customVariables?: Record<string, unknown>;
 }
 

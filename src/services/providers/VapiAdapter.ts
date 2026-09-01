@@ -33,11 +33,16 @@ export class VapiAdapter implements IVoiceProvider {
       customer: {
         number: params.customerPhone,
         name: params.customerName,
+        email: params.customerEmail,
       },
       assistantOverrides: {
         variableValues: {
           customerName: params.customerName,
+          customerEmail: params.customerEmail,
           companyName: params.companyName,
+          businessSector: params.businessSector,
+          leadSource: params.leadSource,
+          sourceDetail: params.sourceDetail,
           demoObjective: params.demoObjective,
           ...params.customVariables,
         },

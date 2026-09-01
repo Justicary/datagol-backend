@@ -4,7 +4,7 @@ import { mapElevenLabsPayload } from '../services/call-payload-mapper.js';
 import { extractTimezoneFromElevenLabsPayload } from '../services/elevenlabs-timezone.js';
 import { geocodeAddress } from '../services/geocoding.js';
 import { resolveCallUsageEntries } from '../services/usage-registration.js';
-import { LEAD_TEMPERATURES, LEAD_CHANNELS } from '../types/lead-enums.js';
+import { LEAD_TEMPERATURES, LEAD_CHANNELS, LEAD_FOLLOWUP_STATUSES } from '../types/lead-enums.js';
 import { CONTACT_ADDRESS_TYPES } from '../types/contact-enums.js';
 import { NOTIFY_HOT_LEAD_QUEUE } from './notify-hot-lead.js';
 import { SEND_CALL_SUMMARY_QUEUE } from './send-call-summary.js';
@@ -233,6 +233,42 @@ export async function processCallCompletedHandler(fastify: FastifyInstance, job:
                 contactId: result.contact_id,
                 err: whatsappMessagesError.message,
                 msg: 'No se pudo respaldar el transcript en whatsapp_messages',
+            });
+        }
+    }
+
+    // Confirmación de cita: si la llamada concluyó exitosamente como confirmación de cita
+    // o agendamiento sin requerir seguimiento manual adicional, resolver los leads pendientes
+    // asociados al contacto para no dejar tareas duplicadas en "Por atender".
+    if (result?.contact_id && (mapped.inquiryReason === 'Confirmación de cita agendada' || mapped.bookedAppointment) && !mapped.needsFollowup) {
+        try {
+            await fastify.supabaseAdmin
+                .from('leads')
+                .update({
+                    followup_status: LEAD_FOLLOWUP_STATUSES.DESCARTADO,
+                    needs_followup: false,
+                })
+                .eq('organization_id', event.organization_id)
+                .eq('contact_id', result.contact_id)
+                .eq('followup_status', LEAD_FOLLOWUP_STATUSES.PENDIENTE);
+
+            await fastify.supabaseAdmin
+                .from('appointments')
+                .update({
+                    status: 'confirmada',
+                    confirmation_requested_at: new Date().toISOString(),
+                })
+                .eq('organization_id', event.organization_id)
+                .eq('contact_id', result.contact_id)
+                .eq('status', 'programada');
+        } catch (resolveErr: unknown) {
+            const errMessage = resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
+            fastify.log.warn({
+                webhookEventId,
+                organizationId: event.organization_id,
+                contactId: result.contact_id,
+                err: errMessage,
+                msg: 'No se pudieron resolver automáticamente los leads/citas de confirmación pendientes',
             });
         }
     }

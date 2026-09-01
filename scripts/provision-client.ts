@@ -92,8 +92,9 @@ Uso correcto:
         console.log(`🎉 ¡Aprovisionamiento completado con éxito!`);
         console.log(`📄 Archivo de variables generado: ${outputYamlPath}`);
         console.log('=================================================================');
-    } catch (err: any) {
-        console.error('❌ Error fatal durante el aprovisionamiento:', err.message || err);
+    } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error('❌ Error fatal durante el aprovisionamiento:', errorMsg);
         process.exit(1);
     }
 }

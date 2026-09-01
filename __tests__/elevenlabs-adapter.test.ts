@@ -111,6 +111,52 @@ describe('ElevenLabsAdapter.triggerOutboundCall', () => {
         expect(sentBody.conversation_initiation_client_data.dynamic_variables.score).toBe(95);
         expect(sentBody.agent_id).toBe('agent-test-123');
     });
+
+    it('incluye customer_email, business_sector, lead_source, source_detail y verbaliza sutilmente source_detail en custom_greeting', async () => {
+        let sentBody: any = null;
+        vi.spyOn(global, 'fetch').mockImplementation(async (_input, init) => {
+            sentBody = JSON.parse((init as any).body);
+            return new Response(JSON.stringify({ conversation_id: 'conv_detail_123' }), { status: 200 });
+        });
+
+        const adapter = new ElevenLabsAdapter();
+        await adapter.triggerOutboundCall(
+            {
+                ...baseParams,
+                customerEmail: 'prospecto@ejemplo.com',
+                businessSector: 'Ferretería y Construcción',
+                leadSource: 'redes_sociales',
+                sourceDetail: 'Instagram Ads',
+            },
+            orgConfig
+        );
+
+        expect(sentBody.dynamic_variables.customer_email).toBe('prospecto@ejemplo.com');
+        expect(sentBody.dynamic_variables.business_sector).toBe('Ferretería y Construcción');
+        expect(sentBody.dynamic_variables.lead_source).toBe('redes_sociales');
+        expect(sentBody.dynamic_variables.source_detail).toBe('Instagram Ads');
+        expect(sentBody.dynamic_variables.custom_greeting).toContain('Veo que nos encontraste a través de Instagram Ads.');
+        expect(sentBody.conversation_initiation_client_data.dynamic_variables.customer_email).toBe('prospecto@ejemplo.com');
+    });
+
+    it('verbaliza leadSource amigablemente cuando no se proporcionó sourceDetail específico', async () => {
+        let sentBody: any = null;
+        vi.spyOn(global, 'fetch').mockImplementation(async (_input, init) => {
+            sentBody = JSON.parse((init as any).body);
+            return new Response(JSON.stringify({ conversation_id: 'conv_lead_src_123' }), { status: 200 });
+        });
+
+        const adapter = new ElevenLabsAdapter();
+        await adapter.triggerOutboundCall(
+            {
+                ...baseParams,
+                leadSource: 'redes_sociales',
+            },
+            orgConfig
+        );
+
+        expect(sentBody.dynamic_variables.custom_greeting).toContain('Veo que nos encontraste por redes sociales.');
+    });
 });
 
 /**

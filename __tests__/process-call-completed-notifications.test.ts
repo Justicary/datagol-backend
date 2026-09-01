@@ -144,4 +144,85 @@ describe('2.2/4 — process-call-completed: condiciones de disparo de las notifi
         expect(queueNames).toContain(SEND_CALL_SUMMARY_QUEUE);
         expect(queueNames).not.toContain(SEND_PROSPECT_SUMMARY_QUEUE);
     });
+
+    it('llamada de confirmación de cita o agendamiento sin requerir seguimiento resuelve leads pendientes y citas programadas asociadas', async () => {
+        const runId = Date.now();
+        const conversationId = `notif-trigger:${runId}:confirm-appt`;
+        const testPhone = `+52222${String(runId % 10000000).padStart(7, '0')}`;
+        createdConversationIds.push(conversationId);
+
+        // 1. Crear contacto previo con lead pendiente y cita programada
+        const { data: contact } = await supabaseAdmin
+            .from('contacts')
+            .insert({
+                organization_id: REAL_ORG_ID,
+                phone_e164: testPhone,
+                full_name: 'Víctor Prueba',
+            })
+            .select('id')
+            .single();
+
+        const { data: prevLead } = await supabaseAdmin
+            .from('leads')
+            .insert({
+                organization_id: REAL_ORG_ID,
+                contact_id: contact?.id,
+                channel: 'voice',
+                inquiry_reason: 'Agendamiento de cita en vivo',
+                followup_status: 'pendiente',
+                needs_followup: true,
+            })
+            .select('id')
+            .single();
+
+        const { data: appt } = await supabaseAdmin
+            .from('appointments')
+            .insert({
+                organization_id: REAL_ORG_ID,
+                contact_id: contact?.id,
+                customer_name: 'Víctor Prueba',
+                customer_phone: testPhone,
+                start_time: new Date(Date.now() + 86400000).toISOString(),
+                end_time: new Date(Date.now() + 86400000 + 1800000).toISOString(),
+                status: 'programada',
+            })
+            .select('id')
+            .single();
+
+        try {
+            const webhookEventId = await insertWebhookEvent(conversationId, {
+                telefono_contacto_prospecto: { value: testPhone },
+                motivo_consulta: { value: 'Confirmación de cita agendada' },
+                requiere_seguimiento: { value: false },
+                cita_programada: { value: true },
+            });
+
+            const { fastify } = buildFakeFastify();
+            await processCallCompletedHandler(fastify, buildJob(webhookEventId));
+
+            // Verificar que el lead previo ya no está pendiente
+            const { data: updatedLead } = await supabaseAdmin
+                .from('leads')
+                .select('followup_status, needs_followup')
+                .eq('id', prevLead?.id)
+                .single();
+
+            expect(updatedLead?.followup_status).toBe('descartado');
+            expect(updatedLead?.needs_followup).toBe(false);
+
+            // Verificar que la cita pasó a confirmada
+            const { data: updatedAppt } = await supabaseAdmin
+                .from('appointments')
+                .select('status, confirmation_requested_at')
+                .eq('id', appt?.id)
+                .single();
+
+            expect(updatedAppt?.status).toBe('confirmada');
+            expect(updatedAppt?.confirmation_requested_at).toBeTruthy();
+        } finally {
+            if (appt?.id) await supabaseAdmin.from('appointments').delete().eq('id', appt.id);
+            if (prevLead?.id) await supabaseAdmin.from('leads').delete().eq('id', prevLead.id);
+            if (contact?.id) await supabaseAdmin.from('contacts').delete().eq('id', contact.id);
+        }
+    });
 });

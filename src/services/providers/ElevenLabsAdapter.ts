@@ -69,11 +69,36 @@ export class ElevenLabsAdapter implements IVoiceProvider {
       }
     }
 
-    const disclaimerGreeting = `Hola ${params.customerName}, le saluda Sofía de ${params.companyName}, un asistente virtual con Inteligencia Artificial. ${params.demoObjective}`;
+    let sourceMention = '';
+    if (params.sourceDetail && params.sourceDetail.trim()) {
+      sourceMention = ` Veo que nos encontraste a través de ${params.sourceDetail.trim()}.`;
+    } else if (
+      params.leadSource &&
+      params.leadSource.trim() &&
+      params.leadSource !== 'desconocido' &&
+      params.leadSource !== 'sitio_web'
+    ) {
+      const sourceLabels: Record<string, string> = {
+        anuncio_pagado: 'nuestro anuncio',
+        busqueda_google: 'Google',
+        redes_sociales: 'redes sociales',
+        referido: 'una recomendación',
+        letrero_fisico: 'nuestro letrero',
+        directorio: 'el directorio',
+      };
+      const label = sourceLabels[params.leadSource] || params.leadSource.trim();
+      sourceMention = ` Veo que nos encontraste por ${label}.`;
+    }
+
+    const disclaimerGreeting = `Hola ${params.customerName}, te saluda Camila de ${params.companyName}. ${sourceMention} ${params.demoObjective}`;
 
     const dynamicVariables: Record<string, unknown> = {
       customer_name: params.customerName,
+      customer_email: params.customerEmail || '',
       company_name: params.companyName,
+      business_sector: params.businessSector || '',
+      lead_source: params.leadSource || '',
+      source_detail: params.sourceDetail || '',
       demo_objective: params.demoObjective,
       custom_greeting: disclaimerGreeting,
       caller_phone: callerNumber,

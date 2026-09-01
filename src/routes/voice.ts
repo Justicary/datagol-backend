@@ -150,6 +150,28 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
       contactId = (seedResult as any).contact_id ?? null;
     }
 
+    const isAppointmentConfirmation =
+      body.action === 'confirm_appointment' ||
+      customVariables?.action === 'confirm_appointment' ||
+      body.demoObjective === 'Confirmación de cita agendada';
+    const appointmentId =
+      body.appointmentId ||
+      body.appointment_id ||
+      customVariables?.appointmentId ||
+      customVariables?.appointment_id;
+
+    if (organizationId && appointmentId && isAppointmentConfirmation) {
+      try {
+        await supabaseAdmin
+          .from('appointments')
+          .update({ confirmation_requested_at: new Date().toISOString() })
+          .eq('id', String(appointmentId))
+          .eq('organization_id', organizationId);
+      } catch (apptErr) {
+        request.log.warn({ err: apptErr, appointmentId, organizationId }, 'No se pudo actualizar confirmation_requested_at en la cita');
+      }
+    }
+
     // Resolver proveedor activo ('elevenlabs' o 'vapi', o el configurado en body / org / env)
     const activeProviderType =
       body.provider ||
@@ -178,6 +200,8 @@ export const voiceRoutes: FastifyPluginAsync = async (fastify) => {
           companyName: String(companyName),
           businessSector: businessSector ? String(businessSector) : undefined,
           demoObjective: String(demoObjective),
+          leadSource,
+          sourceDetail: sourceDetail ? String(sourceDetail) : undefined,
           customVariables: mergedCustomVariables,
         },
         orgConfig
