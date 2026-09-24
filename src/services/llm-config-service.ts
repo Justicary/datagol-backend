@@ -175,7 +175,6 @@ export async function recordLlmUsage(
                 unit_type: 'llm_input_token',
                 quantity: result.inputTokens,
                 unit_rate_usd: unitRateUsd,
-                amount_usd: unitRateUsd * result.inputTokens,
                 occurred_at: now.toISOString(),
                 metadata: { model: config.model, provider: config.provider },
             });
@@ -190,14 +189,17 @@ export async function recordLlmUsage(
                 unit_type: 'llm_output_token',
                 quantity: result.outputTokens,
                 unit_rate_usd: unitRateUsd,
-                amount_usd: unitRateUsd * result.outputTokens,
                 occurred_at: now.toISOString(),
                 metadata: { model: config.model, provider: config.provider },
             });
         }
 
         if (rows.length > 0) {
-            await fastify.supabaseAdmin.from('usage_events').insert(rows);
+            // `amount_usd` no se envía: es columna generada (quantity × unit_rate_usd).
+            const { error } = await fastify.supabaseAdmin.from('usage_events').insert(rows);
+            if (error) {
+                fastify.log.warn({ err: error.message, organizationId }, '[LlmConfig] Falló el registro de consumo en usage_events');
+            }
         }
     } catch (err) {
         fastify.log.warn({ err, organizationId }, '[LlmConfig] Falló el registro de consumo en usage_events');

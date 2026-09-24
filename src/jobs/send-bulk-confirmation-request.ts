@@ -185,17 +185,20 @@ async function sendPlainConfirmationRequestWhatsApp(
             const now = new Date();
             const rate = await getRate(fastify, USAGE_EVENT_PROVIDERS.META, 'wa_service_mx', now);
             if (rate && rate.unitRateUsd > 0) {
-                await fastify.supabaseAdmin.from('usage_events').insert({
+                // `amount_usd` no se envía: es columna generada (quantity × unit_rate_usd).
+                const { error: meteringInsertError } = await fastify.supabaseAdmin.from('usage_events').insert({
                     organization_id: params.organizationId,
                     provider: USAGE_EVENT_PROVIDERS.META,
                     unit_type: 'wa_service_mx',
                     quantity: 1,
                     unit_rate_usd: rate.unitRateUsd,
-                    amount_usd: rate.unitRateUsd,
                     occurred_at: now.toISOString(),
                     idempotency_key: `wa-bulk-confirm:${waMessageId}`,
                     metadata: { contact_id: params.contactId },
                 });
+                if (meteringInsertError) {
+                    fastify.log.warn({ err: meteringInsertError.message, organizationId: params.organizationId }, '[BulkConfirmation WhatsApp] Falló el registro de consumo en usage_events');
+                }
             }
         } catch (meteringErr) {
             fastify.log.warn({ meteringErr, organizationId: params.organizationId }, '[BulkConfirmation WhatsApp] Falló el registro de consumo en usage_events');

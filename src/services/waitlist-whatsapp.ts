@@ -136,17 +136,20 @@ export async function sendWaitlistOfferWhatsApp(
             const now = new Date();
             const rate = await getRate(fastify, USAGE_EVENT_PROVIDERS.META, unitType, now);
             if (rate && rate.unitRateUsd > 0) {
-                await fastify.supabaseAdmin.from('usage_events').insert({
+                // `amount_usd` no se envía: es columna generada (quantity × unit_rate_usd).
+                const { error: meteringInsertError } = await fastify.supabaseAdmin.from('usage_events').insert({
                     organization_id: organizationId,
                     provider: USAGE_EVENT_PROVIDERS.META,
                     unit_type: unitType,
                     quantity: 1,
                     unit_rate_usd: rate.unitRateUsd,
-                    amount_usd: rate.unitRateUsd,
                     occurred_at: now.toISOString(),
                     idempotency_key: `wa-waitlist-offer:${waMessageId}`,
                     metadata: { contact_id: contactId, template_name: withinWindow ? null : templateName },
                 });
+                if (meteringInsertError) {
+                    fastify.log.warn({ err: meteringInsertError.message, organizationId }, '[Waitlist WhatsApp] Falló el registro de consumo en usage_events');
+                }
             }
         } catch (meteringErr) {
             fastify.log.warn({ meteringErr, organizationId }, '[Waitlist WhatsApp] Falló el registro de consumo en usage_events');

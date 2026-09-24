@@ -197,6 +197,9 @@ describe('Agradecimiento Automático — Canal WhatsApp (Meta API & 24h Window)'
                     unit_rate_usd: 0.008,
                 })
             );
+            // amount_usd es columna generada en Postgres: enviarla hace fallar el insert.
+            const usageRow = mockInsert.mock.calls.map((call: unknown[]) => call[0] as Record<string, unknown>).find((row: Record<string, unknown>) => row?.provider === 'meta');
+            expect(usageRow).not.toHaveProperty('amount_usd');
         });
 
         it('fuera de ventana de 24h SIN plantilla configurada: omite deliberadamente con skipReason sin lanzar excepción', async () => {
