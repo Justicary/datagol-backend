@@ -38,7 +38,10 @@
     "src/lib/signing-keys.ts",
     "src/lib/platform-admin.ts",
     "src/routes/control/admin-passport.ts",
-    "src/routes/admin/sso.ts"
+    "src/routes/admin/sso.ts",
+    "src/services/jev/openrouter-key-client.ts",
+    "src/services/jev-config-service.ts",
+    "src/routes/organization-jev.ts"
   ],
   "thresholds": {
     "high": 90,
