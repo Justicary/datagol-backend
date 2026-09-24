@@ -3,11 +3,23 @@ import { fetchWithTimeout } from '../llm/http.js';
 import { LlmProviderError } from '../llm/llm-provider.interface.js';
 
 /**
- * Base de la API de OpenRouter. Jev se consume únicamente a través de
- * OpenRouter (cuenta BYOK de cada organización), así que el endpoint es fijo
- * — a diferencia del LLM BYOK, aquí no se acepta un `baseUrl` configurable.
+ * Origen de la API de OpenRouter. Jev se consume únicamente a través de
+ * OpenRouter (cuenta BYOK de cada organización), así que es fijo — a
+ * diferencia del LLM BYOK, aquí no se acepta un `baseUrl` configurable. Las
+ * rutas varían por versión (`/api/v1/key`, `/api/alpha/decisions`), por eso
+ * se guarda solo el origen.
  */
-export const OPENROUTER_API_BASE_URL = 'https://openrouter.ai/api/v1';
+export const OPENROUTER_ORIGIN = 'https://openrouter.ai';
+
+/**
+ * Headers de atribución de OpenRouter. `X-OpenRouter-Title` es el nombre que
+ * usa el SDK oficial (@openrouter/sdk 1.3.x); `X-Title` es el nombre anterior
+ * que sigue usando OpenAiCompatibleAdapter.
+ */
+export const OPENROUTER_ATTRIBUTION_HEADERS = {
+    'HTTP-Referer': 'https://datagol.net',
+    'X-OpenRouter-Title': 'Datagol',
+} as const;
 
 /**
  * Respuesta de `GET /api/v1/key` de OpenRouter (información de la llave que
@@ -41,14 +53,11 @@ export interface OpenRouterKeyInfo {
 export async function fetchOpenRouterKeyInfo(apiKey: string): Promise<OpenRouterKeyInfo> {
     let response: Response;
     try {
-        response = await fetchWithTimeout(`${OPENROUTER_API_BASE_URL}/key`, {
+        response = await fetchWithTimeout(`${OPENROUTER_ORIGIN}/api/v1/key`, {
             method: 'GET',
             headers: {
                 Authorization: `Bearer ${apiKey}`,
-                // Headers de atribución recomendados por OpenRouter — mismos que
-                // usa OpenAiCompatibleAdapter.
-                'HTTP-Referer': 'https://datagol.net',
-                'X-Title': 'Datagol',
+                ...OPENROUTER_ATTRIBUTION_HEADERS,
             },
         });
     } catch {
@@ -65,7 +74,7 @@ export async function fetchOpenRouterKeyInfo(apiKey: string): Promise<OpenRouter
     }
 
     if (!response.ok) {
-        throw classifyError(response.status, extractErrorMessage(json));
+        throw classifyError(response.status, extractOpenRouterErrorMessage(json));
     }
 
     const parsed = openRouterKeyInfoSchema.safeParse(json);
@@ -84,7 +93,8 @@ const openRouterErrorSchema = z.object({
     error: z.object({ message: z.string().optional() }),
 });
 
-function extractErrorMessage(json: unknown): string | undefined {
+/** Mensaje crudo de un cuerpo de error de OpenRouter — solo para logs internos. */
+export function extractOpenRouterErrorMessage(json: unknown): string | undefined {
     const parsed = openRouterErrorSchema.safeParse(json);
     return parsed.success ? parsed.data.error.message : undefined;
 }

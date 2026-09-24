@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { fetchOpenRouterKeyInfo, OPENROUTER_API_BASE_URL } from '../src/services/jev/openrouter-key-client.js';
+import { fetchOpenRouterKeyInfo, OPENROUTER_ORIGIN } from '../src/services/jev/openrouter-key-client.js';
 
 function mockResponse(status: number, body: unknown): Response {
     return {
@@ -30,12 +30,13 @@ describe('services/jev/openrouter-key-client.ts', () => {
 
         expect(info).toEqual({ label: 'datagol-org', limitRemaining: 12.5, isFreeTier: false });
         const [url, init] = vi.mocked(global.fetch).mock.calls[0];
-        expect(url).toBe(`${OPENROUTER_API_BASE_URL}/key`);
+        expect(url).toBe('https://openrouter.ai/api/v1/key');
+        expect(OPENROUTER_ORIGIN).toBe('https://openrouter.ai');
         expect(init?.method).toBe('GET');
         const headers = init?.headers as Record<string, string>;
         expect(headers.Authorization).toBe('Bearer sk-or-v1-real');
         expect(headers['HTTP-Referer']).toBe('https://datagol.net');
-        expect(headers['X-Title']).toBe('Datagol');
+        expect(headers['X-OpenRouter-Title']).toBe('Datagol');
     });
 
     it('éxito: llave sin tope de gasto (limit_remaining null) → limitRemaining null', async () => {
