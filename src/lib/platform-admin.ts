@@ -3,15 +3,32 @@ import { supabaseAdmin } from './supabase.js';
 import { verifyAdminSession } from './admin-session.js';
 
 /**
+ * ¿Está permitido el atajo de desarrollo `x-platform-admin: true`? Requiere
+ * AMBAS condiciones: `ALLOW_DEV_ADMIN_BYPASS=true` y `NODE_ENV` distinto de
+ * `production`. Se lee `process.env` en cada llamada (no la configuración
+ * cacheada) para que ninguna ruta de código lo habilite por accidente y las
+ * pruebas puedan verificar ambos lados. `validateEnv()` además impide
+ * arrancar en producción con la bandera encendida.
+ */
+export function isDevAdminBypassEnabled(): boolean {
+    return process.env.ALLOW_DEV_ADMIN_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
+}
+
+/**
  * Middleware para verificar si el usuario llamador es Administrador de la Plataforma.
- * Compartido por todas las rutas bajo `routes/admin/**`.
+ * Compartido por todas las rutas bajo `routes/admin/**` y `/control/**`.
  */
 export async function isPlatformAdmin(request: FastifyRequest, reply: FastifyReply) {
     const authHeader = request.headers.authorization;
-    const isLocalDevAdmin = request.headers['x-platform-admin'] === 'true';
 
-    if (isLocalDevAdmin) {
-        return;
+    if (request.headers['x-platform-admin'] === 'true') {
+        if (isDevAdminBypassEnabled()) {
+            return;
+        }
+        // Sin el atajo habilitado, el header se ignora y la petición sigue
+        // el camino normal de autenticación. Se registra: en un entorno real
+        // es un intento de saltarse la autenticación.
+        request.log.warn({ ip: request.ip, url: request.url, msg: 'Header x-platform-admin ignorado: el atajo de desarrollo no está habilitado' });
     }
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {

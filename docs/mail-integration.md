@@ -107,7 +107,8 @@ replicando el patrón `INSERT ... ON CONFLICT` que ya usa
 
 Todas requieren `isPlatformAdmin` (header `Authorization: Bearer <jwt>` de
 un usuario `platform_admin`, o `x-platform-admin: true` en desarrollo
-local).
+local con `ALLOW_DEV_ADMIN_BYPASS=true` y `NODE_ENV` distinto de
+`production`).
 
 ### `GET /api/admin/email-accounts/organization/:orgId`
 

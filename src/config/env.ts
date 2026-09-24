@@ -50,6 +50,16 @@ const envSchema = z.object({
     // `true` en api.datagol.net. Ver Fase F — con la bandera apagada,
     // ninguna ruta /control/** se registra y no se exige ninguna de las
     // variables de abajo.
+    // Atajo SOLO de desarrollo local: si es 'true' (y NODE_ENV no es
+    // 'production'), el header `x-platform-admin: true` autentica como
+    // superadmin sin token (src/lib/platform-admin.ts). Apagado por defecto;
+    // con NODE_ENV=production la aplicación se niega a arrancar si está
+    // encendido (ver validateEnv abajo).
+    ALLOW_DEV_ADMIN_BYPASS: z
+        .string()
+        .default('false')
+        .transform((val) => val === 'true'),
+
     CONTROL_PLANE: z
         .string()
         .default('false')
@@ -130,6 +140,15 @@ export function validateEnv(): EnvConfig {
             logger.error({ missing }, '[Env] CONTROL_PLANE activo sin llaves de firma configuradas');
             throw new Error(message);
         }
+    }
+
+    // El bypass de superadmin sin token nunca puede quedar encendido en
+    // producción: se falla al arrancar, no a mitad de una petición.
+    if (result.data.ALLOW_DEV_ADMIN_BYPASS && process.env.NODE_ENV === 'production') {
+        const message =
+            'Error fatal: ALLOW_DEV_ADMIN_BYPASS=true con NODE_ENV=production. El atajo `x-platform-admin` autentica como superadmin sin token y solo se permite en desarrollo local.';
+        logger.error('[Env] ALLOW_DEV_ADMIN_BYPASS encendido en producción');
+        throw new Error(message);
     }
 
     cachedEnv = result.data;

@@ -20,3 +20,8 @@ if (!process.env.CONTROL_PLANE_SIGNING_KEYS || !process.env.LICENSE_PUBLIC_KEYS)
 if (!process.env.ADMIN_PASSPORT_SIGNING_KEYS || !process.env.ADMIN_PASSPORT_PUBLIC_KEYS) {
     await setTestAdminPassportKeyEnv('v1');
 }
+
+// Las suites de rutas admin/** usan el atajo local `x-platform-admin: true`
+// (src/lib/platform-admin.ts), que ahora exige habilitarse explícitamente.
+// NODE_ENV en Vitest es 'test', nunca 'production'.
+process.env.ALLOW_DEV_ADMIN_BYPASS ??= 'true';

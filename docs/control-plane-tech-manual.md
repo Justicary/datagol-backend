@@ -489,6 +489,8 @@ ADMIN_PASSPORT_PUBLIC_KEYS="{\"v1\":\"-----BEGIN PUBLIC KEY-----\\n...\\n-----EN
 
 Comprobar que las rutas del Plano de Control responden usando el encabezado de desarrollo `x-platform-admin: true`:
 
+> El encabezado solo funciona con `ALLOW_DEV_ADMIN_BYPASS=true` en el `.env` local **y** `NODE_ENV` distinto de `production` (`pnpm dev` usa `development`). Sin la variable, el encabezado se ignora y se exige un token real. Con `NODE_ENV=production` la aplicación se niega a arrancar si la variable está encendida.
+
 ```bash
 # 1. Health check
 curl -i http://localhost:3000/health
