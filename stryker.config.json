@@ -41,7 +41,9 @@
     "src/routes/admin/sso.ts",
     "src/services/jev/openrouter-key-client.ts",
     "src/services/jev-config-service.ts",
-    "src/routes/organization-jev.ts"
+    "src/routes/organization-jev.ts",
+    "src/services/jev/jev-decisions-client.ts",
+    "src/services/jev-decision-service.ts"
   ],
   "thresholds": {
     "high": 90,

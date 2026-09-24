@@ -43,6 +43,18 @@ export function llmOutputTokenUnitType(model: string): string {
     return `llm_output_token_${model}`;
 }
 
+/**
+ * Tokens de Jev (TypeSafe AI) vía OpenRouter. A diferencia de los tokens de
+ * LLM de ElevenLabs, el unit_type es fijo: el modelo se guarda en
+ * `metadata.model` (db/migrations/73_jev_metering.sql). No forman parte de
+ * USAGE_EVENT_UNIT_TYPES porque ese conjunto es el que sabe registrar el job
+ * `process-call-completed`.
+ */
+export const JEV_USAGE_UNIT_TYPES = {
+    INPUT_TOKEN: 'jev_input_token',
+    OUTPUT_TOKEN: 'jev_output_token',
+} as const;
+
 export type UsageEventUnitType = (typeof USAGE_EVENT_UNIT_TYPES)[keyof typeof USAGE_EVENT_UNIT_TYPES];
 
 export const ALL_USAGE_EVENT_UNIT_TYPES: readonly UsageEventUnitType[] = Object.values(USAGE_EVENT_UNIT_TYPES);

@@ -16,6 +16,8 @@ export const USAGE_EVENT_PROVIDERS = {
     TELNYX: 'telnyx',
     META: 'meta',
     LLM: 'llm',
+    // Jev (TypeSafe AI) vía OpenRouter — db/migrations/73_jev_metering.sql.
+    JEV: 'jev',
 } as const;
 
 export type UsageEventProvider = (typeof USAGE_EVENT_PROVIDERS)[keyof typeof USAGE_EVENT_PROVIDERS];
