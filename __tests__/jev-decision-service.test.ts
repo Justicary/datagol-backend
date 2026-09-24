@@ -117,7 +117,6 @@ describe('services/jev-decision-service.ts', () => {
                 unit_type: 'jev_input_token',
                 quantity: 100,
                 unit_rate_usd: 0.000001,
-                amount_usd: 0.000001 * 100,
                 occurred_at: occurredAt,
                 metadata: { model: DECISION.model, decision_id: 'dec_1', questions: ['is_urgent'], provider_cost_usd: 0.00003 },
             },
@@ -127,12 +126,13 @@ describe('services/jev-decision-service.ts', () => {
                 unit_type: 'jev_output_token',
                 quantity: 4,
                 unit_rate_usd: 0.000001,
-                amount_usd: 0.000001 * 4,
                 occurred_at: occurredAt,
                 metadata: { model: DECISION.model, decision_id: 'dec_1', questions: ['is_urgent'] },
             },
         ]);
         expect(log.warn).not.toHaveBeenCalled();
+        // amount_usd es columna generada en Postgres: enviarla hace fallar el insert.
+        for (const row of usageInserts) expect(row).not.toHaveProperty('amount_usd');
     });
 
     it('sin tarifa vigente registra con tarifa 0; sin tokens no inserta nada', async () => {
@@ -143,7 +143,7 @@ describe('services/jev-decision-service.ts', () => {
 
         await evaluateJevDecision(fastify, 'org-1', { state: 'x', questions: QUESTIONS });
         expect(usageInserts).toHaveLength(1);
-        expect(usageInserts[0]).toMatchObject({ unit_type: 'jev_input_token', unit_rate_usd: 0, amount_usd: 0 });
+        expect(usageInserts[0]).toMatchObject({ unit_type: 'jev_input_token', unit_rate_usd: 0 });
 
         const insertSpy = vi.mocked(fastify.supabaseAdmin.from);
         insertSpy.mockClear();
