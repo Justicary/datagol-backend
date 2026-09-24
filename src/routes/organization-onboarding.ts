@@ -280,6 +280,9 @@ export async function organizationOnboardingRoutes(fastify: FastifyInstance) {
             // llave se guarda aquí igual que las demás; la validación en vivo
             // vive aparte en POST /api/organizations/:id/llm/validate.
             llm: SECRET_KEYS.LLM_API_KEY,
+            // BYOK de Jev vía OpenRouter — llave aparte de la del LLM; la
+            // validación en vivo vive en POST /api/organizations/:id/jev/validate.
+            jev: SECRET_KEYS.JEV_API_KEY,
         };
         const { provider, value } = bodyResult.data;
         const secretKey = PROVIDER_TO_SECRET_KEY[provider];

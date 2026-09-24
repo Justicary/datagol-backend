@@ -18,6 +18,9 @@ export const SECRET_KEYS = {
     TOOL_WEBHOOK_SECRET: 'tool_webhook_secret',
     GOOGLE_MAPS_KEY: 'google_maps_key',
     LLM_API_KEY: 'llm_api_key',
+    // BYOK de Jev (TypeSafe AI) vía OpenRouter — aparte de LLM_API_KEY porque
+    // Jev no redacta texto (db/migrations/72_jev_byok.sql).
+    JEV_API_KEY: 'jev_api_key',
 } as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[keyof typeof SECRET_KEYS];

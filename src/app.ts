@@ -23,6 +23,7 @@ import organizationMetricsRoutes from './routes/organization-metrics.js';
 import organizationEmailRoutes from './routes/organization-email.js';
 import organizationThankYouRoutes from './routes/organization-thank-you.js';
 import organizationLlmRoutes from './routes/organization-llm.js';
+import organizationJevRoutes from './routes/organization-jev.js';
 import organizationReportsRoutes from './routes/organization-reports.js';
 import organizationCompetitorSitesRoutes from './routes/organization-competitor-sites.js';
 import organizationAttachmentsRoutes from './routes/organization-attachments.js';
@@ -227,6 +228,8 @@ export async function buildApp() {
     // Agradecimiento automático omnicanal y gestión de adjuntos
     await app.register(organizationThankYouRoutes);
     await app.register(organizationLlmRoutes);
+    // BYOK de Jev (TypeSafe AI) vía OpenRouter — configuración aparte del LLM
+    await app.register(organizationJevRoutes);
     await app.register(organizationReportsRoutes);
     await app.register(organizationCompetitorSitesRoutes);
     await app.register(organizationAttachmentsRoutes);
