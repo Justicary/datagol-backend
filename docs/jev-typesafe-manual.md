@@ -77,6 +77,18 @@ Todas las rutas exigen el permiso `manage_credentials` (mismo RBAC que
 
 4. **Consultar**: `GET /api/organizations/:id/jev-config`.
 
+5. **Prueba de humo de punta a punta** (sin desplegar, desde Node):
+
+   ```bash
+   pnpm tsx scripts/jev-smoke-test.ts --org <organization_id> [--model ~typesafe/jev-latest]
+   ```
+
+   Verifica tarifas `jev` (migración 73), guarda el modelo si falta, valida
+   la llave, hace **una decisión real** con el ejemplo de §3 (noul + choice +
+   score) y comprueba los asientos en `usage_events`. Consume tokens reales
+   (centavos) y deja dos filas append-only a tarifa 0. Termina con código 1 en
+   el primer paso que falle.
+
 Estado "validado" (`isJevConfigValidated`): modelo configurado,
 `validatedAt` no nulo y `lastError` nulo.
 
@@ -262,6 +274,7 @@ Del análisis inicial (ninguno implementado todavía):
 | `src/services/jev-config-service.ts` | `integration_settings.jev`, validación de credenciales |
 | `src/services/jev-decision-service.ts` | `evaluateJevDecision()`: config + llave + llamada + metering |
 | `src/routes/organization-jev.ts`, `src/schemas/jev.ts` | Rutas `/jev-config` y `/jev/validate` |
+| `scripts/jev-smoke-test.ts` | Prueba de humo contra OpenRouter y la base real |
 | `db/migrations/72_jev_byok.sql`, `73_jev_metering.sql` | `jev_api_key`, proveedor `jev`, tarifas 0 |
 | `__tests__/jev-*.test.ts`, `__tests__/organization-jev-routes.test.ts` | Pruebas unitarias (sin base de datos) |
 
