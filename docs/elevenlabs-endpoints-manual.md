@@ -180,6 +180,27 @@ Es el webhook que ElevenLabs dispara automáticamente **al terminar la conversac
   3. Reconstruye el HMAC y valida la firma antes de procesar el JSON.
   4. Responde **200 OK** de inmediato y encola el trabajo pesado en `pg-boss` (`process-call-completed`).
 
+### Workspace compartido (grupo de credenciales) y agentes secundarios
+Si `<WEBHOOK_TOKEN>` es el de un **grupo** (`credential_groups.webhook_token`), el token no identifica a la organización. Tras validar la firma con el secreto del dueño del grupo, la organización se resuelve con `resolveGroupOrganization()` (`src/services/elevenlabs-group-org-resolution.ts`), en este orden:
+
+1. **Agente principal**: `data.agent_id` = `organizations.elevenlabs_agent_id` de una organización del grupo. Si el agente es de una organización de **otro** grupo, se rechaza sin probar respaldos.
+2. **Llamada pre-sembrada**: `data.conversation_id` = `call_logs.provider_call_id`. Cubre las salientes que dispara `POST /api/voice/outbound` con un **agente secundario** (p. ej. el "Agente de Citas"), que siembran `call_logs` con el `conversation_id` real antes de que termine la llamada. La organización de esa fila debe pertenecer al grupo.
+3. **Dueña del grupo, solo si es su única organización.** En un grupo con varias organizaciones no se asume la dueña: una llamada de un agente desconocido podría ser del cliente de otra organización (AGENTS.md §5).
+
+Si nada atribuye la llamada, responde **401** (`agent_id no pertenece a este grupo`) y el log indica el motivo (`reason`). Los respaldos 2 y 3 dejan un log `info` con `via`.
+
+> **Recomendación operativa:** en un grupo con varias organizaciones, un agente secundario que reciba llamadas **entrantes** (sin pre-siembra) seguirá rechazándose. Para esos casos, el agente debe registrarse en la organización correspondiente.
+
+### Backfill de una conversación perdida
+Si un webhook se rechazó y la conversación no llegó a `call_logs`, `scripts/backfill-elevenlabs-conversation.ts` la recupera desde `GET /v1/convai/conversations/:id` y la procesa con el mismo handler que el webhook:
+
+```bash
+pnpm tsx scripts/backfill-elevenlabs-conversation.ts --org <organization_id> --conversation <conversation_id> --dry-run   # solo mapea y muestra
+pnpm tsx scripts/backfill-elevenlabs-conversation.ts --org <organization_id> --conversation <conversation_id>             # persiste, sin notificaciones
+```
+
+Por defecto **no** encola notificaciones (minuta, alerta de prospecto caliente, resumen, agradecimiento): se listan las que se habrían enviado. `--notify` las encola en pg-boss real.
+
 ---
 
 ### Configuración en ElevenLabs (Paso a Paso)
