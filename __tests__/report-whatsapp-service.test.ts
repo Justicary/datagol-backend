@@ -103,6 +103,39 @@ describe('services/report-whatsapp-service.ts', () => {
 
         expect(usageInserts).toHaveLength(1);
         expect(usageInserts[0]).toMatchObject({ provider: 'meta', unit_type: 'wa_utility_mx' });
+        // amount_usd es columna generada en Postgres: enviarla hace fallar el insert.
+        expect(usageInserts[0]).not.toHaveProperty('amount_usd');
+        expect(fastify.log.warn).not.toHaveBeenCalled();
+    });
+
+    it('si el insert de metering devuelve error, el envío sigue siendo exitoso y el error queda en el log', async () => {
+        const { fastify } = buildFakeFastify({ whatsapp_phone_number_id: '123456' });
+        const baseFrom = fastify.supabaseAdmin.from;
+        fastify.supabaseAdmin.from = vi.fn((table: string) =>
+            table === 'usage_events'
+                ? { insert: vi.fn().mockResolvedValue({ error: { message: 'check violation' } }) }
+                : baseFrom(table)
+        );
+        vi.spyOn(secretService, 'getSecret').mockResolvedValue('wa-token');
+        vi.spyOn(rateService, 'getRate').mockResolvedValue({ unitRateUsd: 0.008 } as any);
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({ messages: [{ id: 'wamid.ERR' }] }),
+        } as any);
+
+        const result = await sendWeeklyReportWhatsApp(fastify, {
+            organizationId: 'org-1',
+            reportType: REPORT_TYPES.EXECUTIVE,
+            phoneE164: '+525512345678',
+            templateName: 'reporte_semanal',
+            headline: 'x',
+        });
+
+        expect(result.sent).toBe(true);
+        expect(fastify.log.warn).toHaveBeenCalledWith(
+            { err: 'check violation', organizationId: 'org-1' },
+            '[ReportWhatsApp] Falló el registro de consumo en usage_events'
+        );
     });
 
     it('Meta Graph API retorna error: sent=false con el mensaje de error', async () => {

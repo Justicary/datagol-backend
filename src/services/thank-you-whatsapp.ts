@@ -171,13 +171,13 @@ export async function sendThankYouWhatsApp(
             const now = new Date();
             const rate = await getRate(fastify, USAGE_EVENT_PROVIDERS.META, unitType, now);
             if (rate && rate.unitRateUsd > 0) {
-                await fastify.supabaseAdmin.from('usage_events').insert({
+                // `amount_usd` no se envía: es columna generada (quantity × unit_rate_usd).
+                const { error: meteringInsertError } = await fastify.supabaseAdmin.from('usage_events').insert({
                     organization_id: organizationId,
                     provider: USAGE_EVENT_PROVIDERS.META,
                     unit_type: unitType,
                     quantity: 1,
                     unit_rate_usd: rate.unitRateUsd,
-                    amount_usd: rate.unitRateUsd,
                     occurred_at: now.toISOString(),
                     idempotency_key: `wa-thank-you:${waMessageId}`,
                     metadata: {
@@ -185,6 +185,9 @@ export async function sendThankYouWhatsApp(
                         template_name: withinWindow ? null : whatsappTemplateName,
                     },
                 });
+                if (meteringInsertError) {
+                    fastify.log.warn({ err: meteringInsertError.message, organizationId }, '[WhatsApp] Falló el registro de consumo en usage_events');
+                }
             }
         } catch (meteringErr) {
             fastify.log.warn({ meteringErr, organizationId }, '[WhatsApp] Falló el registro de consumo en usage_events');

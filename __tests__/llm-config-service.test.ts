@@ -108,6 +108,30 @@ describe('services/llm-config-service.ts', () => {
             expect(result).toMatchObject({ success: false, kind: 'not_configured' });
         });
 
+        it('si el insert de metering devuelve error, la validación sigue exitosa y el error queda en el log', async () => {
+            const { fastify } = buildFakeFastify({
+                llm: { provider: 'openrouter', model: 'deepseek/deepseek-v4-flash-0731', baseUrl: 'https://openrouter.ai/api/v1' },
+            });
+            const baseFrom = fastify.supabaseAdmin.from;
+            fastify.supabaseAdmin.from = vi.fn((table: string) =>
+                table === 'usage_events'
+                    ? { insert: vi.fn().mockResolvedValue({ error: { message: 'cannot insert a non-DEFAULT value into column "amount_usd"' } }) }
+                    : baseFrom(table)
+            );
+            vi.spyOn(secretService, 'getSecret').mockResolvedValue('sk-or-real');
+            vi.spyOn(LlmProviderFactory, 'getProvider').mockReturnValue({
+                complete: vi.fn().mockResolvedValue({ text: 'pong', inputTokens: 3, outputTokens: 1 }),
+            });
+
+            const result = await validateLlmCredentials(fastify, 'org-1');
+
+            expect(result.success).toBe(true);
+            expect(fastify.log.warn).toHaveBeenCalledWith(
+                { err: 'cannot insert a non-DEFAULT value into column "amount_usd"', organizationId: 'org-1' },
+                '[LlmConfig] Falló el registro de consumo en usage_events'
+            );
+        });
+
         it('éxito: guarda validatedAt y registra usage_events con tarifa 0', async () => {
             const { fastify, usageInserts, getIntegrationSettings } = buildFakeFastify({
                 llm: { provider: 'openrouter', model: 'deepseek/deepseek-v4-flash-0731', baseUrl: 'https://openrouter.ai/api/v1' },
@@ -133,6 +157,9 @@ describe('services/llm-config-service.ts', () => {
                     expect.objectContaining({ provider: 'llm', unit_type: 'llm_output_token', quantity: 1, unit_rate_usd: 0 }),
                 ])
             );
+            // amount_usd es columna generada en Postgres: enviarla hace fallar el insert.
+            for (const row of usageInserts) expect(row).not.toHaveProperty('amount_usd');
+            expect(fastify.log.warn).not.toHaveBeenCalled();
         });
 
         const cases: Array<{ kind: LlmProviderErrorKind }> = [
