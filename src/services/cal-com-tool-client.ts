@@ -120,7 +120,7 @@ export async function getAvailableSlots(
 
     if (!response.ok) {
         const errText = await response.text();
-        fastify.log.warn({ organizationId, status: response.status, msg: 'Cal.com respondió error en /slots/available' });
+        fastify.log.warn({ organizationId, status: response.status, details: errText, msg: 'Cal.com respondió error en /slots/available' });
         throw new CalProviderError(response.status, errText);
     }
 
@@ -191,7 +191,7 @@ export async function createBooking(
 
     if (!response.ok) {
         const errText = await response.text();
-        fastify.log.warn({ organizationId, status: response.status, msg: 'Cal.com respondió error en POST /bookings' });
+        fastify.log.warn({ organizationId, status: response.status, details: errText, msg: 'Cal.com respondió error en POST /bookings' });
         throw new CalProviderError(response.status, errText);
     }
 
@@ -240,7 +240,7 @@ export async function rescheduleBooking(
             return rescheduleBooking(fastify, organizationId, { ...params, calBookingId: nextUid }, signal);
         }
 
-        fastify.log.warn({ organizationId, status: response.status, msg: 'Cal.com respondió error en /bookings/:id/reschedule' });
+        fastify.log.warn({ organizationId, status: response.status, details: errText, msg: 'Cal.com respondió error en /bookings/:id/reschedule' });
         throw new CalProviderError(response.status, errText);
     }
 
@@ -275,7 +275,7 @@ export async function cancelBooking(
 
     if (!response.ok) {
         const errText = await response.text();
-        fastify.log.warn({ organizationId, status: response.status, msg: 'Cal.com respondió error en /bookings/:id/cancel' });
+        fastify.log.warn({ organizationId, status: response.status, details: errText, msg: 'Cal.com respondió error en /bookings/:id/cancel' });
         throw new CalProviderError(response.status, errText);
     }
 }
@@ -312,7 +312,7 @@ export async function getBooking(
 
     if (!response.ok) {
         const errText = await response.text();
-        fastify.log.warn({ organizationId, calBookingId, status: response.status, msg: 'Cal.com respondió error en GET /bookings/:id' });
+        fastify.log.warn({ organizationId, calBookingId, status: response.status, details: errText, msg: 'Cal.com respondió error en GET /bookings/:id' });
         throw new CalProviderError(response.status, errText);
     }
 

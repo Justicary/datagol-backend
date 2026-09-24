@@ -1445,31 +1445,7 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 |--------|---------|-------|--------|-------|------------|
 | `service_role_only` | ALL | service_role | PERMISSIVE | `true` | `true` |
 
-### `customers`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
-
-### `deployments`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
-
-### `contracts`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
-
-### `licenses`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
-
-### `license_heartbeats`
+### `provisioning_task_templates`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
@@ -1481,13 +1457,19 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 |--------|---------|-------|--------|-------|------------|
 | `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
 
-### `provisioning_task_templates`
+### `deployment_events`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
 
-### `deployment_events`
+### `license_heartbeats`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `licenses`
 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
@@ -1499,3 +1481,20 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 |--------|---------|-------|--------|-------|------------|
 | `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
 
+### `contracts`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `deployments`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `customers`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |

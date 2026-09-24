@@ -8,7 +8,7 @@ Es documento hermano de `AGENTS.md` de `datagol-frontend`. Las secciones de prin
 
 # Project goal
 
-API de orquestación para una plataforma de Agentes de IA de Voz y Automatización Omnicanal bajo modelo Done-For-You (DFY): cada PyME cliente opera su propia infraestructura de proveedores (ElevenLabs, Telnyx, Meta/WhatsApp) y Datagol provee el plano de control, la lógica de negocio y las herramientas (*tools*) que el agente invoca durante la conversación.
+API de orquestación para una plataforma de Agentes de IA de Voz y Automatización Omnicanal bajo modelo Done-For-You (DFY): cada PyME cliente opera su propia infraestructura de proveedores (ElevenLabs, Telnyx, Supabase, Meta/WhatsApp, OpenRouter, Resend) y Datagol provee el plano de control, la lógica de negocio y las herramientas (*tools*) que el agente invoca durante la conversación.
 
 **Restricción rectora del proyecto:** este backend **no toca audio**. ElevenLabs recibe la llamada vía SIP desde Telnyx y gestiona íntegramente el media path. La API es un servicio HTTP de *tool calls* y *webhooks*. Cualquier propuesta de implementar streaming de audio, WebSockets de media o transcodificación debe rechazarse: es responsabilidad del proveedor.
 

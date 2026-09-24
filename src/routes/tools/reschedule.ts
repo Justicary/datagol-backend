@@ -197,7 +197,7 @@ function logDegradedFailure(request: FastifyRequest, organizationId: string, err
     } else if (err instanceof ToolTimeoutError) {
         request.log.warn({ organizationId, msg: 'Tool degradado: timeout reprogramando en Cal.com' });
     } else if (err instanceof CalProviderError) {
-        request.log.warn({ organizationId, status: err.status, msg: 'Tool degradado: Cal.com respondió error' });
+        request.log.warn({ organizationId, status: err.status, details: err.message, msg: 'Tool degradado: Cal.com respondió error' });
     } else {
         request.log.error({ organizationId, errName, errMessage, msg: 'Tool degradado: error inesperado' });
     }

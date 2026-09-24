@@ -51,6 +51,11 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
         }
         const { conversationId, customerName, customerPhone, customerEmail, startTime, timeZone, contactAddressId, serviceAddress } = bodyResult.data;
 
+        request.log.info(
+            { organizationId: auth.organizationId, conversationId, startTime, timeZone, hasPhone: !!customerPhone, hasEmail: !!customerEmail },
+            'Procesando tool booking'
+        );
+
         if (!isValidDateString(startTime)) {
             return reply.status(400).send({ error: 'BadRequest', message: 'startTime no es una fecha válida' });
         }
@@ -126,6 +131,9 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
             proposedAddress = await getCachedPrimaryAddress(fastify, conversationId, contactId);
         }
 
+        const normalizedPhone = customerPhone ? normalizePhoneE164(customerPhone) : null;
+        const validPhone = normalizedPhone?.success ? normalizedPhone.phoneE164 : (customerPhone && !customerPhone.includes('default') ? customerPhone : null);
+
         try {
             const calResult = await withToolTimeout((signal) =>
                 createBooking(
@@ -135,7 +143,7 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
                         eventTypeId: auth.calEventTypeId!,
                         customerName,
                         customerEmail: customerEmail ?? null,
-                        customerPhone: customerPhone ?? null,
+                        customerPhone: validPhone,
                         startTime,
                         timeZone,
                     },
@@ -152,7 +160,7 @@ export async function bookingToolRoute(fastify: FastifyInstance) {
                     conversation_id: conversationId,
                     customer_name: customerName,
                     customer_email: customerEmail ?? null,
-                    customer_phone: customerPhone ?? null,
+                    customer_phone: validPhone ?? (customerPhone && !customerPhone.includes('default') ? customerPhone : null),
                     service_address: finalServiceAddress,
                     start_time: calResult.startTime,
                     end_time: calResult.endTime ?? new Date(new Date(calResult.startTime).getTime() + DEFAULT_APPOINTMENT_DURATION_MS).toISOString(),
@@ -349,7 +357,7 @@ function logDegradedFailure(request: FastifyRequest, organizationId: string, err
     } else if (err instanceof ToolTimeoutError) {
         request.log.warn({ organizationId, msg: 'Tool degradado: timeout creando la reserva en Cal.com' });
     } else if (err instanceof CalProviderError) {
-        request.log.warn({ organizationId, status: err.status, msg: 'Tool degradado: Cal.com respondió error' });
+        request.log.warn({ organizationId, status: err.status, details: err.message, msg: 'Tool degradado: Cal.com respondió error' });
     } else {
         request.log.error({ organizationId, errName, errMessage, msg: 'Tool degradado: error inesperado' });
     }
