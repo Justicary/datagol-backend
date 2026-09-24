@@ -44,7 +44,8 @@
     "src/routes/organization-jev.ts",
     "src/services/jev/jev-decisions-client.ts",
     "src/services/jev-decision-service.ts",
-    "src/services/reports/nl-jev-translation.ts"
+    "src/services/reports/nl-jev-translation.ts",
+    "src/services/elevenlabs-group-org-resolution.ts"
   ],
   "thresholds": {
     "high": 90,

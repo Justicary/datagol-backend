@@ -5,6 +5,7 @@ import { verifyElevenLabsSignature } from '../../services/webhook-verification.j
 import { PROCESS_CALL_COMPLETED_QUEUE } from '../../jobs/process-call-completed.js';
 import { SECRET_KEYS } from '../../types/secret-keys.js';
 import { WEBHOOK_EVENT_PROVIDERS } from '../../types/webhook-provider.js';
+import { resolveGroupOrganization } from '../../services/elevenlabs-group-org-resolution.js';
 
 const WEBHOOK_PATH = '/webhooks/elevenlabs/:webhookToken';
 
@@ -52,9 +53,11 @@ function extractAgentId(body: unknown): string | null {
  * A. `credential_groups.webhook_token` (workspace COMPARTIDO, FASE B.3): el
  *    token identifica al GRUPO, no a una organización. Tras verificar la
  *    firma con el secreto único del grupo, y SOLO ENTONCES, se lee `agent_id`
- *    del cuerpo y se resuelve la organización por el índice único
- *    `organizations.elevenlabs_agent_id` — rechazando si esa organización no
- *    pertenece al grupo ya autenticado.
+ *    del cuerpo y se resuelve la organización con
+ *    `resolveGroupOrganization()` (services/elevenlabs-group-org-resolution.ts):
+ *    agente principal → llamada pre-sembrada en `call_logs` → dueña del grupo
+ *    si es su única organización. Se rechaza si nada atribuye la llamada a
+ *    una organización del grupo ya autenticado.
  * B. `organizations.webhook_token` (instalación de un solo inquilino, camino
  *    histórico sin cambios — Fase 2.1 original): el token ya identifica la
  *    organización directamente, sin necesidad de `agent_id`.
@@ -143,23 +146,36 @@ export async function elevenLabsPostCallWebhookRoutes(fastify: FastifyInstance) 
                 return reply.status(401).send({ error: 'Unauthorized', message: 'No se pudo identificar la organización del grupo' });
             }
 
-            const { data: matchedOrg, error: matchError } = await fastify.supabaseAdmin
-                .from('organizations')
-                .select('id, status, credential_group_id')
-                .eq('elevenlabs_agent_id', agentId)
-                .maybeSingle();
+            const resolution = await resolveGroupOrganization(fastify.supabaseAdmin, {
+                groupId: resolvedGroupId,
+                ownerOrganizationId: signingSecretOwnerId,
+                agentId,
+                conversationId: extractConversationId(body),
+            });
 
-            if (matchError || !matchedOrg || matchedOrg.credential_group_id !== resolvedGroupId) {
+            if (!resolution.resolved) {
                 request.log.warn({
                     groupId: resolvedGroupId,
                     agentId,
-                    msg: 'Webhook de ElevenLabs (workspace compartido) rechazado: agent_id no pertenece a ninguna organización de este grupo',
+                    reason: resolution.reason,
+                    detail: resolution.detail,
+                    msg: 'Webhook de ElevenLabs (workspace compartido) rechazado: no se pudo atribuir a una organización de este grupo',
                 });
                 return reply.status(401).send({ error: 'Unauthorized', message: 'agent_id no pertenece a este grupo' });
             }
 
-            organizationId = matchedOrg.id as string;
-            orgStatus = matchedOrg.status as string;
+            if (resolution.via !== 'agent_id') {
+                request.log.info({
+                    groupId: resolvedGroupId,
+                    agentId,
+                    organizationId: resolution.organization.id,
+                    via: resolution.via,
+                    msg: 'Webhook de ElevenLabs atribuido por respaldo: agent_id no registrado en organizations.elevenlabs_agent_id',
+                });
+            }
+
+            organizationId = resolution.organization.id;
+            orgStatus = resolution.organization.status;
         } else {
             organizationId = singleTenantOrg!.id;
             orgStatus = singleTenantOrg!.status;
@@ -209,12 +225,12 @@ export async function elevenLabsPostCallWebhookRoutes(fastify: FastifyInstance) 
 
         try {
             await fastify.pgBoss.send(PROCESS_CALL_COMPLETED_QUEUE, { webhookEventId: insertedEvent.id });
-        } catch (queueError: any) {
+        } catch (queueError: unknown) {
             request.log.error({
                 organizationId,
                 eventId,
                 webhookEventId: insertedEvent.id,
-                err: queueError.message,
+                err: queueError instanceof Error ? queueError.message : String(queueError),
                 msg: 'Error al encolar process-call-completed',
             });
             return reply.status(500).send({ error: 'InternalServerError', message: 'No se pudo encolar el procesamiento' });

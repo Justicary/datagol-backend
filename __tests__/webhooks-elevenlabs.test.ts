@@ -446,7 +446,42 @@ describe('2.1 / B.3 — POST /webhooks/elevenlabs/:webhookToken con workspace co
         clearSecretCache(ownerOrgId);
     });
 
+    // Conversaciones pre-sembradas en call_logs por las pruebas de agente
+    // secundario (provider_call_id es único global: se sufijan con un UUID).
+    const RUN_ID = crypto.randomUUID();
+    const SECONDARY_AGENT_ID = 'agent-secundario-saliente';
+    const seededConversationIds: string[] = [];
+
+    async function seedCallLog(organizationId: string, conversationId: string): Promise<void> {
+        const { error } = await supabaseAdmin
+            .from('call_logs')
+            .insert({ organization_id: organizationId, provider_call_id: conversationId });
+        if (error) throw new Error(`No se pudo sembrar call_logs de prueba: ${error.message}`);
+        seededConversationIds.push(conversationId);
+    }
+
+    async function postSigned(app: Awaited<ReturnType<typeof buildTestApp>>, data: Record<string, unknown>) {
+        const rawBody = JSON.stringify({ type: 'post_call_transcription', data });
+        return app.inject({
+            method: 'POST',
+            url: `/webhooks/elevenlabs/${GROUP_WEBHOOK_TOKEN}`,
+            headers: { 'content-type': 'application/json', 'elevenlabs-signature': signPayload(rawBody, GROUP_SIGNING_SECRET) },
+            payload: rawBody,
+        });
+    }
+
+    async function webhookEventOrgIds(conversationId: string): Promise<string[]> {
+        const { data } = await supabaseAdmin
+            .from('webhook_events')
+            .select('organization_id')
+            .eq('event_id', `post_call_transcription:${conversationId}`);
+        return (data ?? []).map((row) => row.organization_id as string);
+    }
+
     afterAll(async () => {
+        if (seededConversationIds.length > 0) {
+            await supabaseAdmin.from('call_logs').delete().in('provider_call_id', seededConversationIds);
+        }
         await supabaseAdmin.from('webhook_events').delete().in('organization_id', [ownerOrgId, memberOrgId, outsideOrgId].filter(Boolean));
         if (outsideOrgId) await supabaseAdmin.from('organizations').delete().eq('id', outsideOrgId);
         if (memberOrgId) await supabaseAdmin.from('organizations').delete().eq('id', memberOrgId);
@@ -583,6 +618,146 @@ describe('2.1 / B.3 — POST /webhooks/elevenlabs/:webhookToken con workspace co
                 .select('organization_id')
                 .eq('event_id', `post_call_transcription:${conversationId}`);
             expect(rows?.[0]?.organization_id).toBe(ownerOrgId);
+        } finally {
+            await app.close();
+        }
+    });
+
+    describe('agentes secundarios (agent_id fuera de organizations.elevenlabs_agent_id)', () => {
+        it('llamada saliente pre-sembrada en call_logs (owner) con agente secundario → 200, encola y atribuye al owner', async () => {
+            const conversationId = `conv-test-secondary-agent-${RUN_ID}`;
+            await seedCallLog(ownerOrgId, conversationId);
+            const { app, sendSpy } = await buildTestAppWithFakeQueue();
+            try {
+                const response = await postSigned(app, { conversation_id: conversationId, agent_id: SECONDARY_AGENT_ID });
+
+                expect(response.statusCode).toBe(200);
+                expect(response.json().status).toBe('accepted');
+                expect(sendSpy).toHaveBeenCalledTimes(1);
+                expect(sendSpy.mock.calls[0][0]).toBe(PROCESS_CALL_COMPLETED_QUEUE);
+                expect(await webhookEventOrgIds(conversationId)).toEqual([ownerOrgId]);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('pre-sembrada para un MIEMBRO no-owner → se atribuye al miembro, no a la dueña del grupo', async () => {
+            const conversationId = `conv-test-secondary-agent-member-${RUN_ID}`;
+            await seedCallLog(memberOrgId, conversationId);
+            const { app, sendSpy } = await buildTestAppWithFakeQueue();
+            try {
+                const response = await postSigned(app, { conversation_id: conversationId, agent_id: SECONDARY_AGENT_ID });
+
+                expect(response.statusCode).toBe(200);
+                expect(sendSpy).toHaveBeenCalledTimes(1);
+                expect(await webhookEventOrgIds(conversationId)).toEqual([memberOrgId]);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('agente desconocido SIN pre-siembra en un grupo con varias organizaciones → 401, sin evento ni encolado', async () => {
+            const conversationId = `conv-test-unknown-agent-${RUN_ID}`;
+            const { app, sendSpy } = await buildTestAppWithFakeQueue();
+            try {
+                const response = await postSigned(app, { conversation_id: conversationId, agent_id: `agent-desconocido-${RUN_ID}` });
+
+                expect(response.statusCode).toBe(401);
+                expect(response.json().message).toBe('agent_id no pertenece a este grupo');
+                expect(sendSpy).not.toHaveBeenCalled();
+                expect(await webhookEventOrgIds(conversationId)).toEqual([]);
+            } finally {
+                await app.close();
+            }
+        });
+
+        it('pre-sembrada para una organización FUERA del grupo → 401 (la conversación no se reatribuye)', async () => {
+            const conversationId = `conv-test-outside-seed-${RUN_ID}`;
+            await seedCallLog(outsideOrgId, conversationId);
+            const { app, sendSpy } = await buildTestAppWithFakeQueue();
+            try {
+                const response = await postSigned(app, { conversation_id: conversationId, agent_id: SECONDARY_AGENT_ID });
+
+                expect(response.statusCode).toBe(401);
+                expect(sendSpy).not.toHaveBeenCalled();
+                expect(await webhookEventOrgIds(conversationId)).toEqual([]);
+            } finally {
+                await app.close();
+            }
+        });
+    });
+});
+
+describe('Workspace compartido de UNA sola organización: respaldo por organización dueña del grupo', () => {
+    const SOLO_WEBHOOK_TOKEN = `solo-group-token-${crypto.randomUUID()}`;
+    const SOLO_SIGNING_SECRET = 'solo-group-e2e-secret-abc123';
+    const SOLO_MAIN_AGENT_ID = `agent-solo-main-${crypto.randomUUID()}`;
+    let soloGroupId: string;
+    let soloOrgId: string;
+
+    beforeAll(async () => {
+        const { data: group, error: groupErr } = await supabaseAdmin
+            .from('credential_groups')
+            .insert({ name: 'Grupo de una organización (webhooks-elevenlabs.test.ts)' })
+            .select('id')
+            .single();
+        if (groupErr || !group) throw new Error(`No se pudo crear credential_groups de prueba: ${groupErr?.message}`);
+        soloGroupId = group.id;
+
+        const { data: org, error: orgErr } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Única organización del grupo (webhooks-elevenlabs.test.ts)',
+                email: `solo-shared-webhook-test-${Date.now()}@example.invalid`,
+                credential_group_id: soloGroupId,
+                elevenlabs_agent_id: SOLO_MAIN_AGENT_ID,
+            })
+            .select('id')
+            .single();
+        if (orgErr || !org) throw new Error(`No se pudo crear la organización única: ${orgErr?.message}`);
+        soloOrgId = org.id;
+
+        const { error: updateErr } = await supabaseAdmin
+            .from('credential_groups')
+            .update({ owner_organization_id: soloOrgId, webhook_token: SOLO_WEBHOOK_TOKEN })
+            .eq('id', soloGroupId);
+        if (updateErr) throw new Error(`No se pudo configurar el grupo único: ${updateErr.message}`);
+
+        const saved = await setSecret(soloOrgId, SECRET_KEYS.WEBHOOK_SIGNING_SECRET, SOLO_SIGNING_SECRET);
+        if (!saved) throw new Error('No se pudo guardar webhook_signing_secret del grupo único');
+        clearSecretCache(soloOrgId);
+    });
+
+    afterAll(async () => {
+        if (soloOrgId) await supabaseAdmin.from('webhook_events').delete().eq('organization_id', soloOrgId);
+        if (soloOrgId) await supabaseAdmin.from('organizations').delete().eq('id', soloOrgId);
+        if (soloGroupId) await supabaseAdmin.from('credential_groups').delete().eq('id', soloGroupId);
+    });
+
+    it('agente secundario sin pre-siembra → 200 atribuido a la única organización (dueña) del grupo', async () => {
+        const { app, sendSpy } = await buildTestAppWithFakeQueue();
+        try {
+            const conversationId = `conv-test-solo-owner-${crypto.randomUUID()}`;
+            const rawBody = JSON.stringify({
+                type: 'post_call_transcription',
+                data: { conversation_id: conversationId, agent_id: 'agent-secundario-saliente' },
+            });
+            const response = await app.inject({
+                method: 'POST',
+                url: `/webhooks/elevenlabs/${SOLO_WEBHOOK_TOKEN}`,
+                headers: { 'content-type': 'application/json', 'elevenlabs-signature': signPayload(rawBody, SOLO_SIGNING_SECRET) },
+                payload: rawBody,
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.json().status).toBe('accepted');
+            expect(sendSpy).toHaveBeenCalledTimes(1);
+
+            const { data: rows } = await supabaseAdmin
+                .from('webhook_events')
+                .select('organization_id')
+                .eq('event_id', `post_call_transcription:${conversationId}`);
+            expect(rows?.map((row) => row.organization_id)).toEqual([soloOrgId]);
         } finally {
             await app.close();
         }
