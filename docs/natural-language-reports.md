@@ -21,7 +21,8 @@ Cualquier propuesta que pretenda que el LLM escriba consultas SQL en runtime que
 ```
 1. Pregunta en español (POST /api/organizations/:id/reports/ask)
        │
-       ▼ (LLM clasifica según catálogo dinámico de 18 intenciones y fecha local)
+       ▼ (Jev clasifica si la organización lo tiene validado y está seguro — §8;
+       ▼  si no, el LLM clasifica según el catálogo y la fecha local)
 2. Intención estructurada JSON { status, intent, parameters, interpretation }
        │
        ▼ (Validación con Zod; si falla -> clasifica como no_resuelta)
@@ -173,3 +174,50 @@ genérico de `askReport()` ya lo convierte en 500 y lo registra en
 `unanswered_questions` con `reason: 'error'`. La distinción es intencional:
 **"faltó un prerequisito que el usuario puede resolver" usa `warnings`;
 "algo se rompió" usa una excepción.**
+
+---
+
+## ⚡ 8. Clasificación con Jev (camino rápido opcional)
+
+Si la organización tiene **Jev (TypeSafe AI) configurado y validado**
+([`jev-typesafe-manual.md`](jev-typesafe-manual.md)), `translateQuestion()`
+intenta primero clasificar la pregunta con Jev
+(`src/services/reports/nl-jev-translation.ts`). Si Jev resuelve con
+confianza, **no se llama al LLM para traducir**; la narrativa (paso 6) la
+sigue redactando el LLM.
+
+**El LLM BYOK sigue siendo obligatorio.** Se valida antes de intentar Jev;
+una organización sin LLM obtiene `no_resuelta` como siempre, tenga o no Jev.
+
+Jev responde 4 preguntas sobre `{ pregunta }` en una sola llamada:
+
+| Pregunta | Tipo | Opciones |
+|---|---|---|
+| `intencion` | choice | las intenciones de `ALL_INTENTS` (descripción + ejemplos) + `fuera_de_catalogo` + `ambigua` |
+| `periodo` | choice | `hoy`, `ayer`, `esta_semana`, `semana_pasada`, `este_mes`, `mes_pasado`, `ultimos_n_dias`, `rango_explicito`, `sin_periodo` |
+| `comparar_con` | choice | `ninguna`, `periodo_anterior`, `mismo_periodo_mes_pasado` |
+| `menciona_filtro` | noul | ¿restringe con estado, canal, cantidad o solo no leídos? |
+
+Se acepta la clasificación de Jev solo si **todas** estas condiciones se
+cumplen; si no, traduce el LLM exactamente como antes:
+
+- La intención es una del catálogo (no `ambigua` ni `fuera_de_catalogo`:
+  el LLM redacta la pregunta de aclaración o el motivo).
+- Confianza ≥ `0.7` en intención, periodo y comparación.
+- El periodo no lleva valores (`ultimos_n_dias` y `rango_explicito` necesitan
+  N o fechas, que Jev no extrae). `sin_periodo` → `este_mes`, el mismo
+  default del prompt.
+- Si la intención tiene parámetros propios en su `parametersSchema`
+  (`conteo_citas`, `listado_citas`, `conteo_conversaciones`,
+  `listado_correos_enviados`, `resumen_correos_recibidos`),
+  `menciona_filtro < 0.5`. Una intención nueva con parámetros entra sola en
+  esta regla.
+
+Resultado de Jev: `{ status: 'success', intent, parameters: { periodo: { type }, comparar_con? }, interpretation: "<Intención>, <periodo>" }`,
+que sigue exactamente el mismo camino de validación y ejecución que la
+traducción del LLM.
+
+Cada pregunta deja un log `[NlTranslation]` con `path: 'jev'` o
+`path: 'llm'` + `jevFallbackReason`, para calibrar los umbrales con datos
+reales. El consumo de Jev se registra en `usage_events` con
+`provider = 'jev'`.

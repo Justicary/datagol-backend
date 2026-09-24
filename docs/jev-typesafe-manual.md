@@ -248,20 +248,43 @@ Cada decisión exitosa registra en `usage_events` (append-only):
 
 ---
 
-## 7. Casos de uso candidatos
+## 7. Casos de uso
 
-Del análisis inicial (ninguno implementado todavía):
+### Implementado: traducción NL → intención en reportes
 
-1. Traducción NL → intención en reportes (`nl-translation-service.ts`):
-   `choice` sobre el catálogo + `requiere_aclaracion` / `no_resuelta`.
-2. Sentimiento de llamadas Vapi (`process-vapi-call-completed.ts`): `choice`
-   `positivo | neutral | urgente | queja` en vez de JSON libre de un LLM.
-3. Respaldo de temperatura/origen del prospecto cuando ElevenLabs no los
+`src/services/reports/nl-jev-translation.ts`, invocado desde
+`translateQuestion()` (`nl-translation-service.ts`). Detalle funcional en
+[`natural-language-reports.md`](natural-language-reports.md) §8.
+
+- **Opcional:** solo si la organización tiene Jev **validado**
+  (`isJevConfigValidated`). El LLM BYOK sigue siendo **obligatorio**: se
+  exige antes de intentar Jev, es el respaldo y redacta la narrativa.
+- **Jev solo clasifica** (una llamada, 4 preguntas en paralelo): `intencion`
+  (`choice` sobre el catálogo + `fuera_de_catalogo` + `ambigua`), `periodo`
+  (`choice` de tipos sin valores + `sin_periodo`), `comparar_con` (`choice`)
+  y `menciona_filtro` (`noul`).
+- **El LLM traduce** (exactamente como antes) si: Jev no está validado o
+  falla; la intención es `ambigua` (hace falta redactar la pregunta de
+  aclaración) o `fuera_de_catalogo`; alguna confianza < `0.7`
+  (`JEV_NL_MIN_CONFIDENCE`); el periodo lleva valores (`ultimos_n_dias`,
+  `rango_explicito`); o la intención tiene parámetros propios (estado,
+  canal, límite, solo no leídos — derivado de su `parametersSchema`) y
+  `menciona_filtro ≥ 0.5`.
+- **Timeout** propio de 3 s para que el respaldo llegue rápido.
+- **Observabilidad:** cada pregunta deja un log `[NlTranslation]` con
+  `path: 'jev'` (con `confidence`) o `path: 'llm'` con `jevFallbackReason`.
+  Sirve para calibrar los umbrales con datos reales.
+
+### Candidatos (no implementados)
+
+1. Respaldo de temperatura/origen del prospecto cuando ElevenLabs no los
    envía (`call-payload-mapper.ts`): `choice` sobre los valores del CHECK.
-4. Alerta de prospecto caliente por umbral (`notify-hot-lead.ts`): `noul`.
-5. QA de conversaciones (AGENTS.md §14): `noul` "¿el agente malinterpretó?"
+2. Alerta de prospecto caliente por umbral (`notify-hot-lead.ts`): `noul`.
+3. QA de conversaciones (AGENTS.md §14): `noul` "¿el agente malinterpretó?"
    + `score` de severidad.
-6. Filtrar ruido en el análisis de competidores: `choice` por línea cambiada.
+4. Filtrar ruido en el análisis de competidores: `choice` por línea cambiada.
+5. Sentimiento de llamadas Vapi (`process-vapi-call-completed.ts`) — baja
+   prioridad: Vapi no está en el flujo actual.
 
 ---
 
@@ -273,6 +296,7 @@ Del análisis inicial (ninguno implementado todavía):
 | `src/services/jev/jev-decisions-client.ts` | Cliente de `POST /api/alpha/decisions`, tipos y validación |
 | `src/services/jev-config-service.ts` | `integration_settings.jev`, validación de credenciales |
 | `src/services/jev-decision-service.ts` | `evaluateJevDecision()`: config + llave + llamada + metering |
+| `src/services/reports/nl-jev-translation.ts` | Camino rápido de traducción NL → intención (§7) |
 | `src/routes/organization-jev.ts`, `src/schemas/jev.ts` | Rutas `/jev-config` y `/jev/validate` |
 | `scripts/jev-smoke-test.ts` | Prueba de humo contra OpenRouter y la base real |
 | `db/migrations/72_jev_byok.sql`, `73_jev_metering.sql` | `jev_api_key`, proveedor `jev`, tarifas 0 |
