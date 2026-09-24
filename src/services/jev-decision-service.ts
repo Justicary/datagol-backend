@@ -97,7 +97,9 @@ interface RecordJevUsageParams {
 
 /**
  * Registra los tokens de Jev en `usage_events` con la tarifa vigente de
- * `provider_rates` (0 para BYOK, ver db/migrations/73_jev_metering.sql). El
+ * `provider_rates` (0 para BYOK, ver db/migrations/73_jev_metering.sql).
+ * `amount_usd` NO se envía: es una columna generada por Postgres
+ * (quantity × unit_rate_usd) y rechaza cualquier valor explícito. El
  * costo real reportado por OpenRouter viaja en `metadata.provider_cost_usd`
  * para conciliación, solo en el asiento de entrada para no duplicarlo. Nunca
  * lanza: un fallo de metering no invalida una decisión ya obtenida.
@@ -134,7 +136,6 @@ async function recordJevUsage(
                 unit_type: entry.unitType,
                 quantity: entry.quantity,
                 unit_rate_usd: unitRateUsd,
-                amount_usd: unitRateUsd * entry.quantity,
                 occurred_at: now.toISOString(),
                 metadata: entry.metadata,
             });
