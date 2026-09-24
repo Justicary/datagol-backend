@@ -10,6 +10,7 @@ import {
 import { rawLlmTranslationSchema } from '../../schemas/natural-reports.js';
 import { getIntentCatalogPromptText, getIntentByKey } from './intents/index.js';
 import { getZonedDateParts, DEFAULT_TIMEZONE } from './nl-dimensions.js';
+import { tryTranslateWithJev } from './nl-jev-translation.js';
 
 const TRANSLATION_MAX_OUTPUT_TOKENS = 600;
 
@@ -140,6 +141,25 @@ export async function translateQuestion(
             reason: 'No hay una llave de API de LLM guardada para esta organización.',
             interpretation: 'Falta llave de IA',
         };
+    }
+
+    // Camino rápido opcional: si la organización tiene Jev validado y Jev
+    // clasifica la pregunta con confianza, no se llama al LLM. El LLM BYOK
+    // sigue siendo obligatorio (validado arriba) — es el respaldo y el que
+    // redacta la narrativa.
+    const jevAttempt = await tryTranslateWithJev(fastify, organizationId, params.question);
+    if (jevAttempt.status === 'resolved') {
+        fastify.log.info(
+            { organizationId, path: 'jev', intent: jevAttempt.result.intent, confidence: jevAttempt.confidence },
+            '[NlTranslation] Pregunta traducida con Jev'
+        );
+        return jevAttempt.result;
+    }
+    if (jevAttempt.reason !== 'jev_no_configurado') {
+        fastify.log.info(
+            { organizationId, path: 'llm', jevFallbackReason: jevAttempt.reason, detail: jevAttempt.detail },
+            '[NlTranslation] Jev no resolvió la pregunta, se traduce con el LLM'
+        );
     }
 
     const prompt = buildTranslationPrompt(params.question, params.timezone, params.now);
