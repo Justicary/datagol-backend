@@ -134,12 +134,13 @@ describe('Ejecución de intenciones con consultas parametrizadas', () => {
     it('ejecuta pendientes_abiertos listando contactos en pipeline abierto', async () => {
         const intent = getIntentByKey('pendientes_abiertos')!;
         const fastify = buildMockFastify([
-            { id: 'ct-1', first_name: 'Carlos', lifecycle_stage: 'lead' },
+            { id: 'ct-1', full_name: 'Carlos', phone_e164: '+525511223344', lifecycle_stage: 'prospecto' },
         ]);
 
         const result = await intent.execute(fastify, orgId, {}, period);
         expect(result.shape).toBe('lista');
-        expect((result.data as any)[0].first_name).toBe('Carlos');
+        expect((result.data as any)[0].full_name).toBe('Carlos');
+        expect((result.data as any)[0].phone).toBe('+525511223344');
     });
 
     // 6. seguimientos_vencidos
@@ -181,12 +182,13 @@ describe('Ejecución de intenciones con consultas parametrizadas', () => {
     it('ejecuta listado_prospectos devolviendo lista detallada', async () => {
         const intent = getIntentByKey('listado_prospectos')!;
         const fastify = buildMockFastify([
-            { id: 'ct-2', first_name: 'Elena', phone: '+525599887766', lifecycle_stage: 'lead' },
+            { id: 'ct-2', full_name: 'Elena', phone_e164: '+525599887766', lifecycle_stage: 'prospecto' },
         ]);
 
         const result = await intent.execute(fastify, orgId, {}, period);
         expect(result.shape).toBe('lista');
-        expect((result.data as any)[0].first_name).toBe('Elena');
+        expect((result.data as any)[0].full_name).toBe('Elena');
+        expect((result.data as any)[0].phone).toBe('+525599887766');
     });
 
     // 10. conteo_conversaciones

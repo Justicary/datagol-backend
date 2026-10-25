@@ -52,7 +52,7 @@ export const prospectosCalientesSinAtenderIntent: NlIntentDefinition<
         // 1. Consultar leads calientes sin cita agendada
         const { data: hotLeads, error: hotErr } = await fastify.supabaseAdmin
             .from('leads')
-            .select('id, customer_name, customer_phone, created_at, temperature, service_summary, booked_appointment')
+            .select('id, full_name, contact_phone, created_at, temperature, inquiry_reason, booked_appointment')
             .eq('organization_id', organizationId)
             .eq('temperature', 'caliente')
             .eq('booked_appointment', false)
@@ -75,14 +75,14 @@ export const prospectosCalientesSinAtenderIntent: NlIntentDefinition<
             fastify.log.warn({ err: nullErr.message, organizationId }, '[NlIntent:prospectos_calientes] Error contando nulos');
         }
 
-        const prospectos: ProspectoCalienteItem[] = (hotLeads ?? []).map((l) => ({
-            id: l.id,
-            customer_name: l.customer_name,
-            customer_phone: l.customer_phone,
-            created_at: l.created_at,
-            temperature: l.temperature,
-            service_summary: l.service_summary,
-            booked_appointment: l.booked_appointment ?? false,
+        const prospectos: ProspectoCalienteItem[] = (hotLeads ?? []).map((l: Record<string, unknown>) => ({
+            id: String(l.id ?? ''),
+            customer_name: (l.full_name as string | null) ?? (l.customer_name as string | null) ?? null,
+            customer_phone: (l.contact_phone as string | null) ?? (l.customer_phone as string | null) ?? null,
+            created_at: String(l.created_at ?? ''),
+            temperature: (l.temperature as string | null) ?? null,
+            service_summary: (l.inquiry_reason as string | null) ?? (l.service_summary as string | null) ?? null,
+            booked_appointment: Boolean(l.booked_appointment ?? false),
         }));
 
         const totalSinClasificar = nullCount ?? 0;

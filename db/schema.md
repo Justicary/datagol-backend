@@ -1158,6 +1158,105 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 | `attempts` | `int4` |  |
 | `created_at` | `timestamptz` |  |
 
+## Table `telegram_connections`
+
+Configuración del Bot de Telegram de cada organización (1:1). Los secretos (telegram_bot_token, telegram_webhook_secret) viven en Supabase Vault.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  Unique |
+| `telegram_bot_id` | `int8` |  Unique |
+| `bot_username` | `text` |  |
+| `bot_first_name` | `text` |  Nullable |
+| `webhook_token` | `text` |  Unique |
+| `webhook_registered_at` | `timestamptz` |  Nullable |
+| `status` | `text` |  |
+| `last_error` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `telegram_identities`
+
+Identidades de Telegram vinculadas a miembros de la organización. Autorización basada exclusivamente en telegram_user_id numérico inmutable.
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `organization_member_id` | `uuid` |  |
+| `user_id` | `uuid` |  |
+| `telegram_user_id` | `int8` |  Unique |
+| `telegram_chat_id` | `int8` |  |
+| `telegram_username` | `text` |  Nullable |
+| `telegram_first_name` | `text` |  Nullable |
+| `status` | `text` |  |
+| `linked_at` | `timestamptz` |  |
+| `revoked_at` | `timestamptz` |  Nullable |
+| `last_seen_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `telegram_link_tokens`
+
+Tokens efímeros de un solo uso para vincular una cuenta de Telegram vía deep link (/start <token>). Persiste únicamente SHA-256 (token_hash).
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `organization_member_id` | `uuid` |  |
+| `created_by_user_id` | `uuid` |  |
+| `token_hash` | `text` |  Unique |
+| `expires_at` | `timestamptz` |  |
+| `used_at` | `timestamptz` |  Nullable |
+| `used_by_telegram_user_id` | `int8` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `telegram_conversations`
+
+Contexto conversacional de corto plazo por chat privado de Telegram (máx. 3 turnos con resultDigest <= 500 chars, TTL 30 min).
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `telegram_chat_id` | `int8` |  |
+| `telegram_identity_id` | `uuid` |  Nullable |
+| `context` | `jsonb` |  |
+| `context_expires_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `telegram_messages`
+
+Bitácora de auditoría operativa del canal Telegram (metadatos de ejecución e intención sin almacenar el texto crudo ni datos sensibles).
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `conversation_id` | `uuid` |  Nullable |
+| `telegram_identity_id` | `uuid` |  Nullable |
+| `direction` | `text` |  |
+| `telegram_update_id` | `int8` |  Nullable |
+| `telegram_message_id` | `int8` |  Nullable |
+| `intent` | `text` |  Nullable |
+| `harness_status` | `text` |  Nullable |
+| `execution_time_ms` | `int4` |  Nullable |
+| `error` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
 ## RLS Policies
 
 ### `organization_members`
@@ -1235,12 +1334,6 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 | `admin_delete_organizations` | DELETE | authenticated | PERMISSIVE | `is_platform_admin()` | — |
 | `org_read` | SELECT | authenticated | PERMISSIVE | `((id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) OR is_platform_admin())` | — |
 | `org_update` | UPDATE | authenticated | PERMISSIVE | `(has_permission(id, 'configure_agent'::text) OR is_platform_admin())` | `(has_permission(id, 'configure_agent'::text) OR is_platform_admin())` |
-
-### `usage_events`
-
-| Policy | Command | Roles | Action | USING | WITH CHECK |
-|--------|---------|-------|--------|-------|------------|
-| `usage_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_costs'::text)` | — |
 
 ### `contact_notes`
 
@@ -1498,3 +1591,43 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `platform_admin_only` | ALL | authenticated | PERMISSIVE | `is_platform_admin()` | `is_platform_admin()` |
+
+### `usage_events`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `usage_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_costs'::text)` | — |
+
+### `telegram_connections`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `telegram_connections_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_credentials'::text)` | — |
+| `telegram_connections_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_credentials'::text)` | `has_permission(organization_id, 'manage_credentials'::text)` |
+
+### `telegram_identities`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `telegram_identities_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_credentials'::text)` | — |
+| `telegram_identities_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_credentials'::text)` | `has_permission(organization_id, 'manage_credentials'::text)` |
+
+### `telegram_link_tokens`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `telegram_link_tokens_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_credentials'::text)` | — |
+| `telegram_link_tokens_write` | ALL | authenticated | PERMISSIVE | `has_permission(organization_id, 'manage_credentials'::text)` | `has_permission(organization_id, 'manage_credentials'::text)` |
+
+### `telegram_conversations`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `telegram_conversations_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'use_nl_reports'::text)` | — |
+
+### `telegram_messages`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `telegram_messages_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'use_nl_reports'::text)` | — |
+

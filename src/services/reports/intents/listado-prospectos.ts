@@ -14,11 +14,11 @@ export type ListadoProspectosParams = z.infer<typeof listadoProspectosSchema>;
 
 export interface ProspectoListItem {
     id: string;
-    first_name: string | null;
-    last_name: string | null;
+    full_name: string | null;
     phone: string | null;
     email: string | null;
     lifecycle_stage: string;
+    pipeline_stage: string | null;
     created_at: string;
 }
 
@@ -42,7 +42,7 @@ export const listadoProspectosIntent: NlIntentDefinition<ListadoProspectosParams
     ): Promise<IntentExecutionResult<ProspectoListItem[]>> => {
         const { data, error } = await fastify.supabaseAdmin
             .from('contacts')
-            .select('id, first_name, last_name, phone, email, lifecycle_stage, created_at')
+            .select('id, full_name, phone_e164, email, lifecycle_stage, pipeline_stage, created_at')
             .eq('organization_id', organizationId)
             .gte('created_at', period.startUtc)
             .lte('created_at', period.endUtc)
@@ -54,7 +54,15 @@ export const listadoProspectosIntent: NlIntentDefinition<ListadoProspectosParams
             throw new Error(`Error al consultar listado de prospectos: ${error.message}`);
         }
 
-        const items: ProspectoListItem[] = data ?? [];
+        const items: ProspectoListItem[] = (data ?? []).map((row: Record<string, unknown>) => ({
+            id: String(row.id ?? ''),
+            full_name: (row.full_name as string | null) ?? (row.first_name as string | null) ?? null,
+            phone: (row.phone_e164 as string | null) ?? (row.phone as string | null) ?? null,
+            email: (row.email as string | null) ?? null,
+            lifecycle_stage: String(row.lifecycle_stage ?? ''),
+            pipeline_stage: (row.pipeline_stage as string | null) ?? null,
+            created_at: String(row.created_at ?? ''),
+        }));
         const warnings: string[] = [];
 
         if (items.length === 50) {

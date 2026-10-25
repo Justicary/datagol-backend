@@ -12,6 +12,7 @@ export const WEBHOOK_EVENT_PROVIDERS = {
     TELNYX: 'telnyx',
     META: 'meta',
     CAL: 'cal',
+    TELEGRAM: 'telegram',
 } as const;
 
 export type WebhookEventProvider = (typeof WEBHOOK_EVENT_PROVIDERS)[keyof typeof WEBHOOK_EVENT_PROVIDERS];

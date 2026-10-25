@@ -7,12 +7,13 @@ import {
     type NlTranslationResult,
     type NlIntentKey,
 } from '../../types/natural-reports.js';
+import type { TelegramConversationTurn } from '../../types/telegram.js';
 import { rawLlmTranslationSchema } from '../../schemas/natural-reports.js';
 import { getIntentCatalogPromptText, getIntentByKey } from './intents/index.js';
 import { getZonedDateParts, DEFAULT_TIMEZONE } from './nl-dimensions.js';
 import { tryTranslateWithJev } from './nl-jev-translation.js';
 
-const TRANSLATION_MAX_OUTPUT_TOKENS = 600;
+const TRANSLATION_MAX_OUTPUT_TOKENS = 1500;
 
 const DAYS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const MONTHS_ES = [
@@ -23,13 +24,31 @@ const MONTHS_ES = [
 export function buildTranslationPrompt(
     question: string,
     timezone: string = DEFAULT_TIMEZONE,
-    now: Date = new Date()
+    now: Date = new Date(),
+    conversationContext?: readonly TelegramConversationTurn[]
 ): string {
     const zoned = getZonedDateParts(now, timezone);
     const dayOfWeek = DAYS_ES[new Date(Date.UTC(zoned.year, zoned.month - 1, zoned.day)).getUTCDay()];
     const fechaActualStr = `${dayOfWeek} ${zoned.day} de ${MONTHS_ES[zoned.month - 1]} de ${zoned.year}`;
 
     const catalogText = getIntentCatalogPromptText();
+
+    const hasTurns = Boolean(conversationContext && conversationContext.length > 0);
+    const turnsBlock = hasTurns
+        ? `\nTURNOS PREVIOS DE LA CONVERSACIÓN (del más antiguo al más reciente):
+${conversationContext!
+    .map(
+        (t, idx) =>
+            `${idx + 1}. Pregunta: "${t.question}" -> Intención: "${t.intent}", Parámetros: ${JSON.stringify(
+                t.parameters
+            )}, Resumen: "${t.resultDigest}"`
+    )
+    .join('\n')}
+
+REGLA DE CONTINUIDAD CONVERSACIONAL:
+- Si la pregunta actual hace referencia implícita o anafórica a un turno previo (ej. "¿y la semana pasada?", "¿y por WhatsApp?", "dame sus nombres", "¿cuántos fueron ayer?"), resuelve la referencia heredando la intención o los parámetros relevantes del último turno y aplicando el cambio solicitado, SIEMPRE que el resultado sea una de las 22 intenciones válidas del catálogo oficial.
+- Si al heredar el contexto la consulta pide algo que NO existe en las 22 intenciones del catálogo, responde con status "no_resuelta". NUNCA inventes intenciones ni aproximes fuera del catálogo.\n`
+        : '';
 
     return `Eres un clasificador semántico de consultas de negocio para Datagol. Tu única tarea es traducir la pregunta del usuario en español a una intención estructurada del catálogo oficial.
 
@@ -43,10 +62,10 @@ ${catalogText}
 DIMENSIONES TEMPORALES VÁLIDAS PARA "periodo":
 - "type": "hoy" | "ayer" | "esta_semana" | "semana_pasada" | "este_mes" | "mes_pasado" | "ultimos_n_dias" (con "n": number) | "rango_explicito" (con "inicio": "YYYY-MM-DD", "fin": "YYYY-MM-DD")
 Si el usuario no especifica periodo, usa por defecto: {"type": "este_mes"}.
-
+${turnsBlock}
 REGLAS DURAS OBLIGATORIAS:
-1. Elige EXACTAMENTE UNA intención del catálogo si la pregunta encaja con claridad.
-2. Si la pregunta es ambigua o demasiado vaga (ejemplo: "¿cómo voy?", "¿está bien?", "¿qué pasó?"), responde con status "requiere_aclaracion" y una pregunta de vuelta en "preguntaAclaracion".
+1. Elige EXACTAMENTE UNA intención del catálogo si la pregunta encaja con claridad (por ejemplo, "¿Tenemos correos electrónicos pendientes?" corresponde a "resumen_correos_recibidos" con {"soloNoLeidos": true}).
+2. Si la pregunta es ambigua, demasiado vaga (ejemplo: "¿cómo voy?", "¿está bien?", "¿qué pasó?") o pregunta qué tipo de consultas o reportes puedes contestar (ejemplo: "¿qué tipo de preguntas te puedo hacer?", "¿qué puedes responder?"), responde con status "requiere_aclaracion" e indica en "preguntaAclaracion" las áreas disponibles: Agenda (citas), Pendientes (prospectos abiertos y seguimientos vencidos), Captación (prospectos nuevos y conversaciones), Costos, Resultados (ventas y conversión) y Correos (enviados, con error o recibidos en el buzón).
 3. Si la pregunta pide algo fuera del catálogo de 22 intenciones (ej. pipeline detallado, nóminas, configuración técnica de IA, inventarios), responde con status "no_resuelta". NUNCA aproximes a la intención más cercana si no corresponde.
 4. PROHIBIDO inventar intenciones o parámetros.
 5. "interpretation": SIEMPRE incluye una breve frase en español llano que resuma lo que entendiste (ej. "Prospectos nuevos, canal WhatsApp, mes pasado").
@@ -68,11 +87,17 @@ PREGUNTA DEL USUARIO:
 
 function parseTranslationResponse(text: string): NlTranslationResult | null {
     try {
-        const cleaned = text
+        let cleaned = text
             .trim()
             .replace(/^```json\s*/i, '')
             .replace(/^```\s*/i, '')
-            .replace(/```\s*$/i, '');
+            .replace(/```\s*$/i, '')
+            .trim();
+        const firstBrace = cleaned.indexOf('{');
+        const lastBrace = cleaned.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+        }
         const json = JSON.parse(cleaned);
         const parsed = rawLlmTranslationSchema.safeParse(json);
         if (!parsed.success) {
@@ -118,6 +143,9 @@ export interface TranslateQuestionParams {
     question: string;
     timezone?: string;
     now?: Date;
+    conversationContext?: readonly TelegramConversationTurn[];
+    channel?: 'dashboard' | 'telegram';
+    conversationId?: string;
 }
 
 export async function translateQuestion(
@@ -143,26 +171,40 @@ export async function translateQuestion(
         };
     }
 
-    // Camino rápido opcional: si la organización tiene Jev validado y Jev
-    // clasifica la pregunta con confianza, no se llama al LLM. El LLM BYOK
-    // sigue siendo obligatorio (validado arriba) — es el respaldo y el que
-    // redacta la narrativa.
-    const jevAttempt = await tryTranslateWithJev(fastify, organizationId, params.question);
-    if (jevAttempt.status === 'resolved') {
+    // Camino rápido opcional: si la organización tiene Jev validado y NO hay
+    // turnos previos en contexto conversacional (Jev evalúa solo la pregunta
+    // aislada sin ver turnos previos), intenta clasificar con Jev.
+    const hasConversationContext = Boolean(
+        params.conversationContext && params.conversationContext.length > 0
+    );
+    if (!hasConversationContext) {
+        const jevAttempt = await tryTranslateWithJev(fastify, organizationId, params.question);
+        if (jevAttempt.status === 'resolved') {
+            fastify.log.info(
+                { organizationId, path: 'jev', intent: jevAttempt.result.intent, confidence: jevAttempt.confidence },
+                '[NlTranslation] Pregunta traducida con Jev'
+            );
+            return jevAttempt.result;
+        }
+        if (jevAttempt.reason !== 'jev_no_configurado') {
+            fastify.log.info(
+                { organizationId, path: 'llm', jevFallbackReason: jevAttempt.reason, detail: jevAttempt.detail },
+                '[NlTranslation] Jev no resolvió la pregunta, se traduce con el LLM'
+            );
+        }
+    } else {
         fastify.log.info(
-            { organizationId, path: 'jev', intent: jevAttempt.result.intent, confidence: jevAttempt.confidence },
-            '[NlTranslation] Pregunta traducida con Jev'
-        );
-        return jevAttempt.result;
-    }
-    if (jevAttempt.reason !== 'jev_no_configurado') {
-        fastify.log.info(
-            { organizationId, path: 'llm', jevFallbackReason: jevAttempt.reason, detail: jevAttempt.detail },
-            '[NlTranslation] Jev no resolvió la pregunta, se traduce con el LLM'
+            { organizationId, path: 'llm', jevFallbackReason: 'contexto_conversacional_activo' },
+            '[NlTranslation] Contexto conversacional activo, se traduce con el LLM'
         );
     }
 
-    const prompt = buildTranslationPrompt(params.question, params.timezone, params.now);
+    const prompt = buildTranslationPrompt(
+        params.question,
+        params.timezone,
+        params.now,
+        params.conversationContext
+    );
     const provider = LlmProviderFactory.getProvider(config.provider);
 
     try {
@@ -174,7 +216,19 @@ export async function translateQuestion(
             maxOutputTokens: TRANSLATION_MAX_OUTPUT_TOKENS,
         });
 
-        await recordLlmUsage(fastify, organizationId, config, result);
+        const usageMetadata =
+            params.channel || params.conversationId
+                ? {
+                      ...(params.channel ? { channel: params.channel } : {}),
+                      ...(params.conversationId ? { conversationId: params.conversationId } : {}),
+                  }
+                : undefined;
+
+        if (usageMetadata) {
+            await recordLlmUsage(fastify, organizationId, config, result, usageMetadata);
+        } else {
+            await recordLlmUsage(fastify, organizationId, config, result);
+        }
 
         const parsed = parseTranslationResponse(result.text);
         if (!parsed) {

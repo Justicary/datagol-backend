@@ -48,6 +48,11 @@ export class OpenAiCompatibleAdapter implements ILlmProvider {
                     model: params.model,
                     messages: [{ role: 'user', content: params.prompt }],
                     max_tokens: params.maxOutputTokens ?? 256,
+                    // En OpenRouter (ej. openrouter/auto que enruta a modelos de
+                    // razonamiento como glm-5.3-flash o deepseek-v4.1-flash),
+                    // limitar el esfuerzo de razonamiento evita que el modelo
+                    // agote max_tokens en `message.reasoning` y devuelva `content: null`.
+                    ...(isOpenRouter ? { reasoning: { effort: 'low' } } : {}),
                 }),
             });
         } catch {

@@ -1,7 +1,7 @@
-import crypto from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { getSecret } from '../services/secret-service.js';
 import { SECRET_KEYS } from '../types/secret-keys.js';
+import { timingSafeEqualStrings } from './timing-safe.js';
 
 export type ToolAuthResult =
     | { ok: true; organizationId: string; calEventTypeId: number | null }
@@ -59,13 +59,4 @@ export async function resolveToolOrganization(
         organizationId,
         calEventTypeId: org.cal_event_type_id === null || org.cal_event_type_id === undefined ? null : Number(org.cal_event_type_id),
     };
-}
-
-function timingSafeEqualStrings(a: string, b: string): boolean {
-    const bufferA = Buffer.from(a, 'utf8');
-    const bufferB = Buffer.from(b, 'utf8');
-    if (bufferA.length !== bufferB.length) {
-        return false;
-    }
-    return crypto.timingSafeEqual(bufferA, bufferB);
 }

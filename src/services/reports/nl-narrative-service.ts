@@ -5,7 +5,7 @@ import { LlmProviderFactory } from '../llm/LlmProviderFactory.js';
 import { SECRET_KEYS } from '../../types/secret-keys.js';
 import { type ResolvedPeriod } from '../../types/natural-reports.js';
 
-const NARRATIVE_MAX_OUTPUT_TOKENS = 250;
+const NARRATIVE_MAX_OUTPUT_TOKENS = 800;
 const ALWAYS_ALLOWED_MAX = 12;
 const NUMBER_TOLERANCE = 0.05;
 
@@ -76,6 +76,8 @@ export interface GenerateNarrativeParams {
     interpretation: string;
     period: ResolvedPeriod;
     data: unknown;
+    channel?: 'dashboard' | 'telegram';
+    conversationId?: string;
 }
 
 /**
@@ -128,7 +130,19 @@ export async function generateNarrative(
             return null;
         }
 
-        await recordLlmUsage(fastify, organizationId, config, result);
+        const usageMetadata =
+            params.channel || params.conversationId
+                ? {
+                      ...(params.channel ? { channel: params.channel } : {}),
+                      ...(params.conversationId ? { conversationId: params.conversationId } : {}),
+                  }
+                : undefined;
+
+        if (usageMetadata) {
+            await recordLlmUsage(fastify, organizationId, config, result, usageMetadata);
+        } else {
+            await recordLlmUsage(fastify, organizationId, config, result);
+        }
         return narrativeText;
     } catch (err) {
         fastify.log.warn({ err, organizationId }, '[NlNarrative] Error al generar la narrativa contextual, fallback a solo datos');

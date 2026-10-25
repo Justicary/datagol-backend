@@ -77,6 +77,11 @@ export const FEATURE_KEYS = {
     // requires_provider es NULL: el canal WhatsApp ya lo cubre el feature
     // 'whatsapp' existente, verificado por separado en waitlist-engine.ts.
     WAITLIST: 'waitlist',
+    // Canal conversacional de administración y reportes en lenguaje natural
+    // por Telegram (db/migrations/75_telegram_channel.sql). Planes pro/elite/enterprise.
+    // requires_provider = 'telegram' (verifica telegram_bot_token en Vault) y
+    // además forma parte de LLM_BACKED_FEATURE_KEYS (exige isLlmConfigValidated).
+    TELEGRAM: 'telegram',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

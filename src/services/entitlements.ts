@@ -23,6 +23,7 @@ const LLM_BACKED_FEATURE_KEYS = new Set<string>([
     FEATURE_KEYS.WEEKLY_EXECUTIVE_REPORT,
     FEATURE_KEYS.COMPETITOR_ANALYSIS,
     FEATURE_KEYS.NATURAL_LANGUAGE_REPORTS,
+    FEATURE_KEYS.TELEGRAM,
 ]);
 
 /**
@@ -185,6 +186,9 @@ export async function checkProviderCredentials(
             break;
         case 'meta':
             secretKey = SECRET_KEYS.WHATSAPP_ACCESS_TOKEN;
+            break;
+        case 'telegram':
+            secretKey = SECRET_KEYS.TELEGRAM_BOT_TOKEN;
             break;
     }
 

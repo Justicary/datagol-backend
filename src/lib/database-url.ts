@@ -26,6 +26,16 @@ export function parseDatabaseUrl(rawUrl: string): PoolConfig {
             password = password.slice(1, -1);
         }
 
+        // Si la contraseña viene percent-encoded (%3F, %2F, %21), decodificarla
+        // para entregar a pg.Pool los caracteres reales de la contraseña.
+        if (password.includes('%')) {
+            try {
+                password = decodeURIComponent(password);
+            } catch {
+                // Conservar el valor original si contiene un % literal inválido
+            }
+        }
+
         const hostPortMatch = hostPortDb.match(/^([^:]+):(\d+)\/(.+)$/);
         if (!hostPortMatch) throw new Error('Invalid host:port/db format');
 

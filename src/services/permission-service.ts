@@ -1,4 +1,4 @@
-import { createSupabaseUserClient } from '../lib/supabase.js';
+import { createSupabaseUserClient, supabaseAdmin } from '../lib/supabase.js';
 import { logger } from '../lib/logger.js';
 import type { PermissionKey } from '../types/permission-keys.js';
 
@@ -55,6 +55,53 @@ export async function getPermissionsForUser(
     }
 
     const permissions = new Set<string>((data ?? []).map((row: { permission_key: string }) => row.permission_key));
+
+    permissionsCache.set(key, { permissions, expiresAt: now + PERMISSIONS_CACHE_TTL_MS });
+
+    return permissions;
+}
+
+/**
+ * Resuelve el conjunto de permisos efectivos de un miembro en una organización
+ * SIN requerir un JWT de usuario (vía `supabaseAdmin` / `service_role` ->
+ * RPC `member_permissions_in_org`, db/migrations/75_telegram_channel.sql BLOQUE 3).
+ *
+ * Diseñado específicamente para canales asíncronos (como el worker de Telegram)
+ * donde la identidad del miembro ya fue autenticada contra `telegram_identities`.
+ * Reutiliza la misma caché e invalidación que `getPermissionsForUser` y falla
+ * cerrado (conjunto vacío) ante cualquier error.
+ */
+export async function getPermissionsForMember(
+    organizationId: string,
+    userId: string
+): Promise<Set<string>> {
+    if (!organizationId || !userId) {
+        return new Set();
+    }
+
+    const key = cacheKey(organizationId, userId);
+    const now = Date.now();
+    const cached = permissionsCache.get(key);
+    if (cached && cached.expiresAt > now) {
+        return cached.permissions;
+    }
+
+    const { data, error } = await supabaseAdmin.rpc('member_permissions_in_org', {
+        p_org_id: organizationId,
+        p_user_id: userId,
+    });
+
+    if (error) {
+        logger.warn(
+            { err: error, organizationId, userId },
+            '[Permissions] Error resolviendo member_permissions_in_org; se deniega por defecto'
+        );
+        return new Set();
+    }
+
+    const permissions = new Set<string>(
+        (data ?? []).map((row: { permission_key: string }) => row.permission_key)
+    );
 
     permissionsCache.set(key, { permissions, expiresAt: now + PERMISSIONS_CACHE_TTL_MS });
 

@@ -28,6 +28,17 @@ describe('src/lib/database-url.ts — parseDatabaseUrl', () => {
         expect(config.password).toBe('p4ss/word');
     });
 
+    it('decodifica contraseñas percent-encoded (%3F, %2F, %21) para entregar el valor real a pg.Pool', () => {
+        const config = parseDatabaseUrl(
+            'postgresql://postgres.ebpqtqwqlmykabglhhrq:LTVKt%3F4%2F%21ejjsdQ@aws-0-us-east-2.pooler.supabase.com:5432/postgres'
+        );
+        expect(config.user).toBe('postgres.ebpqtqwqlmykabglhhrq');
+        expect(config.password).toBe('LTVKt?4/!ejjsdQ');
+        expect(config.host).toBe('aws-0-us-east-2.pooler.supabase.com');
+        expect(config.port).toBe(5432);
+        expect(config.database).toBe('postgres');
+    });
+
     it('recae en connectionString crudo cuando el formato no coincide con host:puerto/base', () => {
         const config = parseDatabaseUrl('not-a-valid-connection-string');
         expect(config.connectionString).toBe('not-a-valid-connection-string');

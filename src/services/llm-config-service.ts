@@ -160,11 +160,17 @@ export async function recordLlmUsage(
     fastify: FastifyInstance,
     organizationId: string,
     config: LlmConfig,
-    result: LlmCompletionResult
+    result: LlmCompletionResult,
+    extraMetadata?: Record<string, unknown>
 ): Promise<void> {
     try {
         const now = new Date();
         const rows: Record<string, unknown>[] = [];
+        const baseMetadata: Record<string, unknown> = {
+            model: config.model,
+            provider: config.provider,
+            ...(extraMetadata ?? {}),
+        };
 
         if (result.inputTokens > 0) {
             const rate = await getRate(fastify, USAGE_EVENT_PROVIDERS.LLM, 'llm_input_token', now);
@@ -176,7 +182,7 @@ export async function recordLlmUsage(
                 quantity: result.inputTokens,
                 unit_rate_usd: unitRateUsd,
                 occurred_at: now.toISOString(),
-                metadata: { model: config.model, provider: config.provider },
+                metadata: baseMetadata,
             });
         }
 
@@ -190,7 +196,7 @@ export async function recordLlmUsage(
                 quantity: result.outputTokens,
                 unit_rate_usd: unitRateUsd,
                 occurred_at: now.toISOString(),
-                metadata: { model: config.model, provider: config.provider },
+                metadata: baseMetadata,
             });
         }
 

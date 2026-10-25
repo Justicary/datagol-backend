@@ -21,6 +21,10 @@ export const SECRET_KEYS = {
     // BYOK de Jev (TypeSafe AI) vía OpenRouter — aparte de LLM_API_KEY porque
     // Jev no redacta texto (db/migrations/72_jev_byok.sql).
     JEV_API_KEY: 'jev_api_key',
+    // Bot de Telegram por organización y secreto de verificación de webhook
+    // (db/migrations/75_telegram_channel.sql).
+    TELEGRAM_BOT_TOKEN: 'telegram_bot_token',
+    TELEGRAM_WEBHOOK_SECRET: 'telegram_webhook_secret',
 } as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[keyof typeof SECRET_KEYS];

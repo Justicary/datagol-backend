@@ -55,6 +55,8 @@ describe('services/llm/adapters', () => {
             const headers = call[1]?.headers as Record<string, string>;
             expect(headers['HTTP-Referer']).toBeDefined();
             expect(headers['X-Title']).toBeDefined();
+            const parsedBody = JSON.parse(call[1]?.body as string);
+            expect(parsedBody.reasoning).toEqual({ effort: 'low' });
         });
 
         it('401 → invalid_key', async () => {

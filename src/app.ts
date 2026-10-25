@@ -25,6 +25,7 @@ import organizationThankYouRoutes from './routes/organization-thank-you.js';
 import organizationLlmRoutes from './routes/organization-llm.js';
 import organizationJevRoutes from './routes/organization-jev.js';
 import organizationReportsRoutes from './routes/organization-reports.js';
+import organizationTelegramRoutes from './routes/organization-telegram.js';
 import organizationCompetitorSitesRoutes from './routes/organization-competitor-sites.js';
 import organizationAttachmentsRoutes from './routes/organization-attachments.js';
 import organizationConcurrencyRoutes from './routes/organization-concurrency.js';
@@ -33,6 +34,7 @@ import sendTemplateEmailRoutes from './routes/send-template-email.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
 import { elevenLabsPostCallWebhookRoutes } from './routes/webhooks/elevenlabs.js';
+import { telegramWebhookRoutes } from './routes/webhooks/telegram.js';
 import { toolRoutes } from './routes/tools/index.js';
 import { waitlistConfirmationRoutes } from './routes/public/waitlist-confirmation.js';
 import { appointmentsAdminRoutes } from './routes/appointments-admin.js';
@@ -57,16 +59,22 @@ export async function buildApp() {
             level: 'info',
             redact: [
                 'req.headers.authorization',
+                'req.headers["x-telegram-bot-api-secret-token"]',
                 '*.api_key',
                 '*.secret',
                 '*.secret_key',
                 '*.token',
+                '*.botToken',
                 'password',
                 'authorization',
                 'elevenlabs_api_key',
                 'telnyx_api_key',
                 'whatsapp_access_token',
                 'llm_api_key',
+                'telegram_bot_token',
+                'telegram_webhook_secret',
+                'link_token',
+                'botToken',
             ],
         },
     });
@@ -231,6 +239,8 @@ export async function buildApp() {
     // BYOK de Jev (TypeSafe AI) vía OpenRouter — configuración aparte del LLM
     await app.register(organizationJevRoutes);
     await app.register(organizationReportsRoutes);
+    // Canal conversacional de Telegram (docs/tasks/1TODO_telegram_system.md)
+    await app.register(organizationTelegramRoutes);
     await app.register(organizationCompetitorSitesRoutes);
     await app.register(organizationAttachmentsRoutes);
     // Reparto de concurrencia del grupo de credenciales (docs/tasks/catalogo-productos-grupos-cred.md FASE B.4)
@@ -243,6 +253,7 @@ export async function buildApp() {
     await app.register(voiceRoutes);
     await app.register(elevenLabsWebhookRoutes);
     await app.register(elevenLabsPostCallWebhookRoutes);
+    await app.register(telegramWebhookRoutes);
     // Fase 5 — Tool calls en vivo del agente de voz (routes/tools/**)
     await app.register(toolRoutes);
     await app.register(uploadRoutes);
