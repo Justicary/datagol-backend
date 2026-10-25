@@ -14,9 +14,7 @@ API de orquestación para una plataforma de Agentes de IA de Voz y Automatizaci�
 
 ---
 
-# Technology stack
-
-- **Node.js 24 LTS** con **TypeScript ^7** y `@types/node` (^26) — ejecutado mediante `tsx` (^4.23.1) con tipado estricto (`strict: true`).
+- **Node.js 24 LTS (≥ 24.22.1)** con **TypeScript ^5** y `@types/node` (^26) — ejecutado mediante `tsx` (^4.23.1) con tipado estricto (`strict: true`). Obligatorio runtime parcheado contra vulnerabilidades críticas de octubre de 2026 (CVE-2026-111497 / Node2Shell).
 - **Fastify ^5** (`fastify` ^5.10.0) — servidor HTTP con plugins oficiales:
   - `@fastify/multipart` (^10.1.0) para carga segura de archivos (límite 10 MB).
   - `@fastify/websocket` (^11.3.0) para conexiones en tiempo real.
@@ -34,7 +32,7 @@ API de orquestación para una plataforma de Agentes de IA de Voz y Automatizaci�
   - `pg-boss` (^12.27.0) sobre el mismo Postgres para todo trabajo diferido (ver §8). Nada de BullMQ/Redis: un solo motor de colas, sin infraestructura adicional que mantener.
 - **Configuración y Entorno**:
   - `dotenv` (^17.4.2) para carga de variables de entorno.
-- **pnpm ^10.5.2** — package manager obligatorio (no usar `npm` ni `yarn`).
+- **pnpm ^12.15.0** — package manager obligatorio (no usar `npm` ni `yarn`).
 - **Docker** — contenedor agnóstico listo para despliegue en cualquier nube.
 
 ## Reglas arbitradas por el stack
@@ -229,7 +227,8 @@ docker build -t datagol-api:local .
 
 ### 🐳 15. Contenedores, Despliegue y Gestión de Infraestructura
 
-* Imagen base `node:24-alpine`. Build multi-etapa; la imagen final no contiene `devDependencies` ni código fuente TypeScript.
+* Imagen base `node:24.22.1-alpine`. Build multi-etapa; la imagen final no contiene `devDependencies` ni código fuente TypeScript.
+* **Seguridad del Runtime (Parches Octubre 2026):** Se prohíbe el uso de versiones vulnerables de Node.js (< 24.22.1). Todos los entornos (local vía `.nvmrc`, contenedores Docker y servicios Cloud Run / CI) deben fijar y ejecutar Node.js ≥ 24.22.1 para mitigar RCE en el decodificador Brotli (Node2Shell / CVE-2026-111497) y anomalías en validaciones TLS/HTTPS.
 * El proceso corre como usuario no-root.
 * **Toda la configuración por variables de entorno**, validadas con Zod al arranque. La aplicación debe fallar de inmediato y con mensaje claro si falta una variable, nunca a mitad de una llamada.
 * **Cero dependencias de un proveedor de nube específico** en el camino crítico. Migrar de hosting debe ser cambiar un origin, no reescribir código.
@@ -301,3 +300,45 @@ Las versiones de este proyecto pueden diferir de tus datos de entrenamiento. Con
 
 Las tarifas de proveedores (ElevenLabs, Telnyx, Meta) cambian trimestralmente y **nunca se escriben literales en el código**: viven en tablas de configuración versionadas por fecha de vigencia.
 <!-- END:agent-rules -->
+
+<!-- trail:start -->
+## Trail — repo context graph
+
+This repo is indexed in `.trail/cache/`: small linked markdown nodes that explain each
+system and carry exact file:line spans, kept in sync with the code through git.
+
+For ANY task here — understanding how something works, finding where code lives,
+or scoping a change — get context from the graph before grepping or opening
+source files. Re-ask freely (it's cheap) and reuse literal identifiers you
+already have (symbol, error string, file name) as the query. New to this repo?
+Run `trail map` first — a token-budgeted orientation (dir clusters, hubs,
+hotspots), no LLM, no key.
+
+- Run `trail ask "<your question>" --source` → ranked nodes with the relevant
+  code spans inlined (each hit's ≤8-line crux by default; `--full` for whole
+  definitions when the crux isn't enough). Match the tool to the task shape:
+  for understanding or editing, the top node IS the answer — cite its
+  `covers:` file:line spans and edit straight from `--source`. For
+  exhaustive tasks ("every occurrence / every caller of this pattern"), ranked
+  results are top-N, not complete — run `trail grep "<literal>"` instead
+  (exhaustive over indexed files, grouped by enclosing symbol), falling back
+  to raw `grep -rn` only for unindexed files.
+- `trail skeleton <file>` → every definition's signature + span, ~10× cheaper
+  than reading the file; use it to skim an API surface.
+- `trail callers <symbol>` gives precomputed, exact edges — who calls this.
+  Add `--direction out` for what it calls, or `--depth N` to walk
+  transitively for the full blast radius. For structural questions, skip
+  ranking and use this directly.
+- Or browse: `.trail/cache/INDEX.md` lists every node; follow the links.
+- Monorepos and folders of multiple repos rank fairly across sub-projects —
+  hits carry `[scope/]` labels naming which one they're from. Narrow with
+  `trail ask "<task>" --in <scope>/` once you know where you're working.
+
+If a returned span is truncated ("+N more lines"), open the file at that exact
+range before finalizing. Only open source files when a node genuinely lacks a
+needed detail, and then at the exact file:line the node points to — never
+re-read whole files.
+
+After big code changes, refresh the graph with `trail build` (deterministic,
+no API key, $0).
+<!-- trail:end -->

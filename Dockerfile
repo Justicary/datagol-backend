@@ -1,28 +1,28 @@
 # Etapa 1: Construcción (Builder)
-FROM node:24-alpine AS builder
+FROM node:24.22.1-alpine AS builder
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@12.15.0 --activate
 
-COPY package.json pnpm-lock.yaml tsconfig.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 RUN pnpm install --frozen-lockfile
 
 COPY src/ ./src/
 RUN pnpm build
 
 # Etapa 2: Dependencias de producción (Prod Deps)
-FROM node:24-alpine AS prod-deps
+FROM node:24.22.1-alpine AS prod-deps
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.5.2 --activate
+RUN corepack enable && corepack prepare pnpm@12.15.0 --activate
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --prod --frozen-lockfile
 
 # Etapa 3: Imagen de Ejecución (Runner)
-FROM node:24-alpine AS runner
+FROM node:24.22.1-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production

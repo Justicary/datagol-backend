@@ -1,0 +1,34 @@
+# Git
+/.git
+/.gitignore
+
+# Dependencias y artefactos de build
+/node_modules
+/dist
+/.pnpm-store
+*.log
+
+# Entorno y secretos locales
+.env*
+.secrets*
+env-vars.yaml
+
+# Testing, Cobertura y Mutación (anclados a la raíz para no ignorar src/services/reports)
+/coverage
+/reports
+/.stryker-tmp
+/__tests__
+
+# Trail y caché de grafo
+/graft
+/.trail/cache
+
+# Archivos de configuración de IDE / agentes
+/.agents
+/.claude
+/.idea
+/.vscode
+
+# Documentación y scripts locales (anclados a la raíz)
+/docs
+/scripts

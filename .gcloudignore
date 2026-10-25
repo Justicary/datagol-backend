@@ -1,0 +1,4 @@
+#!include:.gitignore
+#!include:.dockerignore
+.dockerignore
+.gcloudignore

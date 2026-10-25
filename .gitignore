@@ -28,3 +28,7 @@ dist/
 # Sistema operativo
 .DS_Store
 Thumbs.db
+
+# Trail y Graft
+graft/
+.trail/cache/
