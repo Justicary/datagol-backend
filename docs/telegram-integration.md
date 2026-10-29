@@ -8,11 +8,12 @@ Este documento especifica la arquitectura, el modelo de seguridad, las tablas de
 
 El canal de Telegram **no** introduce un agente paralelo ni un motor de consultas independiente. Comparte exactamente el mismo arnés agnóstico de canal (`src/services/harness/ask-harness.ts`) que el endpoint HTTP `POST /api/organizations/:id/reports/ask`:
 
-1. **Traducción acotada al catálogo (`nl-translation-service.ts`):** El LLM (o Jev cuando no hay contexto previo) traduce la pregunta en español a una de las **22 intenciones** cerradas del catálogo oficial (`src/services/reports/intents/`) y valida sus parámetros con Zod.
+1. **Traducción acotada al catálogo (`nl-translation-service.ts`):** El LLM (o Jev cuando no hay contexto previo) traduce la pregunta en español a una de las intenciones cerradas del catálogo oficial (`src/services/reports/intents/`) y valida sus parámetros con Zod.
 2. **Resolución determinista de periodo (`period-resolver.ts`):** Los rangos temporales (`hoy`, `esta_semana`, `este_mes`, etc.) se resuelven en la zona horaria local de la organización (`organizations.timezone`).
-3. **Ejecución parametrizada (`executeIntent`):** Consulta determinista sobre Supabase con `organization_id` inyectado desde el servidor.
-4. **Narrativa con verificación anti-alucinación (`nl-narrative-service.ts`):** Toda cifra de la narrativa se verifica contra los datos exactos; si hay discrepancia, se descarta la narrativa y se entregan únicamente los datos verificados.
-5. **Metering por organización (`recordLlmUsage`):** Cada llamada al LLM registra tokens y costo en `usage_events` atribuidos a `organization_id` con metadatos `{ channel: 'telegram', conversation_id }`.
+3. **Ejecución parametrizada y conversión a hora local (`executeIntent`):** Consulta determinista sobre Supabase con `organization_id` inyectado desde el servidor. Toda intención con horarios específicos (`start_time` y `end_time` en agenda) formatea deterministamente las marcas de tiempo a la zona horaria de la organización (`period.timezone`) vía `formatToZonedTime`.
+4. **Narrativa con verificación anti-alucinación (`nl-narrative-service.ts`):** Toda cifra de la narrativa se verifica contra los datos exactos (que ya incluyen los horarios locales calculados); si hay discrepancia, se descarta la narrativa y se entregan únicamente los datos verificados.
+5. **Formateo HTML en zona horaria local (`formatter.ts`):** `formatHarnessResponseForTelegram` renderiza la respuesta y traduce cualquier marca de tiempo ISO al horario local de la organización (`response.period.timezone`), evitando exponer marcas de tiempo UTC crudas en el chat.
+6. **Metering por organización (`recordLlmUsage`):** Cada llamada al LLM registra tokens y costo en `usage_events` atribuidos a `organization_id` con metadatos `{ channel: 'telegram', conversation_id }`.
 
 ---
 

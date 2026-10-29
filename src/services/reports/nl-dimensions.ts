@@ -315,3 +315,33 @@ export function resolvePeriod(
         previousPeriod,
     };
 }
+
+/**
+ * Convierte una fecha UTC (Date o string ISO) a su representación local legible (YYYY-MM-DD HH:mm)
+ * en la zona horaria indicada. Si la fecha es inválida o vacía, retorna la cadena original o vacía.
+ */
+export function formatToZonedTime(
+    dateOrIso: Date | string | null | undefined,
+    timeZone: string = DEFAULT_TIMEZONE
+): string {
+    if (!dateOrIso) return '';
+    if (typeof dateOrIso === 'string') {
+        const trimmed = dateOrIso.trim();
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(trimmed)) {
+            return trimmed;
+        }
+        const date = new Date(trimmed);
+        if (Number.isNaN(date.getTime())) {
+            return trimmed;
+        }
+        const tz = isValidTimezone(timeZone) ? timeZone : DEFAULT_TIMEZONE;
+        const parts = getZonedDateParts(date, tz);
+        return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
+    }
+    if (Number.isNaN(dateOrIso.getTime())) {
+        return '';
+    }
+    const tz = isValidTimezone(timeZone) ? timeZone : DEFAULT_TIMEZONE;
+    const parts = getZonedDateParts(dateOrIso, tz);
+    return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
+}

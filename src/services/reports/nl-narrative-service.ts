@@ -56,17 +56,18 @@ export function buildNarrativePrompt(
     period: ResolvedPeriod,
     data: unknown
 ): string {
+    const timezoneStr = period?.timezone ? `\nZona horaria del negocio: "${period.timezone}"` : '';
     return `Eres un analista de negocios ejecutivo para Datagol. Redacta UNA SOLA frase o máximo dos oraciones en español mexicano que resuma el contexto clave de los datos calculados para responder a la pregunta del usuario.
 
 REGLAS ESTRICTAS:
-1. Usa ÚNICAMENTE las cifras exactas provistas en el bloque DATOS. PROHIBIDO inventar, estimar o aproximar números que no estén presentes.
+1. Usa ÚNICAMENTE las cifras exactas provistas en el bloque DATOS (los horarios y fechas ya se encuentran calculados en la zona horaria del negocio). PROHIBIDO inventar, estimar o aproximar números que no estén presentes.
 2. Sé directo, profesional y conciso (máximo 40 palabras).
 3. No saludes ni des introducciones como "Claro", "Aquí tienes".
 4. Devuelve ÚNICAMENTE el texto de la frase en texto plano, sin comillas adicionales ni bloques de código.
 
 Pregunta del usuario: "${question}"
 Interpretación: "${interpretation}"
-Periodo: "${period.label}"
+Periodo: "${period.label}"${timezoneStr}
 DATOS (ya calculados y exactos):
 ${JSON.stringify(data)}`;
 }

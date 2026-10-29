@@ -2,8 +2,9 @@
 
 Este documento detalla la arquitectura, el catálogo de intenciones, la gestión de dimensiones temporales y el procedimiento para extender el sistema con nuevas intenciones de reporte en la v2.
 
-> Catálogo actual: **22 intenciones** (18 originales + 4 de correo, ver §2.1 y
-> [`docs/tasks/reportes-nl-correos-backend.md`](tasks/reportes-nl-correos-backend.md)).
+> Catálogo actual: **25 intenciones** (18 originales + 4 de correo + 3 de cotizaciones, ver §2.1,
+> [`docs/tasks/reportes-nl-correos-backend.md`](tasks/reportes-nl-correos-backend.md) y
+> [`docs/tasks/procedimiento-cotizaciones.md`](tasks/procedimiento-cotizaciones.md)).
 
 ---
 
@@ -84,6 +85,11 @@ Las intenciones están agrupadas en 6 familias y definidas en `src/services/repo
 21. `correos_con_error`: Correos con `status = 'failed'` en el periodo, con `error_message` (máx. 15).
 22. `resumen_correos_recibidos`: **Única intención con fuente de datos en vivo (IMAP) en vez de Supabase** — ver §7 para el diseño completo.
 
+### 🧾 Cotizaciones (Fase I — `docs/tasks/procedimiento-cotizaciones.md`)
+23. `conteo_cotizaciones`: Conteo numérico de cotizaciones creadas o emitidas en el periodo, con filtro opcional por `status`.
+24. `tasa_aceptacion_cotizaciones`: Tasas de conversión de carritos a cotizaciones emitidas, porcentaje de aceptación de cotizaciones emitidas y ticket promedio.
+25. `productos_mas_cotizados`: Ranking de los productos, servicios o planes más cotizados en el periodo por número de cotizaciones y monto acumulado.
+
 ---
 
 ## 🌐 3. Dimensiones y Manejo de Zona Horaria
@@ -91,6 +97,7 @@ Las intenciones están agrupadas en 6 familias y definidas en `src/services/repo
 ### Zona Horaria de la Organización
 - La fecha y los periodos (`hoy`, `ayer`, `esta_semana`, `semana_pasada`, `este_mes`, `mes_pasado`, `ultimos_n_dias`, `rango_explicito`) **siempre se resuelven en la zona horaria local de la organización** (`organizations.timezone`, default `'America/Mexico_City'`).
 - Las fronteras del día local (00:00:00 a 23:59:59.999) se traducen a marcas de tiempo UTC para las consultas a Postgres.
+- **Formateo determinista de salida de horarios:** Toda intención que devuelve registros con horarios específicos (`start_time` y `end_time` en `listado_citas` y `citas_sin_desenlace`) formatea deterministamente las marcas de tiempo a la zona horaria local del negocio vía `formatToZonedTime` (`YYYY-MM-DD HH:mm`). Esto garantiza que el bloque `DATOS` entregado al LLM y a los canales (Telegram / Dashboard) contenga la hora local real, permitiendo que la narrativa refleje la hora exacta y que la verificación anti-alucinación (`verifyNarrativeNumbers`) apruebe las cifras.
 
 ---
 

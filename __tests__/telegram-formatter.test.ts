@@ -229,4 +229,41 @@ describe('Telegram Formatter (formatter.ts)', () => {
         expect(isTelegramHelpQuery('¿Tenemos correos electronicos pendientes?')).toBe(false);
         expect(isTelegramHelpQuery('¿Cuántas citas tuvimos hoy?')).toBe(false);
     });
+
+    it('formatea marcas de tiempo ISO a la zona horaria del negocio (22:00 UTC -> 16:00 en America/Mexico_City)', () => {
+        const res: AskReportSuccessResponse = {
+            status: 'ok',
+            intent: 'listado_citas',
+            shape: 'lista',
+            period: {
+                type: 'hoy',
+                startUtc: '2026-10-29T06:00:00.000Z',
+                endUtc: '2026-10-30T05:59:59.999Z',
+                startLocal: '2026-10-29',
+                endLocal: '2026-10-29',
+                label: 'Hoy (29 de octubre de 2026)',
+                timezone: 'America/Mexico_City',
+            },
+            interpretation: 'Citas programadas para hoy',
+            narrative: 'Tienes 1 cita programada hoy a las 16:00 horas con Dr. Pérez.',
+            data: [
+                {
+                    customer_name: 'Dr. Pérez',
+                    start_time: '2026-10-29T22:00:00.000Z',
+                    end_time: '2026-10-29T23:00:00.000Z',
+                    status: 'confirmada',
+                },
+            ],
+            warnings: [],
+        };
+
+        const html = formatHarnessResponseForTelegram(res);
+        // Debe mostrar 16:00 y no 22:00
+        expect(html).toContain('16:00');
+        expect(html).toContain('17:00');
+        expect(html).not.toContain('22:00:00');
+        expect(html).not.toContain('23:00:00');
+        expect(html).toContain('<b>Start time:</b> 2026-10-29 16:00');
+        expect(html).toContain('<b>End time:</b> 2026-10-29 17:00');
+    });
 });

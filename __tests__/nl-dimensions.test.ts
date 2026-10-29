@@ -4,6 +4,7 @@ import {
     getZonedDateParts,
     zonedDateTimeToUtc,
     isValidTimezone,
+    formatToZonedTime,
     DEFAULT_TIMEZONE,
 } from '../src/services/reports/nl-dimensions.js';
 import { NL_PERIOD_TYPES, NL_COMPARE_TO_DIMENSIONS } from '../src/types/natural-reports.js';
@@ -129,5 +130,36 @@ describe('services/reports/nl-dimensions.ts', () => {
         );
         expect(periodMesPasado.previousPeriod).toBeDefined();
         expect(periodMesPasado.previousPeriod?.label).toContain('julio 2026');
+    });
+
+    describe('formatToZonedTime', () => {
+        it('convierte un timestamp UTC a la hora local correspondiente (ej. 22:00 UTC -> 16:00 en America/Mexico_City)', () => {
+            const utcIso = '2026-10-29T22:00:00.000Z';
+            const formatted = formatToZonedTime(utcIso, 'America/Mexico_City');
+            expect(formatted).toBe('2026-10-29 16:00');
+        });
+
+        it('respeta diferentes zonas horarias (ej. America/Tijuana vs Europe/Madrid)', () => {
+            const utcIso = '2026-10-29T22:00:00Z';
+            // Tijuana está en UTC-7 en octubre (horario de verano de la frontera norte de México): 22 - 7 = 15:00
+            const tijuana = formatToZonedTime(utcIso, 'America/Tijuana');
+            expect(tijuana).toBe('2026-10-29 15:00');
+
+            // Madrid está en UTC+1 en octubre estándar (CET): 22 + 1 = 23:00
+            const madrid = formatToZonedTime(utcIso, 'Europe/Madrid');
+            expect(madrid).toBe('2026-10-29 23:00');
+        });
+
+        it('mantiene cadenas ya formateadas en YYYY-MM-DD HH:mm', () => {
+            expect(formatToZonedTime('2026-10-29 16:00', 'America/Mexico_City')).toBe('2026-10-29 16:00');
+        });
+
+        it('maneja entradas nulas, vacías o inválidas sin lanzar excepciones', () => {
+            expect(formatToZonedTime(null)).toBe('');
+            expect(formatToZonedTime(undefined)).toBe('');
+            expect(formatToZonedTime('')).toBe('');
+            expect(formatToZonedTime('cadena-no-valida')).toBe('cadena-no-valida');
+            expect(formatToZonedTime(new Date('invalid'))).toBe('');
+        });
     });
 });

@@ -1,5 +1,6 @@
 import { escapeHtml } from '../../lib/html-escape.js';
 import type { AskReportResponse, AskReportSuccessResponse } from '../../types/natural-reports.js';
+import { formatToZonedTime, DEFAULT_TIMEZONE } from '../reports/nl-dimensions.js';
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 export const MAX_RESULT_DIGEST_LENGTH = 500;
@@ -61,11 +62,18 @@ function formatKeyLabel(key: string): string {
     return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
-function formatScalarValue(val: unknown): string {
+function formatScalarValue(val: unknown, timeZone?: string): string {
     if (val === null || val === undefined || val === '') return '—';
     if (typeof val === 'boolean') return val ? 'Sí' : 'No';
     if (typeof val === 'number') {
         return Number.isInteger(val) ? val.toLocaleString('es-MX') : val.toFixed(2);
+    }
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(trimmed)) {
+            return formatToZonedTime(trimmed, timeZone);
+        }
+        return trimmed;
     }
     if (typeof val === 'object') {
         return JSON.stringify(val);
@@ -73,7 +81,7 @@ function formatScalarValue(val: unknown): string {
     return String(val);
 }
 
-function renderDataBlock(shape: string, data: unknown): string {
+function renderDataBlock(shape: string, data: unknown, timeZone?: string): string {
     if (data === null || data === undefined) {
         return '<i>Sin datos para este periodo.</i>';
     }
@@ -85,11 +93,11 @@ function renderDataBlock(shape: string, data: unknown): string {
             .map(([k, v]) => {
                 if (v && typeof v === 'object' && !Array.isArray(v)) {
                     const sub = Object.entries(v as Record<string, unknown>)
-                        .map(([sk, sv]) => `${escapeHtml(formatKeyLabel(sk))}: ${escapeHtml(formatScalarValue(sv))}`)
+                        .map(([sk, sv]) => `${escapeHtml(formatKeyLabel(sk))}: ${escapeHtml(formatScalarValue(sv, timeZone))}`)
                         .join(', ');
                     return `• <b>${escapeHtml(formatKeyLabel(k))}:</b> ${sub}`;
                 }
-                return `• <b>${escapeHtml(formatKeyLabel(k))}:</b> <code>${escapeHtml(formatScalarValue(v))}</code>`;
+                return `• <b>${escapeHtml(formatKeyLabel(k))}:</b> <code>${escapeHtml(formatScalarValue(v, timeZone))}</code>`;
             })
             .join('\n');
     }
@@ -116,11 +124,11 @@ function renderDataBlock(shape: string, data: unknown): string {
                 if (item && typeof item === 'object') {
                     const fields = Object.entries(item as Record<string, unknown>)
                         .filter(([, v]) => v !== null && v !== undefined && v !== '')
-                        .map(([k, v]) => `<b>${escapeHtml(formatKeyLabel(k))}:</b> ${escapeHtml(formatScalarValue(v))}`)
+                        .map(([k, v]) => `<b>${escapeHtml(formatKeyLabel(k))}:</b> ${escapeHtml(formatScalarValue(v, timeZone))}`)
                         .join(' | ');
                     return `${idx + 1}. ${fields}`;
                 }
-                return `${idx + 1}. ${escapeHtml(formatScalarValue(item))}`;
+                return `${idx + 1}. ${escapeHtml(formatScalarValue(item, timeZone))}`;
             })
             .join('\n');
     }
@@ -128,11 +136,11 @@ function renderDataBlock(shape: string, data: unknown): string {
     if (typeof data === 'object') {
         const entries = Object.entries(data as Record<string, unknown>);
         return entries
-            .map(([k, v]) => `• <b>${escapeHtml(formatKeyLabel(k))}:</b> ${escapeHtml(formatScalarValue(v))}`)
+            .map(([k, v]) => `• <b>${escapeHtml(formatKeyLabel(k))}:</b> ${escapeHtml(formatScalarValue(v, timeZone))}`)
             .join('\n');
     }
 
-    return escapeHtml(formatScalarValue(data));
+    return escapeHtml(formatScalarValue(data, timeZone));
 }
 
 /**
@@ -153,6 +161,13 @@ export function formatHarnessResponseForTelegram(response: AskReportResponse): s
         ].join('\n\n');
     }
 
+    const timezone =
+        'period' in response &&
+        response.period &&
+        typeof (response.period as { timezone?: unknown }).timezone === 'string'
+            ? (response.period as { timezone: string }).timezone
+            : DEFAULT_TIMEZONE;
+
     const parts: string[] = [];
     parts.push(`📊 <b>${escapeHtml(response.interpretation)}</b>`);
     parts.push(`🗓 <i>Periodo: ${escapeHtml(response.period.label)}</i>`);
@@ -161,7 +176,7 @@ export function formatHarnessResponseForTelegram(response: AskReportResponse): s
         parts.push(escapeHtml(response.narrative));
     }
 
-    parts.push(renderDataBlock(response.shape, response.data));
+    parts.push(renderDataBlock(response.shape, response.data, timezone));
 
     if (response.warnings && response.warnings.length > 0) {
         const warningsBlock = response.warnings

@@ -19,9 +19,9 @@ import { getActiveEmailAccount } from '../src/services/email/email-account.servi
 import { getAccountCredentials } from '../src/services/email/email-account-vault.js';
 import { searchInbox } from '../src/services/email/imap-client.js';
 
-describe('Catálogo de 22 Intenciones de Reportes en Lenguaje Natural', () => {
-    it('registra exactamente las 22 intenciones exigidas por la v1 (18 originales + 4 de correos)', () => {
-        expect(ALL_INTENTS).toHaveLength(22);
+describe('Catálogo de 25 Intenciones de Reportes en Lenguaje Natural', () => {
+    it('registra exactamente las 25 intenciones (18 originales + 4 de correos + 3 de cotizaciones)', () => {
+        expect(ALL_INTENTS).toHaveLength(25);
         for (const key of ALL_NL_INTENT_KEYS) {
             const intent = getIntentByKey(key);
             expect(intent).toBeDefined();
@@ -77,16 +77,28 @@ describe('Ejecución de intenciones con consultas parametrizadas', () => {
     }
 
     // 1. listado_citas
-    it('ejecuta listado_citas correctamente', async () => {
+    it('ejecuta listado_citas correctamente formateando los horarios a la zona horaria del negocio', async () => {
         const intent = getIntentByKey('listado_citas')!;
         const fastify = buildMockFastify([
-            { id: '1', customer_name: 'Juan Pérez', customer_phone: '+525512345678', start_time: '2026-08-18T10:00:00Z', status: 'confirmada', service_address: 'Av Reforma' },
+            {
+                id: '1',
+                customer_name: 'Juan Pérez',
+                customer_phone: '+525512345678',
+                customer_email: 'juan@test.com',
+                start_time: '2026-10-29T22:00:00Z',
+                end_time: '2026-10-29T23:00:00Z',
+                status: 'confirmada',
+                service_address: 'Av Reforma',
+            },
         ]);
 
         const result = await intent.execute(fastify, orgId, {}, period);
         expect(result.shape).toBe('lista');
         expect(result.data).toHaveLength(1);
         expect((result.data as any)[0].customer_name).toBe('Juan Pérez');
+        // 22:00 UTC en America/Mexico_City (UTC-6) corresponde exactamente a las 16:00 local
+        expect((result.data as any)[0].start_time).toBe('2026-10-29 16:00');
+        expect((result.data as any)[0].end_time).toBe('2026-10-29 17:00');
     });
 
     // 2. conteo_citas
@@ -127,6 +139,7 @@ describe('Ejecución de intenciones con consultas parametrizadas', () => {
 
         const result = await intent.execute(fastify, orgId, {}, period);
         expect(result.shape).toBe('lista');
+        expect((result.data as any)[0].start_time).toBe('2026-08-10 04:00');
         expect(result.warnings[0]).toContain('fundamental registrar el desenlace');
     });
 
@@ -479,6 +492,52 @@ describe('Ejecución de intenciones con consultas parametrizadas', () => {
             const result = await intent.execute(fastify, orgId, { soloNoLeidos: true }, period);
             expect(searchInbox).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ unseenOnly: true }));
             expect(result.warnings[0]).toContain('No tienes correos sin leer');
+        });
+    });
+
+    describe('conteo_cotizaciones, tasa_aceptacion_cotizaciones y productos_mas_cotizados', () => {
+        it('conteo_cotizaciones devuelve el conteo numérico y filtra por estado si se especifica', async () => {
+            const intent = getIntentByKey('conteo_cotizaciones')!;
+            const fastify = buildMockFastify([], 14);
+            const result = await intent.execute(fastify, orgId, { status: 'emitida' }, period);
+            expect(result.shape).toBe('numero');
+            expect((result.data as any).total).toBe(14);
+            expect((result.data as any).filtroEstado).toBe('emitida');
+        });
+
+        it('tasa_aceptacion_cotizaciones calcula conversión de carritos a emitidas, tasa de aceptación y ticket promedio', async () => {
+            const intent = getIntentByKey('tasa_aceptacion_cotizaciones')!;
+            const fastify = buildMockFastify([
+                { status: 'borrador', total: 5000 },
+                { status: 'emitida', total: 10000 },
+                { status: 'aceptada', total: 20000 },
+                { status: 'rechazada', total: 6000 },
+            ]);
+            const result = await intent.execute(fastify, orgId, {}, period);
+            expect(result.shape).toBe('tabla');
+            const data = result.data as any;
+            expect(data.carritosCreados).toBe(4);
+            expect(data.cotizacionesEmitidas).toBe(3);
+            expect(data.cotizacionesAceptadas).toBe(1);
+            expect(data.tasaCarritoAEmitidaPct).toBe(75);
+            expect(data.tasaEmitidaAAceptadaPct).toBe(33.3);
+            expect(data.ticketPromedioEmitidas).toBe(12000);
+        });
+
+        it('productos_mas_cotizados agrupa y ordena partidas por frecuencia y monto', async () => {
+            const intent = getIntentByKey('productos_mas_cotizados')!;
+            const fastify = buildMockFastify([
+                { sku: 'PLAN-PRO', product_name: 'Plan Pro', item_type: 'plan', quantity: 1, line_total: 49000 },
+                { sku: 'PLAN-PRO', product_name: 'Plan Pro', item_type: 'plan', quantity: 1, line_total: 49000 },
+                { sku: 'BOMBA-01', product_name: 'Bomba 5HP', item_type: 'producto', quantity: 3, line_total: 15000 },
+            ]);
+            const result = await intent.execute(fastify, orgId, { limit: 5 }, period);
+            expect(result.shape).toBe('tabla');
+            const data = result.data as any;
+            expect(data.items).toHaveLength(2);
+            expect(data.items[0].sku).toBe('PLAN-PRO');
+            expect(data.items[0].quoteCount).toBe(2);
+            expect(data.items[0].totalAmount).toBe(98000);
         });
     });
 });

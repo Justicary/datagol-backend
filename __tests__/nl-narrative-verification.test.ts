@@ -78,6 +78,23 @@ describe('services/reports/nl-narrative-service.ts — Verificación Anti-Alucin
         expect(prompt).toContain('Eres un analista de negocios ejecutivo');
         expect(prompt).toContain('DATOS');
         expect(prompt).toContain('"total":45');
+        expect(prompt).toContain('Zona horaria del negocio: "America/Mexico_City"');
+    });
+
+    it('aprueba narrativas con horario local de citas (ej. 16:00) cuando los datos contienen la fecha local', () => {
+        const data = [
+            {
+                customer_name: 'Juan Pérez',
+                start_time: '2026-10-29 16:00',
+                end_time: '2026-10-29 17:00',
+                status: 'confirmada',
+            },
+        ];
+
+        const narrative = 'Tienes 1 cita programada hoy a las 16:00 horas con Juan Pérez.';
+        const verification = verifyNarrativeNumbers(narrative, data);
+        expect(verification.ok).toBe(true);
+        expect(verification.unmatched).toHaveLength(0);
     });
 
     it('generateNarrative retorna la frase cuando el LLM responde válidamente y no alucina', async () => {

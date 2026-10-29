@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { FastifyInstance } from 'fastify';
+import { formatToZonedTime } from '../nl-dimensions.js';
 import {
     NL_INTENT_KEYS,
     NL_INTENT_CATEGORIES,
@@ -57,7 +58,15 @@ export const citasSinDesenlaceIntent: NlIntentDefinition<CitasSinDesenlaceParams
             throw new Error(`Error al consultar citas sin desenlace: ${error.message}`);
         }
 
-        const items: CitaSinDesenlaceItem[] = data ?? [];
+        const rawItems = data ?? [];
+        const items: CitaSinDesenlaceItem[] = rawItems.map((row) => ({
+            id: row.id,
+            customer_name: row.customer_name ?? null,
+            customer_phone: row.customer_phone ?? null,
+            start_time: formatToZonedTime(row.start_time, period.timezone),
+            status: row.status,
+            service_address: row.service_address ?? null,
+        }));
         const warnings: string[] = [
             'Es fundamental registrar el desenlace (asistió / no asistió) en el CRM para que los reportes de asistencia sean confiables.',
         ];

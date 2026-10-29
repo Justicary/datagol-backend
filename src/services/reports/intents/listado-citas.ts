@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { FastifyInstance } from 'fastify';
+import { formatToZonedTime } from '../nl-dimensions.js';
 import {
     NL_INTENT_KEYS,
     NL_INTENT_CATEGORIES,
@@ -63,7 +64,17 @@ export const listadoCitasIntent: NlIntentDefinition<ListadoCitasParams, CitaList
             throw new Error(`Error al consultar listado de citas: ${error.message}`);
         }
 
-        const items: CitaListItem[] = data ?? [];
+        const rawItems = data ?? [];
+        const items: CitaListItem[] = rawItems.map((row) => ({
+            id: row.id,
+            customer_name: row.customer_name ?? null,
+            customer_phone: row.customer_phone ?? null,
+            customer_email: row.customer_email ?? null,
+            start_time: formatToZonedTime(row.start_time, period.timezone),
+            end_time: row.end_time ? formatToZonedTime(row.end_time, period.timezone) : null,
+            status: row.status,
+            service_address: row.service_address ?? null,
+        }));
         const warnings: string[] = [];
 
         if (items.length === 50) {
