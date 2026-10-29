@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { Job } from 'pg-boss';
+import crypto from 'crypto';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { createTestPlan, deleteTestPlan } from './helpers/test-plan.js';
+import { deleteTestOrganizations } from './helpers/test-data-sweeper.js';
 import { setFeatureOverride, clearEntitlementsCache } from '../src/services/entitlements.js';
 import { FEATURE_KEYS } from '../src/types/feature-taxonomy.js';
 
@@ -12,10 +15,12 @@ vi.mock('../src/services/email.js', () => ({
 import { sendHotLeadAlertEmail } from '../src/services/email.js';
 import { notifyHotLeadHandler, type NotifyHotLeadJobData } from '../src/jobs/notify-hot-lead.js';
 
-// Organización real existente, plan 'starter' (sin hot_lead_alerts por
-// defecto — ver plan_features). Ese es justo el estado que necesitamos para
-// probar la ruta "feature deshabilitada, se omite" sin preparar nada extra.
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
+// Organización y plan propios de la suite. El plan no incluye hot_lead_alerts: la
+// ruta de éxito la concede con un override explícito sobre ESTA organización.
+// Nunca se usa una organización real: borrar sus overrides en el finally
+// borraría las activaciones del superadmin.
+let ORG_ID: string;
+let TEST_PLAN_KEY: string;
 
 function buildFakeFastify(): FastifyInstance {
     return {
@@ -32,7 +37,7 @@ async function createLead(overrides: Record<string, unknown> = {}): Promise<stri
     const { data, error } = await supabaseAdmin
         .from('leads')
         .insert({
-            organization_id: REAL_ORG_ID,
+            organization_id: ORG_ID,
             channel: 'voice',
             conversation_id: `notify-hot-lead-test:${Date.now()}:${Math.random().toString(36).slice(2)}`,
             full_name: 'Prospecto de Prueba',
@@ -55,6 +60,22 @@ async function createLead(overrides: Record<string, unknown> = {}): Promise<stri
 describe('4.1 — notify-hot-lead', () => {
     const createdLeadIds: string[] = [];
 
+    beforeAll(async () => {
+        TEST_PLAN_KEY = await createTestPlan(supabaseAdmin);
+        const { data: org, error } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (notify-hot-lead.test.ts)',
+                email: `org-notify-hot-lead-${crypto.randomUUID()}@example.invalid`,
+                plan_key: TEST_PLAN_KEY,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (error || !org) throw new Error(`No se pudo crear la organización de prueba: ${error?.message}`);
+        ORG_ID = org.id;
+    });
+
     afterEach(() => {
         vi.mocked(sendHotLeadAlertEmail).mockReset();
     });
@@ -63,9 +84,13 @@ describe('4.1 — notify-hot-lead', () => {
         if (createdLeadIds.length > 0) {
             await supabaseAdmin.from('leads').delete().in('id', createdLeadIds);
         }
+        // feature_audit_log (append-only) bloquea el DELETE simple: el helper
+        // recurre a admin_delete_organizations_cascade y falla si no la borra.
+        await deleteTestOrganizations(supabaseAdmin, [ORG_ID]);
+        await deleteTestPlan(supabaseAdmin, TEST_PLAN_KEY);
     });
 
-    it('la organización sin la feature hot_lead_alerts (plan starter): se omite y no se envía correo', async () => {
+    it('la organización sin la feature hot_lead_alerts (su plan no la incluye): se omite y no se envía correo', async () => {
         const leadId = await createLead();
         createdLeadIds.push(leadId);
 
@@ -80,7 +105,7 @@ describe('4.1 — notify-hot-lead', () => {
     });
 
     it('contraparte de éxito: con la feature habilitada, envía la alerta y marca hot_lead_notified_at', async () => {
-        const result = await setFeatureOverride(REAL_ORG_ID, FEATURE_KEYS.HOT_LEAD_ALERTS, true, 'Prueba 4.1 notify-hot-lead');
+        const result = await setFeatureOverride(ORG_ID, FEATURE_KEYS.HOT_LEAD_ALERTS, true, 'Prueba 4.1 notify-hot-lead');
         expect(result.success).toBe(true);
 
         try {
@@ -101,13 +126,13 @@ describe('4.1 — notify-hot-lead', () => {
             const { data: lead } = await supabaseAdmin.from('leads').select('hot_lead_notified_at').eq('id', leadId).single();
             expect(lead?.hot_lead_notified_at).not.toBeNull();
         } finally {
-            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', FEATURE_KEYS.HOT_LEAD_ALERTS);
-            clearEntitlementsCache(REAL_ORG_ID);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', ORG_ID).eq('feature_key', FEATURE_KEYS.HOT_LEAD_ALERTS);
+            clearEntitlementsCache(ORG_ID);
         }
     });
 
     it('idempotencia: un lead ya notificado no reenvía el correo', async () => {
-        const result = await setFeatureOverride(REAL_ORG_ID, FEATURE_KEYS.HOT_LEAD_ALERTS, true, 'Prueba 4.1 idempotencia');
+        const result = await setFeatureOverride(ORG_ID, FEATURE_KEYS.HOT_LEAD_ALERTS, true, 'Prueba 4.1 idempotencia');
         expect(result.success).toBe(true);
 
         try {
@@ -120,13 +145,13 @@ describe('4.1 — notify-hot-lead', () => {
 
             expect(sendHotLeadAlertEmail).not.toHaveBeenCalled();
         } finally {
-            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', FEATURE_KEYS.HOT_LEAD_ALERTS);
-            clearEntitlementsCache(REAL_ORG_ID);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', ORG_ID).eq('feature_key', FEATURE_KEYS.HOT_LEAD_ALERTS);
+            clearEntitlementsCache(ORG_ID);
         }
     });
 
     it('la condición de disparo ya no aplica (booked_appointment=true entre encolado y ejecución): se omite', async () => {
-        const result = await setFeatureOverride(REAL_ORG_ID, FEATURE_KEYS.HOT_LEAD_ALERTS, true, 'Prueba 4.1 condición cambiada');
+        const result = await setFeatureOverride(ORG_ID, FEATURE_KEYS.HOT_LEAD_ALERTS, true, 'Prueba 4.1 condición cambiada');
         expect(result.success).toBe(true);
 
         try {
@@ -139,8 +164,8 @@ describe('4.1 — notify-hot-lead', () => {
 
             expect(sendHotLeadAlertEmail).not.toHaveBeenCalled();
         } finally {
-            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', FEATURE_KEYS.HOT_LEAD_ALERTS);
-            clearEntitlementsCache(REAL_ORG_ID);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', ORG_ID).eq('feature_key', FEATURE_KEYS.HOT_LEAD_ALERTS);
+            clearEntitlementsCache(ORG_ID);
         }
     });
 });

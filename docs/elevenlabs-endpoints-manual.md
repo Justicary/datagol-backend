@@ -61,6 +61,11 @@ Todas las rutas de herramientas comparten el prefijo `/tools/:webhookToken/`:
 | `rescheduleAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/reschedule` | Reprograma una cita existente verificando identidad del cliente. |
 | `cancelAppointment` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/cancel` | Cancela una cita existente a solicitud del cliente, verificando su identidad. |
 | `getLocations` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/locations` | Consulta la matriz, sucursales y direcciones físicas o de facturación del negocio. |
+| `quotation_search` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/quotation/search` | Busca productos, servicios o planes para cotizar por texto, SKU o tipo de ítem. |
+| `quotation_cart_set_item` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/quotation/cart/set-item` | Agrega o actualiza la cantidad de una variante en el carrito de cotización activo del contacto. |
+| `quotation_cart_remove_item` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/quotation/cart/remove-item` | Elimina una partida del carrito de cotización activo por SKU o `variantId`. |
+| `quotation_cart_view` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/quotation/cart/view` | Consulta el estado actual del carrito de cotización y el resumen hablado con montos en palabras. |
+| `quotation_finalize` | `POST` | `https://api.datagol.net/tools/<WEBHOOK_TOKEN>/quotation/finalize` | Emite la cotización con folio consecutivo, encola la generación del PDF y el envío por correo y/o WhatsApp. |
 
 > **Nota sobre `<WEBHOOK_TOKEN>`**: Es el identificador alfanumérico público de enrutamiento asignado a cada organización en la columna `organizations.webhook_token` (ej. `b05e8d6ec8801a7124c989330104579c9490b3e06bf02a2bdf404d879564a831`). Permite a la API saber a qué cliente pertenece la llamada **antes** de leer el payload.
 
@@ -156,6 +161,39 @@ ElevenLabs **no** envía firmas HMAC en las Tools; únicamente permite inyectar 
 * **Request Body Parameters**:
   * `addressType` (string, opcional: `matriz`, `sucursal`, `facturacion`, `domicilio`, `servicio`)
   * `label` (string, opcional, ej. `Angelópolis`, `Centro`)
+
+#### G) Configuración de las Tools de Cotización (`quotation_*` — Feature `quotations`):
+Estas 5 herramientas se aprovisionan automáticamente en ElevenLabs cuando la organización tiene habilitada la feature `quotations`:
+
+* **Variable dinámica `system__caller_id` (D2 — Continuidad cross-canal)**:
+  * En llamadas telefónicas (SIP Trunking Telnyx/Twilio) y sesiones de WhatsApp, ElevenLabs expone la variable dinámica `{{system__caller_id}}` con el número E.164 verificado del interlocutor.
+  * Para que el agente pueda identificar al contacto y retomar su carrito abierto entre conversaciones sin depender de que el cliente dicte su teléfono verbalmente, configura el parámetro `customerPhone` de `quotation_cart_set_item`, `quotation_cart_remove_item`, `quotation_cart_view` y `quotation_finalize` como **Dynamic Variable** (`system__caller_id`) con respaldo a **LLM Prompt** cuando el canal es web widget sin caller ID telefónico.
+  * **Seguridad de continuidad**: un carrito abierto únicamente con `customerEmail` (sin teléfono E.164 verificado) solo se retoma dentro del mismo `conversationId`; si cambia de sesión web sin teléfono verificado, se abre un borrador nuevo para impedir que un tercero retome o modifique un carrito ajeno conociendo solo un correo electrónico.
+
+1. **`quotation_search`** (`POST /tools/<WEBHOOK_TOKEN>/quotation/search`):
+   * `query` (string, requerido)
+   * `itemType` (`producto` | `servicio` | `plan`, opcional)
+   * `category` (string, opcional)
+   * `limit` (integer 1..10, opcional, default 5)
+2. **`quotation_cart_set_item`** (`POST /tools/<WEBHOOK_TOKEN>/quotation/cart/set-item`):
+   * `conversationId` (string, opcional — `{{system__conversation_id}}`)
+   * `customerPhone` (string, opcional — `{{system__caller_id}}` o dictado por el cliente)
+   * `customerEmail` (string, opcional)
+   * `customerName` (string, opcional)
+   * `customerCompany` (string, opcional)
+   * `sku` (string, opcional — requerido si no se envía `variantId`)
+   * `variantId` (UUID, opcional — requerido si no se envía `sku`)
+   * `quantity` (number, requerido; `0` elimina la partida)
+   * `notes` (string, opcional)
+3. **`quotation_cart_remove_item`** (`POST /tools/<WEBHOOK_TOKEN>/quotation/cart/remove-item`):
+   * `conversationId`, `customerPhone`, `customerEmail`, `sku`, `variantId`
+4. **`quotation_cart_view`** (`POST /tools/<WEBHOOK_TOKEN>/quotation/cart/view`):
+   * `conversationId`, `customerPhone`, `customerEmail`
+5. **`quotation_finalize`** (`POST /tools/<WEBHOOK_TOKEN>/quotation/finalize`):
+   * `conversationId`, `customerPhone`, `customerEmail`, `customerName`, `customerCompany`
+   * `deliveryChannel` (`email` | `whatsapp` | `both` | `none`, default `both`)
+   * `notes` (string, opcional)
+   * `confirmPriceChanges` (boolean, opcional — en `true` actualiza las partidas al precio vigente de catálogo cuando hubo cambio entre el armado del carrito y la emisión)
 
 ---
 

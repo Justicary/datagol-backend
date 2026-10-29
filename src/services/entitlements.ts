@@ -155,6 +155,16 @@ export async function isFeatureEnabled(organizationId: string, featureKey: strin
 }
 
 /**
+ * Verifica si la organización tiene acceso al módulo de catálogo (ya sea por
+ * `product_rag` o por `quotations`) con una sola llamada a
+ * `getOrganizationFeatures` (AGENTS.md §16).
+ */
+export async function hasCatalogAccess(organizationId: string): Promise<boolean> {
+    const features = await getOrganizationFeatures(organizationId);
+    return features.has(FEATURE_KEYS.PRODUCT_RAG) || features.has(FEATURE_KEYS.QUOTATIONS);
+}
+
+/**
  * Guarda de credenciales previa a habilitar una feature que requiere proveedor.
  */
 export async function checkProviderCredentials(

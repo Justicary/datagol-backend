@@ -30,6 +30,7 @@ import organizationCompetitorSitesRoutes from './routes/organization-competitor-
 import organizationAttachmentsRoutes from './routes/organization-attachments.js';
 import organizationConcurrencyRoutes from './routes/organization-concurrency.js';
 import catalogRoutes from './routes/catalogs.js';
+import organizationQuotationsRoutes from './routes/organization-quotations.js';
 import sendTemplateEmailRoutes from './routes/send-template-email.js';
 import voiceRoutes from './routes/voice.js';
 import { elevenLabsWebhookRoutes } from './routes/elevenlabs.js';
@@ -247,6 +248,8 @@ export async function buildApp() {
     await app.register(organizationConcurrencyRoutes);
     // Catálogo de productos e importación (docs/tasks/catalogo-productos-grupos-cred.md FASE E)
     await app.register(catalogRoutes);
+    // Sistema de cotizaciones del dashboard (docs/tasks/procedimiento-cotizaciones.md FASES G, H, I)
+    await app.register(organizationQuotationsRoutes);
     // Despacho de correo con plantilla personalizada a contactos del CRM
     // (docs/tasks/send-template-email-backend.md)
     await app.register(sendTemplateEmailRoutes);

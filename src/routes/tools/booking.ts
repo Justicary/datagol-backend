@@ -232,11 +232,20 @@ export async function resolveContactBestEffort(
         return null;
     }
 
-    const { data: contactId, error } = await fastify.supabaseAdmin.rpc('resolve_contact', {
-        p_org_id: organizationId,
-        p_phone: phoneE164,
-        p_email: email,
-    });
+    const callResolveContact = () =>
+        fastify.supabaseAdmin.rpc('resolve_contact', {
+            p_org_id: organizationId,
+            p_phone: phoneE164,
+            p_email: email,
+        });
+
+    let { data: contactId, error } = await callResolveContact();
+    // `resolve_contact` hace select → insert: dos tool calls simultáneos con un
+    // teléfono nuevo compiten por el insert y el perdedor recibe unique_violation
+    // (23505). Un reintento encuentra el contacto que creó el ganador.
+    if (error?.code === '23505') {
+        ({ data: contactId, error } = await callResolveContact());
+    }
 
     if (error || !contactId) {
         fastify.log.warn({ organizationId, err: error?.message, msg: 'No se pudo resolver contact_id para la cita, se continúa sin él' });

@@ -25,3 +25,46 @@ Cuando el cliente pregunte por el precio o la disponibilidad de un producto:
 - Di el precio en palabras naturales ("son ciento cincuenta pesos, con IVA
   incluido"), nunca leyendo los dígitos uno por uno.
 `.trim();
+
+/**
+ * Bloque de instrucciones de COTIZACIONES para el System Prompt del agente
+ * conversacional (docs/tasks/procedimiento-cotizaciones.md, FASE D).
+ */
+export const QUOTATION_SYSTEM_PROMPT_SNIPPET = `
+COTIZACIONES:
+- Si el contacto es recurrente o menciona una cotización previa, invoca primero \`quotation_cart_view\` para verificar si tiene un carrito guardado y pregúntale si desea continuarlo.
+- Antes de agregar una partida con \`quotation_cart_set_item\`, confirma el producto/servicio/plan y la cantidad exacta con el cliente. Usa siempre la cantidad total absoluta para ese SKU.
+- Cuando agregues un plan que incluya \`suggestedComplement\` (mantenimiento mensual), ofrécelo como complemento opcional; nunca lo agregues sin que el cliente lo acepte.
+- Para servicios y planes, nunca menciones existencias ni inventario; solo menciona disponibilidad para productos físicos inventariables.
+- Nunca ofrezcas ni apliques descuentos por tu cuenta; los descuentos solo los autoriza un asesor humano desde el panel.
+- Antes de emitir con \`quotation_finalize\`, repasa las partidas y lee siempre \`spokenTotal\` en palabras naturales, pidiendo confirmación explícita del cliente y el canal de envío (correo electrónico o WhatsApp).
+- Si \`quotation_finalize\` reporta \`priceChanges\`, avisa con transparencia al cliente qué partida actualizó su precio antes de despedirte.
+`.trim();
+
+/**
+ * Inyecta o reemplaza la sección `COTIZACIONES:` dentro de un System Prompt
+ * existente sin duplicar ocurrencias previas (mismo patrón que `injectPlansSectionIntoPrompt`).
+ */
+export function injectQuotationsSectionIntoPrompt(
+    currentPrompt: string,
+    newQuotationsBlock: string = QUOTATION_SYSTEM_PROMPT_SNIPPET
+): string {
+    const trimmedBlock = newQuotationsBlock.trim();
+    const sectionRegex =
+        /(?:^|\n\s*)(?:#{1,3}\s*)?COTIZACIONES:?\s*\n[\s\S]*?(?=(\n\s*(?:#{1,3}\s+)?[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\s_]{2,}(?::|\s*\n)|$))/gi;
+
+    if (sectionRegex.test(currentPrompt)) {
+        let firstReplaced = false;
+        const cleaned = currentPrompt.replace(sectionRegex, (match) => {
+            if (!firstReplaced) {
+                firstReplaced = true;
+                const hasLeadingNewline = match.startsWith('\n');
+                return `${hasLeadingNewline ? '\n\n' : ''}${trimmedBlock}`;
+            }
+            return '';
+        });
+        return cleaned.trim();
+    }
+
+    return `${currentPrompt.trim()}\n\n${trimmedBlock}`.trim();
+}

@@ -12,6 +12,8 @@ import {
 } from '../src/services/entitlements.js';
 import { getAuthorizedAgentTools } from '../src/services/agent-provisioning.js';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { createTestPlan, deleteTestPlan } from './helpers/test-plan.js';
+import { deleteTestOrganizations } from './helpers/test-data-sweeper.js';
 import { entitlementsPlugin, requireFeature } from '../src/plugins/entitlements.js';
 import supabasePlugin from '../src/plugins/supabase.js';
 import * as secretService from '../src/services/secret-service.js';
@@ -51,17 +53,23 @@ function traceQueryArgs(builder: any, selectSink: unknown[], eqSink: [unknown, u
 
 // Organización aislada para la suite de pruebas
 let REAL_ORG_ID: string;
+// Plan inventado de la suite: calendar_booking habilitada, lead_capture con
+// fila explícita deshabilitada, todo lo demás (whatsapp, telegram,
+// call_transfer...) ausente, es decir, denegado. No depende del plan starter
+// real, que el superadmin puede cambiar desde el panel.
+let TEST_PLAN_KEY: string;
 // Organización ficticia que no existe en la base de datos
 const FAKE_ORG_ID = '00000000-0000-0000-0000-000000000001';
 
 describe('FASE 1 — Fundaciones & Entitlements', () => {
     beforeAll(async () => {
+        TEST_PLAN_KEY = await createTestPlan(supabaseAdmin, { calendar_booking: true, lead_capture: false });
         const { data: org, error } = await supabaseAdmin
             .from('organizations')
             .insert({
                 name: 'Org (entitlements.test.ts)',
                 email: `org-entitlements-test-${Date.now()}@example.invalid`,
-                plan_key: 'starter',
+                plan_key: TEST_PLAN_KEY,
                 max_concurrent_calls: 1,
                 status: 'active',
             })
@@ -72,19 +80,17 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
     });
 
     afterAll(async () => {
-        if (REAL_ORG_ID) {
-            await supabaseAdmin.from('feature_audit_log').delete().eq('organization_id', REAL_ORG_ID);
-            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID);
-            await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', REAL_ORG_ID);
-            await supabaseAdmin.from('organizations').delete().eq('id', REAL_ORG_ID);
-        }
+        // feature_audit_log es append-only: deleteTestOrganizations recurre a
+        // admin_delete_organizations_cascade y falla si no logra borrarla.
+        await deleteTestOrganizations(supabaseAdmin, [REAL_ORG_ID]);
+        await deleteTestPlan(supabaseAdmin, TEST_PLAN_KEY);
         clearEntitlementsCache();
     });
 
     beforeEach(async () => {
         vi.restoreAllMocks();
-        // Asegurar que la org siempre inicia en plan starter, sin overrides residuales ni cache
-        await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+        // Asegurar que la org siempre inicia en el plan de prueba, sin overrides residuales ni cache
+        await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
         await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', 'whatsapp');
         clearEntitlementsCache();
     });
@@ -239,7 +245,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
         // ==================================================================
         // [A] Tenant plan Starter → 403 en ruta protegida por requireFeature
         // ==================================================================
-        it('1.6.A — Un tenant de plan Starter recibe 403 al invocar una ruta que requiere feature whatsapp', async () => {
+        it('1.6.A — Un tenant cuyo plan no incluye whatsapp recibe 403 al invocar una ruta que requiere feature whatsapp', async () => {
             const app = Fastify({ logger: false });
 
             await app.register(supabasePlugin);
@@ -522,7 +528,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     expect(logs[0].feature_key).toBe('plan:pro');
                     expect(logs[0].action).toBe('plan_changed');
                 } finally {
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                     clearEntitlementsCache();
                 }
             });
@@ -640,7 +646,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     const res = await setOrganizationPlan(REAL_ORG_ID, 'pro', 'Test audit error');
                     expect(res.success).toBe(true);
                 } finally {
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                 }
             });
 
@@ -652,7 +658,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     const res = await setOrganizationPlan(REAL_ORG_ID, 'pro', 'Test prov exception in plan');
                     expect(res.success).toBe(true);
                 } finally {
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                 }
             });
 
@@ -703,9 +709,8 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
             });
 
             it('isFeatureEnabled delega en getOrganizationFeatures y verifica membership real', async () => {
-                // 'calendar_booking' está en el plan starter con enabled:true
-                // (verificado contra plan_features real — a diferencia de
-                // 'lead_capture', que el plan starter tiene con enabled:false).
+                // 'calendar_booking' está en el plan de prueba con enabled:true
+                // (a diferencia de 'lead_capture', que tiene enabled:false).
                 expect(await isFeatureEnabled(REAL_ORG_ID, 'calendar_booking')).toBe(true);
                 expect(await isFeatureEnabled(REAL_ORG_ID, 'feature_inexistente_xyz')).toBe(false);
             });
@@ -819,7 +824,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
             });
 
             it('el fallback JS: un override enabled:true SÍ agrega una feature que no viene del plan (rama "if" real, no solo la del plan)', async () => {
-                // 'call_transfer' no está en plan_features de 'starter' y no está
+                // 'call_transfer' no está en plan_features del plan de prueba y no está
                 // deshabilitado globalmente — si apareciera en el resultado,
                 // solo puede ser por el override.
                 const targetFeature = 'call_transfer';
@@ -1273,7 +1278,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                         '[Entitlements] Advertencia al reprovisionar agente tras cambio de plan'
                     );
                 } finally {
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                     clearEntitlementsCache();
                 }
             });
@@ -1299,7 +1304,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                         '[Entitlements] Error registrando auditoría de cambio de plan'
                     );
                 } finally {
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                 }
             });
 
@@ -1315,7 +1320,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     expect(entry.feature_key).toBe('plan:pro');
                     expect(entry.reason).toBe(uniqueReason.trim());
                 } finally {
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                     clearEntitlementsCache();
                 }
             });
@@ -1338,7 +1343,7 @@ describe('FASE 1 — Fundaciones & Entitlements', () => {
                     expect(org?.agent_reprovision_pending).toBe(true);
                 } finally {
                     vi.restoreAllMocks();
-                    await supabaseAdmin.from('organizations').update({ plan_key: 'starter', max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
+                    await supabaseAdmin.from('organizations').update({ plan_key: TEST_PLAN_KEY, max_concurrent_calls: 1 }).eq('id', REAL_ORG_ID);
                     clearEntitlementsCache();
                 }
             });

@@ -50,6 +50,7 @@ describe('src/types/stock-status.ts — sincronizado con product_variants_stock_
     let groupId: string;
     let catalogId: string;
     let productId: string;
+    let serviceProductId: string;
 
     beforeAll(async () => {
         const org = await createTestOrgWithGroup('Test Org (catalog-enums.test.ts)', `test-catalog-enums-${Date.now()}@example.invalid`);
@@ -66,11 +67,19 @@ describe('src/types/stock-status.ts — sincronizado con product_variants_stock_
 
         const { data: product, error: prodErr } = await supabaseAdmin
             .from('products')
-            .insert({ catalog_id: catalogId, name: 'Producto diagnóstico' })
+            .insert({ catalog_id: catalogId, name: 'Producto diagnóstico', item_type: 'producto' })
             .select('id')
             .single();
         if (prodErr || !product) throw new Error(`No se pudo crear el producto de prueba: ${prodErr?.message}`);
         productId = product.id;
+
+        const { data: serviceProd, error: srvErr } = await supabaseAdmin
+            .from('products')
+            .insert({ catalog_id: catalogId, name: 'Servicio diagnóstico', item_type: 'servicio' })
+            .select('id')
+            .single();
+        if (srvErr || !serviceProd) throw new Error(`No se pudo crear el servicio de prueba: ${srvErr?.message}`);
+        serviceProductId = serviceProd.id;
     });
 
     afterAll(async () => {
@@ -84,9 +93,10 @@ describe('src/types/stock-status.ts — sincronizado con product_variants_stock_
 
     it.each(ALL_STOCK_STATUSES)('el stock_status "%s" es aceptado por product_variants_stock_status_check', async (stockStatus) => {
         const sku = `DIAG-${stockStatus}-${Math.random().toString(36).slice(2)}`;
+        const targetProductId = stockStatus === 'no_aplica' ? serviceProductId : productId;
         const { error } = await supabaseAdmin
             .from('product_variants')
-            .insert({ product_id: productId, catalog_id: catalogId, sku, stock_status: stockStatus });
+            .insert({ product_id: targetProductId, catalog_id: catalogId, sku, stock_status: stockStatus });
 
         expect(error?.code).not.toBe('23514');
 
@@ -101,10 +111,14 @@ describe('src/types/stock-status.ts — sincronizado con product_variants_stock_
         expect(isStockStatus('en_camion')).toBe(false);
     });
 
-    it.each(ALL_STOCK_STATUSES)('STOCK_STATUS_SPEECH["%s"] nunca afirma la existencia como un hecho categórico', (stockStatus) => {
+    it.each(ALL_STOCK_STATUSES)('STOCK_STATUS_SPEECH["%s"] nunca afirma la existencia como un hecho categórico y no_aplica devuelve cadena vacía', (stockStatus) => {
         const speech = STOCK_STATUS_SPEECH[stockStatus];
         expect(speech.toLowerCase()).not.toContain('sí tenemos');
-        expect(speech.length).toBeGreaterThan(0);
+        if (stockStatus === 'no_aplica') {
+            expect(speech).toBe('');
+        } else {
+            expect(speech.length).toBeGreaterThan(0);
+        }
     });
 
     it('stockStatusToSpeech degrada a sin_dato para un valor desconocido', () => {

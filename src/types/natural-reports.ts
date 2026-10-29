@@ -8,6 +8,7 @@ export const NL_INTENT_CATEGORIES = {
     COSTO: 'costo',
     RESULTADO: 'resultado',
     CORREOS: 'correos',
+    COTIZACIONES: 'cotizaciones',
 } as const;
 
 export type NlIntentCategory = (typeof NL_INTENT_CATEGORIES)[keyof typeof NL_INTENT_CATEGORIES];
@@ -46,6 +47,11 @@ export const NL_INTENT_KEYS = {
     LISTADO_CORREOS_ENVIADOS: 'listado_correos_enviados',
     CORREOS_CON_ERROR: 'correos_con_error',
     RESUMEN_CORREOS_RECIBIDOS: 'resumen_correos_recibidos',
+
+    // Cotizaciones (3)
+    CONTEO_COTIZACIONES: 'conteo_cotizaciones',
+    TASA_ACEPTACION_COTIZACIONES: 'tasa_aceptacion_cotizaciones',
+    PRODUCTOS_MAS_COTIZADOS: 'productos_mas_cotizados',
 } as const;
 
 export type NlIntentKey = (typeof NL_INTENT_KEYS)[keyof typeof NL_INTENT_KEYS];

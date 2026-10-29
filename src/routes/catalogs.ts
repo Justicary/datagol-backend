@@ -2,8 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireAuthenticatedUser } from '../lib/organization-auth.js';
 import { getPermissionsForUser } from '../services/permission-service.js';
 import { PERMISSION_KEYS } from '../types/permission-keys.js';
-import { isFeatureEnabled } from '../services/entitlements.js';
-import { FEATURE_KEYS } from '../types/feature-taxonomy.js';
+import { hasCatalogAccess } from '../services/entitlements.js';
 import { CATALOG_IMPORT_MODES, type CatalogImportMode } from '../types/catalog-import.js';
 import {
     catalogOrgParamsSchema,
@@ -84,7 +83,7 @@ export async function catalogRoutes(fastify: FastifyInstance) {
             return null;
         }
 
-        const featureEnabled = await isFeatureEnabled(organizationId, FEATURE_KEYS.PRODUCT_RAG);
+        const featureEnabled = await hasCatalogAccess(organizationId);
         if (!featureEnabled) {
             reply.status(403).send({ success: false, error: 'Forbidden', code: 'FEATURE_DISABLED', message: FEATURE_DISABLED_MESSAGE });
             return null;

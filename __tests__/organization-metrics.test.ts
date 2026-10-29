@@ -3,6 +3,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { deleteTestOrganizations, deleteTestUsers } from './helpers/test-data-sweeper.js';
 import { validateEnv } from '../src/config/env.js';
 import supabasePlugin from '../src/plugins/supabase.js';
 import organizationMetricsRoutes from '../src/routes/organization-metrics.js';
@@ -38,10 +39,6 @@ async function createTestUserWithJwt(): Promise<TestUser> {
     return { userId: created.user.id, jwt: session.session.access_token };
 }
 
-async function deleteTestUser(userId: string): Promise<void> {
-    await supabaseAdmin.auth.admin.deleteUser(userId);
-}
-
 describe('GET /api/organizations/:id/metrics', () => {
     let owner: TestUser;
     let outsider: TestUser;
@@ -58,8 +55,6 @@ describe('GET /api/organizations/:id/metrics', () => {
     const CONV_WA_1 = `metrics-test-wa-1-${Date.now()}`;
     const CONV_ORPHAN = `metrics-test-orphan-${Date.now()}`;
     const CONV_OUTSIDE = `metrics-test-outside-${Date.now()}`;
-
-    const allConversationIds = [CONV_VOICE_1, CONV_VOICE_2, CONV_WA_1, CONV_ORPHAN, CONV_OUTSIDE];
 
     beforeAll(async () => {
         owner = await createTestUserWithJwt();
@@ -148,13 +143,11 @@ describe('GET /api/organizations/:id/metrics', () => {
     });
 
     afterAll(async () => {
-        await supabaseAdmin.from('usage_events').delete().in('conversation_id', allConversationIds);
-        await supabaseAdmin.from('leads').delete().in('conversation_id', allConversationIds);
-        await supabaseAdmin.from('contacts').delete().eq('id', sharedContactId);
-        await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
-        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
-        await deleteTestUser(owner.userId);
-        await deleteTestUser(outsider.userId);
+        // usage_events es append-only: su trigger bloquea el DELETE en cascada de
+        // la organización. deleteTestOrganizations recurre entonces a
+        // admin_delete_organizations_cascade y falla si no logra borrarla.
+        await deleteTestOrganizations(supabaseAdmin, [orgId]);
+        await deleteTestUsers(supabaseAdmin, [owner?.userId, outsider?.userId]);
     });
 
     it('sin JWT → 401', async () => {

@@ -3,6 +3,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { deleteTestOrganizations, deleteTestUsers } from './helpers/test-data-sweeper.js';
 import { validateEnv } from '../src/config/env.js';
 import supabasePlugin from '../src/plugins/supabase.js';
 import organizationMembersRoutes from '../src/routes/organization-members.js';
@@ -38,8 +39,9 @@ async function createTestUserWithJwt(): Promise<TestUser> {
     return { userId: created.user.id, jwt: session.session.access_token };
 }
 
+// Falla si no logra borrarlo: ignorar el error dejaba usuarios basura (ver migración 81).
 async function deleteTestUser(userId: string): Promise<void> {
-    await supabaseAdmin.auth.admin.deleteUser(userId);
+    await deleteTestUsers(supabaseAdmin, [userId]);
 }
 
 describe('routes/organization-members.ts — parámetros inválidos y ramas 500', () => {
@@ -63,7 +65,7 @@ describe('routes/organization-members.ts — parámetros inválidos y ramas 500'
     afterAll(async () => {
         await app.close();
         await supabaseAdmin.from('organization_members').delete().eq('organization_id', orgId);
-        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
+        await deleteTestOrganizations(supabaseAdmin, [orgId]);
         await deleteTestUser(owner.userId);
     });
 

@@ -1,7 +1,10 @@
-import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { Job } from 'pg-boss';
+import crypto from 'crypto';
 import { supabaseAdmin } from '../src/lib/supabase.js';
+import { createTestPlan, deleteTestPlan } from './helpers/test-plan.js';
+import { deleteTestOrganizations } from './helpers/test-data-sweeper.js';
 import { setFeatureOverride, clearEntitlementsCache } from '../src/services/entitlements.js';
 import { FEATURE_KEYS } from '../src/types/feature-taxonomy.js';
 
@@ -12,11 +15,12 @@ vi.mock('../src/services/email.js', () => ({
 import { sendCallSummaryEmail } from '../src/services/email.js';
 import { sendCallSummaryHandler, type SendCallSummaryJobData } from '../src/jobs/send-call-summary.js';
 
-// Organización real existente, plan 'starter'. El plan starter tiene
-// email_summaries con enabled:false en plan_features — la ruta de éxito
-// necesita un override explícito para concederla (ver beforeAll del primer
-// test), igual que la ruta de rechazo usa un override explícito para negarla.
-const REAL_ORG_ID = '56422ca1-ec44-45b4-9eac-7e068d9169be';
+// Organización y plan propios de la suite. El plan no incluye email_summaries: la
+// ruta de éxito la concede con un override explícito sobre ESTA organización.
+// Nunca se usa una organización real: borrar sus overrides en el finally
+// borraría las activaciones del superadmin.
+let ORG_ID: string;
+let TEST_PLAN_KEY: string;
 
 function buildFakeFastify(): FastifyInstance {
     return {
@@ -33,7 +37,7 @@ async function createCallLog(overrides: Record<string, unknown> = {}): Promise<s
     const { data, error } = await supabaseAdmin
         .from('call_logs')
         .insert({
-            organization_id: REAL_ORG_ID,
+            organization_id: ORG_ID,
             provider_call_id: `send-call-summary-test:${Date.now()}:${Math.random().toString(36).slice(2)}`,
             caller_phone: '+525599999999',
             duration_seconds: 185,
@@ -53,6 +57,22 @@ async function createCallLog(overrides: Record<string, unknown> = {}): Promise<s
 describe('4.2 — send-call-summary', () => {
     const createdCallLogIds: string[] = [];
 
+    beforeAll(async () => {
+        TEST_PLAN_KEY = await createTestPlan(supabaseAdmin);
+        const { data: org, error } = await supabaseAdmin
+            .from('organizations')
+            .insert({
+                name: 'Org (send-call-summary.test.ts)',
+                email: `org-send-call-summary-${crypto.randomUUID()}@example.invalid`,
+                plan_key: TEST_PLAN_KEY,
+                status: 'active',
+            })
+            .select('id')
+            .single();
+        if (error || !org) throw new Error(`No se pudo crear la organización de prueba: ${error?.message}`);
+        ORG_ID = org.id;
+    });
+
     afterEach(() => {
         vi.mocked(sendCallSummaryEmail).mockReset();
     });
@@ -61,10 +81,14 @@ describe('4.2 — send-call-summary', () => {
         if (createdCallLogIds.length > 0) {
             await supabaseAdmin.from('call_logs').delete().in('id', createdCallLogIds);
         }
+        // feature_audit_log (append-only) bloquea el DELETE simple: el helper
+        // recurre a admin_delete_organizations_cascade y falla si no la borra.
+        await deleteTestOrganizations(supabaseAdmin, [ORG_ID]);
+        await deleteTestPlan(supabaseAdmin, TEST_PLAN_KEY);
     });
 
-    it('con la feature email_summaries habilitada (por override; el plan starter la tiene apagada), envía la minuta y marca call_summary_sent_at', async () => {
-        const overrideResult = await setFeatureOverride(REAL_ORG_ID, FEATURE_KEYS.EMAIL_SUMMARIES, true, 'Prueba 4.2 ruta de éxito');
+    it('con la feature email_summaries habilitada (por override; el plan de prueba no la incluye), envía la minuta y marca call_summary_sent_at', async () => {
+        const overrideResult = await setFeatureOverride(ORG_ID, FEATURE_KEYS.EMAIL_SUMMARIES, true, 'Prueba 4.2 ruta de éxito');
         expect(overrideResult.success).toBe(true);
 
         try {
@@ -85,15 +109,15 @@ describe('4.2 — send-call-summary', () => {
             const { data: callLog } = await supabaseAdmin.from('call_logs').select('call_summary_sent_at').eq('id', callLogId).single();
             expect(callLog?.call_summary_sent_at).not.toBeNull();
         } finally {
-            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', FEATURE_KEYS.EMAIL_SUMMARIES);
-            clearEntitlementsCache(REAL_ORG_ID);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', ORG_ID).eq('feature_key', FEATURE_KEYS.EMAIL_SUMMARIES);
+            clearEntitlementsCache(ORG_ID);
         }
     });
 
     it('contraparte de rechazo: sin la feature email_summaries, se omite y no se envía correo', async () => {
         // Override explícito deshabilitando la feature para este org, aunque el
-        // plan starter la conceda por defecto (precedencia: override > plan).
-        const result = await setFeatureOverride(REAL_ORG_ID, FEATURE_KEYS.EMAIL_SUMMARIES, false, 'Prueba 4.2 feature deshabilitada');
+        // plan la concediera por defecto (precedencia: override > plan).
+        const result = await setFeatureOverride(ORG_ID, FEATURE_KEYS.EMAIL_SUMMARIES, false, 'Prueba 4.2 feature deshabilitada');
         expect(result.success).toBe(true);
 
         try {
@@ -109,8 +133,8 @@ describe('4.2 — send-call-summary', () => {
             const { data: callLog } = await supabaseAdmin.from('call_logs').select('call_summary_sent_at').eq('id', callLogId).single();
             expect(callLog?.call_summary_sent_at).toBeNull();
         } finally {
-            await supabaseAdmin.from('organization_features').delete().eq('organization_id', REAL_ORG_ID).eq('feature_key', FEATURE_KEYS.EMAIL_SUMMARIES);
-            clearEntitlementsCache(REAL_ORG_ID);
+            await supabaseAdmin.from('organization_features').delete().eq('organization_id', ORG_ID).eq('feature_key', FEATURE_KEYS.EMAIL_SUMMARIES);
+            clearEntitlementsCache(ORG_ID);
         }
     });
 

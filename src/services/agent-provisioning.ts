@@ -47,6 +47,36 @@ export async function getAuthorizedAgentTools(organizationId: string): Promise<A
             enabled: features.has('lead_capture'),
             requiredFeature: 'lead_capture',
         },
+        {
+            name: 'quotation_search',
+            description: 'Busca productos, servicios y planes en el catálogo para cotizar',
+            enabled: features.has('quotations'),
+            requiredFeature: 'quotations',
+        },
+        {
+            name: 'quotation_cart_set_item',
+            description: 'Agrega o actualiza la cantidad absoluta de una partida en el carrito de cotización del contacto',
+            enabled: features.has('quotations'),
+            requiredFeature: 'quotations',
+        },
+        {
+            name: 'quotation_cart_remove_item',
+            description: 'Elimina una partida del carrito de cotización del contacto',
+            enabled: features.has('quotations'),
+            requiredFeature: 'quotations',
+        },
+        {
+            name: 'quotation_cart_view',
+            description: 'Consulta el carrito de cotización actual o retoma uno previo del contacto',
+            enabled: features.has('quotations'),
+            requiredFeature: 'quotations',
+        },
+        {
+            name: 'quotation_finalize',
+            description: 'Emite la cotización con folio oficial y encola el envío del PDF por correo o WhatsApp',
+            enabled: features.has('quotations'),
+            requiredFeature: 'quotations',
+        },
     ];
 
     return ALL_TOOLS.filter((tool) => tool.enabled);

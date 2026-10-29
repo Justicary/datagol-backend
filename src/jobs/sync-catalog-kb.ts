@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import type { Job } from 'pg-boss';
 import { getSecret } from '../services/secret-service.js';
+import { isFeatureEnabled } from '../services/entitlements.js';
+import { FEATURE_KEYS } from '../types/feature-taxonomy.js';
 import { SECRET_KEYS } from '../types/secret-keys.js';
 import { KB_SYNC_STATUSES } from '../types/product-kb-sync-status.js';
 import {
@@ -50,6 +52,7 @@ interface ProductRow {
     id: string;
     catalog_id: string;
     name: string;
+    item_type?: string | null;
     category: string | null;
     active_components: string | null;
     suggested_use: string | null;
@@ -140,6 +143,18 @@ async function markError(fastify: FastifyInstance, productId: string, credential
 export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<SyncCatalogKbJobData>): Promise<void> {
     const { credentialGroupId, ownerOrganizationId } = job.data;
 
+    // H2 (AGENTS.md §16): una organización con `quotations` pero sin
+    // `product_rag` (plan `pro`) usa el catálogo para cotizar, nunca para
+    // sincronizar KB en ElevenLabs (lo que consumiría cuota de su cuenta).
+    const ragEnabled = await isFeatureEnabled(ownerOrganizationId, FEATURE_KEYS.PRODUCT_RAG);
+    if (!ragEnabled) {
+        fastify.log.info(
+            { tenant_id: ownerOrganizationId, credentialGroupId, ownerOrganizationId },
+            'sync-catalog-kb: feature product_rag deshabilitada para la organización propietaria, se omite'
+        );
+        return;
+    }
+
     const apiKey = await getSecret(ownerOrganizationId, SECRET_KEYS.ELEVENLABS_API_KEY);
     if (!apiKey) {
         fastify.log.info({ credentialGroupId, ownerOrganizationId }, 'sync-catalog-kb: sin credencial de ElevenLabs para el grupo, se omite');
@@ -162,7 +177,7 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
     const productIds = dueRows.map((row) => row.product_id as string);
     const { data: products, error: productsError } = await fastify.supabaseAdmin
         .from('products')
-        .select('id, catalog_id, name, category, active_components, suggested_use, description, contraindications, is_active, custom_fields')
+        .select('id, catalog_id, name, item_type, category, active_components, suggested_use, description, contraindications, is_active, custom_fields')
         .in('id', productIds);
 
     if (productsError) {
@@ -200,7 +215,7 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
 
             const { data: variants, error: variantsError } = await fastify.supabaseAdmin
                 .from('product_variants')
-                .select('sku, presentation, is_active')
+                .select('sku, presentation, is_active, billing_period')
                 .eq('product_id', row.product_id);
 
             if (variantsError) throw new Error(variantsError.message);
@@ -213,6 +228,7 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
 
             const productForKb: CatalogProductForKb = {
                 name: product.name,
+                itemType: product.item_type ?? 'producto',
                 category: product.category,
                 activeComponents: product.active_components,
                 suggestedUse: product.suggested_use,
@@ -224,6 +240,7 @@ export async function syncCatalogKbHandler(fastify: FastifyInstance, job: Job<Sy
                 sku: v.sku as string,
                 presentation: v.presentation as string | null,
                 isActive: v.is_active as boolean,
+                billingPeriod: (v as { billing_period?: string | null }).billing_period ?? null,
             }));
 
             const content = generateProductKbDocument(productForKb, variantsForKb);

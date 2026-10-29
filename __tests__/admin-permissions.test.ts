@@ -75,8 +75,16 @@ describe('routes/admin/permissions.ts — consola de permisos del superadmin (RB
         // db/migrations/56_catalogo_productos.sql BLOQUE 10 (catálogo de
         // productos) — no es sensible, así que viewer lo hereda igual que
         // view_contacts/view_conversations.
+        // view_waitlist y view_quotations (77_quotations.sql) siguen el mismo
+        // criterio: lectura no sensible.
         expect([...body.data.roleDefaults.viewer].sort()).toEqual(
-            [PERMISSION_KEYS.VIEW_CONTACTS, PERMISSION_KEYS.VIEW_CONVERSATIONS, PERMISSION_KEYS.VIEW_CATALOG].sort()
+            [
+                PERMISSION_KEYS.VIEW_CONTACTS,
+                PERMISSION_KEYS.VIEW_CONVERSATIONS,
+                PERMISSION_KEYS.VIEW_CATALOG,
+                PERMISSION_KEYS.VIEW_WAITLIST,
+                PERMISSION_KEYS.VIEW_QUOTATIONS,
+            ].sort()
         );
         expect(body.data.roleDefaults.member).toContain(PERMISSION_KEYS.EDIT_CONTACTS);
         expect(body.data.roleDefaults.member).not.toContain(PERMISSION_KEYS.MANAGE_USERS);

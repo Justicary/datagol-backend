@@ -2,7 +2,7 @@
 
 Este documento define las directrices obligatorias, estándares de arquitectura, políticas de calidad de código, pruebas unitarias y métricas de pruebas de mutación para el desarrollo en Antigravity IDE del backend (`datagol-backend`).
 
-Es documento hermano de `AGENTS.md` de `datagol-frontend`. Las secciones de principios de código, TypeScript, testing y QA workflow son deliberadamente simétricas; las secciones de latencia, webhooks, multi-tenancy, metering y secretos son exclusivas del backend.
+Es documento es hermano de `/home/justicary/proyectos/antigravity/mi-new-app/AGENTS.md` del proyecto `datagol-frontend`. Las secciones de principios de código, TypeScript, testing y QA workflow son deliberadamente simétricas; las secciones de latencia, webhooks, multi-tenancy, metering y secretos son exclusivas del backend.
 
 ---
 
@@ -77,7 +77,7 @@ datagol-api/
 │   ├── schemas/               # Esquemas Zod compartidos
 │   ├── lib/                   # Clientes de servicios (supabase, elevenlabs, telnyx, meta)
 │   └── types/                 # Tipos compartidos
-├── db/                        # Esquema de la Base de Datos
+├── db/                        # Esquema de la Base de Datos (schema.md)
 │   └── migrations/            # Migraciones SQL versionadas
 └── __tests__/                 # Pruebas unitarias e integración (Vitest)
 ```
@@ -283,6 +283,7 @@ A continuación se indexan los documentos técnicos y manuales operativos que no
 8. [Manual Técnico del Pasaporte de Superadmin (SSO delegado)](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/admin-passport-sso-tech-manual.md) (`docs/admin-passport-sso-tech-manual.md`): Pase Ed25519 emitido solo por `api.datagol.net` para entrar a `/admin` en cualquier instalación cliente, sesión local HS256 por instalación, `DEPLOYMENT_ID` como `aud`, endpoints `/control/admin-passport` y `/api/admin/sso/**`.
 9. [Manual Técnico de Jev (TypeSafe AI) vía OpenRouter](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/jev-typesafe-manual.md) (`docs/jev-typesafe-manual.md`): BYOK por organización aparte del LLM (`jev_api_key`, `integration_settings.jev`), endpoints `/jev-config` y `/jev/validate`, contrato de `POST /api/alpha/decisions` (noul/choice/score), `evaluateJevDecision()` con camino degradado, metering `jev` y prohibición de uso en `routes/tools/**`.
 10. [Manual de Integración del Canal Conversacional de Telegram](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/telegram-integration.md) (`docs/telegram-integration.md`): Arquitectura multi-tenant BYOB en Supabase Vault, arnés agnóstico de canal (`ask-harness.ts`), doble candado de webhook, vinculación `/start <token>` (Opción 2 + Opción A `member_permissions_in_org`) y los 6 candados de autorización por mensaje.
+11. [Manual Técnico de Cotizaciones con Carrito Conversacional](file:///home/justicary/proyectos/antigravity/datagol-backend/docs/quotations-tech-manual.md) (`docs/quotations-tech-manual.md`): tipos de partida (`producto`/`servicio`/`plan`) y `billing_period`, proyección `plans` → catálogo administrado, carrito por contacto, máquina de estados y folios sin huecos, contrato de las tools `/tools/:token/quotation/*`, cálculo en centavos con totales por modalidad, PDF, matriz de entrega correo/WhatsApp, metering, retención y exportación `datagol.quotation.v1`.
 
 ---
 

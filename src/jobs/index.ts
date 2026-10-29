@@ -20,6 +20,9 @@ import { registerCheckWaitlistExpirationsWorker } from './check-waitlist-expirat
 import { registerSendBulkConfirmationRequestWorker } from './send-bulk-confirmation-request.js';
 import { registerSendLicenseHeartbeatWorker } from './send-license-heartbeat.js';
 import { registerProcessTelegramUpdateWorker } from './process-telegram-update.js';
+import { registerGenerateQuotationPdfWorker } from './generate-quotation-pdf.js';
+import { registerDeliverQuotationWorker } from './deliver-quotation.js';
+import { registerSweepQuotationsWorker } from './sweep-quotations.js';
 
 /**
  * Registra todos los workers de pg-boss de la aplicación. Se invoca una vez
@@ -50,4 +53,8 @@ export async function registerJobs(fastify: FastifyInstance): Promise<void> {
     await registerSendLicenseHeartbeatWorker(fastify);
     // Canal conversacional de Telegram (docs/tasks/1TODO_telegram_system.md, Fase T6)
     await registerProcessTelegramUpdateWorker(fastify);
+    // Sistema de cotizaciones (docs/tasks/procedimiento-cotizaciones.md, Fase F)
+    await registerGenerateQuotationPdfWorker(fastify);
+    await registerDeliverQuotationWorker(fastify);
+    await registerSweepQuotationsWorker(fastify);
 }

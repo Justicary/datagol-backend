@@ -9,6 +9,9 @@ export default defineConfig({
         // cualquier archivo importe src/lib/supabase.ts (que cachea
         // validateEnv() en su nivel de módulo) — ver vitest.setup.ts.
         setupFiles: ['./vitest.setup.ts'],
+        // Borra organizaciones/usuarios de prueba que dejó una corrida
+        // interrumpida (su afterAll nunca corrió) — ver vitest.global-setup.ts.
+        globalSetup: ['./vitest.global-setup.ts'],
         // Varios archivos comparten la misma organización real (REAL_ORG_ID) y
         // mutan `organizations.webhook_token` / `organization_secrets` sobre esa
         // fila en beforeAll/afterAll. Con archivos en paralelo, esas escrituras

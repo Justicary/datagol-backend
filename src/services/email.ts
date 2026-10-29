@@ -740,3 +740,139 @@ export async function sendOrganizationInvitationEmail(params: SendOrganizationIn
     }
 }
 
+export interface SendQuotationEmailParams {
+    organizationId: string;
+    to: string | string[];
+    folio: string;
+    businessName: string;
+    customerName?: string | null;
+    totalFormatted: string;
+    validUntil?: string | null;
+    pdfBuffer?: Buffer | null;
+    pdfDownloadUrl?: string | null;
+    customMessage?: string | null;
+}
+
+export async function buildQuotationEmailContent(params: SendQuotationEmailParams): Promise<{
+    subject: string;
+    html: string;
+    text: string;
+    replyTo?: string;
+    attachBuffer: Buffer | null;
+    filename: string;
+}> {
+    const baseOptions = await resolveOrganizationEmailOptions(params.organizationId);
+    const primaryColor = baseOptions.theme?.accent || '#1e3a8a';
+    const filename = `${params.folio}.pdf`;
+    const canAttachDirectly = Boolean(
+        params.pdfBuffer && params.pdfBuffer.length > 0 && params.pdfBuffer.length <= 7 * 1024 * 1024
+    );
+
+    const safeBusiness = escapeHtml(params.businessName || 'Nuestro equipo');
+    const safeCustomer = params.customerName ? escapeHtml(params.customerName) : 'Cliente';
+    const safeFolio = escapeHtml(params.folio);
+    const safeTotal = escapeHtml(params.totalFormatted);
+    const safeValidUntil = params.validUntil ? escapeHtml(params.validUntil) : null;
+    const safeCustomMsg = params.customMessage ? escapeHtml(params.customMessage) : null;
+
+    const subject = `Cotización ${params.folio} — ${params.businessName || 'Datagol'}`;
+
+    const downloadBlockHtml =
+        !canAttachDirectly && params.pdfDownloadUrl
+            ? `<p style="margin: 16px 0;"><a href="${escapeHtml(params.pdfDownloadUrl)}" style="display:inline-block;padding:10px 18px;background:${primaryColor};color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">Descargar Cotización PDF (${safeFolio})</a></p>`
+            : `<p style="margin: 12px 0; color: #374151;">Encontrará adjunto a este correo el documento PDF con el desglose completo (<strong>${escapeHtml(filename)}</strong>).</p>`;
+
+    const html = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+            <div style="background: ${primaryColor}; color: #ffffff; padding: 18px 24px;">
+                <h2 style="margin: 0; font-size: 18px;">${safeBusiness}</h2>
+                <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">Cotización ${safeFolio}</p>
+            </div>
+            <div style="padding: 24px; color: #111827; line-height: 1.5;">
+                <p>Hola <strong>${safeCustomer}</strong>,</p>
+                <p>Le compartimos su cotización con folio <strong>${safeFolio}</strong> por un total inicial de <strong>${safeTotal}</strong>${safeValidUntil ? ` (vigente hasta el ${safeValidUntil})` : ''}.</p>
+                ${safeCustomMsg ? `<p>${safeCustomMsg}</p>` : ''}
+                ${downloadBlockHtml}
+                <p style="margin-top: 24px; font-size: 12px; color: #6b7280;">Cotización — no es comprobante fiscal.</p>
+            </div>
+        </div>
+    `.trim();
+
+    const textLines = [
+        `Hola ${params.customerName || 'Cliente'},`,
+        '',
+        `Le compartimos su cotización ${params.folio} de ${params.businessName || 'nuestro equipo'} por un total inicial de ${params.totalFormatted}${params.validUntil ? ` (vigente hasta el ${params.validUntil})` : ''}.`,
+    ];
+    if (params.customMessage) {
+        textLines.push('', params.customMessage);
+    }
+    if (!canAttachDirectly && params.pdfDownloadUrl) {
+        textLines.push('', `Descargue su cotización PDF aquí: ${params.pdfDownloadUrl}`);
+    } else {
+        textLines.push('', `Encontrará adjunto el archivo ${filename}.`);
+    }
+    textLines.push('', 'Cotización — no es comprobante fiscal.');
+
+    return {
+        subject,
+        html,
+        text: textLines.join('\n'),
+        replyTo: baseOptions.replyTo ?? undefined,
+        attachBuffer: canAttachDirectly && params.pdfBuffer ? params.pdfBuffer : null,
+        filename,
+    };
+}
+
+/**
+ * Envía una cotización por correo mediante Resend con replyTo de la organización.
+ * Adjunta el PDF si <= 7 MB; si excede 7 MB, incluye enlace firmado en el cuerpo.
+ */
+export async function sendQuotationEmail(params: SendQuotationEmailParams): Promise<{
+    sent: boolean;
+    providerMessageId?: string | null;
+    error?: string;
+}> {
+    const resend = getResendClient();
+    if (!resend) {
+        logger.warn('[Email] Omitiendo envío de cotización con Resend por falta de RESEND_API_KEY.');
+        return { sent: false, error: 'RESEND_API_KEY no configurada' };
+    }
+
+    const content = await buildQuotationEmailContent(params);
+
+    try {
+        const fromEmail = getFromEmail();
+        const response = await resend.emails.send({
+            from: fromEmail,
+            to: params.to,
+            subject: content.subject,
+            html: content.html,
+            text: content.text,
+            ...(content.attachBuffer
+                ? {
+                      attachments: [
+                          {
+                              filename: content.filename,
+                              content: content.attachBuffer,
+                          },
+                      ],
+                  }
+                : {}),
+            ...(content.replyTo ? { replyTo: content.replyTo } : {}),
+        });
+
+        if (response.error) {
+            logger.error({ error: response.error, to: params.to, folio: params.folio }, '[Email] Resend respondió con error al enviar cotización');
+            return { sent: false, error: response.error.message || 'Error de Resend' };
+        }
+
+        logger.info({ to: params.to, emailId: response.data?.id, folio: params.folio }, '[Email] Cotización enviada por correo con Resend');
+        return { sent: true, providerMessageId: response.data?.id ?? null };
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ err, msg, to: params.to, folio: params.folio }, '[Email] Excepción al enviar cotización con Resend');
+        return { sent: false, error: msg };
+    }
+}
+
+

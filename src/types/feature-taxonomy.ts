@@ -82,6 +82,11 @@ export const FEATURE_KEYS = {
     // requires_provider = 'telegram' (verifica telegram_bot_token en Vault) y
     // además forma parte de LLM_BACKED_FEATURE_KEYS (exige isLlmConfigValidated).
     TELEGRAM: 'telegram',
+    // Carrito conversacional por contacto y cotizaciones en PDF con folio
+    // enviadas por correo o WhatsApp (docs/tasks/procedimiento-cotizaciones.md,
+    // db/migrations/77_quotations.sql). Planes pro/elite/enterprise; starter = false.
+    // requires_provider = NULL (WhatsApp se verifica al enviar contra 'whatsapp').
+    QUOTATIONS: 'quotations',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

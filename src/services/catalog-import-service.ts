@@ -4,6 +4,8 @@ import { lookup as dnsLookup } from 'dns/promises';
 import { isIP } from 'net';
 import { FastifyInstance } from 'fastify';
 import { ALL_STOCK_STATUSES, isStockStatus, STOCK_STATUSES } from '../types/stock-status.js';
+import { ALL_CATALOG_ITEM_TYPES, CATALOG_ITEM_TYPES, isCatalogItemType } from '../types/catalog-item-type.js';
+import { ALL_BILLING_PERIODS, BILLING_PERIODS, isBillingPeriod } from '../types/billing-period.js';
 import { CATALOG_IMPORT_MODES, type CatalogImportMode } from '../types/catalog-import.js';
 import type { ColumnMapping } from '../schemas/catalog.js';
 import { uploadProductImage } from './product-image-service.js';
@@ -122,6 +124,9 @@ export interface ImportPlanRow {
     isUpdate: boolean;
     fields: {
         name?: string;
+        itemType?: string;
+        billingPeriod?: string;
+        satUnitKey?: string;
         category?: string;
         activeComponents?: string;
         suggestedUse?: string;
@@ -348,6 +353,32 @@ export function buildImportPlan(
             return;
         }
 
+        const itemTypeRaw = mapping.itemType ? (row[mapping.itemType] ?? '').trim().toLowerCase() : '';
+        let itemType: string = CATALOG_ITEM_TYPES.PRODUCTO;
+        if (itemTypeRaw) {
+            if (!isCatalogItemType(itemTypeRaw)) {
+                errors.push({
+                    row: rowNumber,
+                    message: `Tipo de partida "${itemTypeRaw}" no reconocido para el SKU "${skuRaw}" (valores válidos: ${ALL_CATALOG_ITEM_TYPES.join(', ')}).`,
+                });
+                return;
+            }
+            itemType = itemTypeRaw;
+        }
+
+        const billingPeriodRaw = mapping.billingPeriod ? (row[mapping.billingPeriod] ?? '').trim().toLowerCase() : '';
+        let billingPeriod: string | undefined;
+        if (billingPeriodRaw) {
+            if (!isBillingPeriod(billingPeriodRaw)) {
+                errors.push({
+                    row: rowNumber,
+                    message: `Modalidad de cobro "${billingPeriodRaw}" no reconocida para el SKU "${skuRaw}" (valores válidos: ${ALL_BILLING_PERIODS.join(', ')}).`,
+                });
+                return;
+            }
+            billingPeriod = billingPeriodRaw;
+        }
+
         const stockStatusRaw = mapping.stockStatus ? (row[mapping.stockStatus] ?? '').trim().toLowerCase() : '';
         let stockStatus: string | undefined;
         if (stockStatusRaw) {
@@ -360,6 +391,24 @@ export function buildImportPlan(
             }
             stockStatus = stockStatusRaw;
         }
+
+        if (itemType === CATALOG_ITEM_TYPES.PRODUCTO && stockStatus === STOCK_STATUSES.NO_APLICA) {
+            errors.push({
+                row: rowNumber,
+                message: `El SKU "${skuRaw}" es un producto inventariable y no puede tener stock_status "no_aplica".`,
+            });
+            return;
+        }
+
+        if (itemType !== CATALOG_ITEM_TYPES.PRODUCTO && stockStatus && stockStatus !== STOCK_STATUSES.NO_APLICA) {
+            errors.push({
+                row: rowNumber,
+                message: `El SKU "${skuRaw}" es de tipo "${itemType}" (no inventariable) y no puede tener stock_status "${stockStatus}".`,
+            });
+            return;
+        }
+
+        const satUnitKey = mapping.satUnitKey ? (row[mapping.satUnitKey] ?? '').trim() || undefined : undefined;
 
         const priceRaw = mapping.price ? row[mapping.price] : undefined;
         const price = priceRaw ? parsePrice(priceRaw) : null;
@@ -405,6 +454,9 @@ export function buildImportPlan(
             isUpdate,
             fields: {
                 name,
+                itemType,
+                billingPeriod: billingPeriod ?? BILLING_PERIODS.UNICO,
+                satUnitKey,
                 category: mapping.category ? row[mapping.category]?.trim() || undefined : undefined,
                 activeComponents: mapping.activeComponents ? row[mapping.activeComponents]?.trim() || undefined : undefined,
                 suggestedUse: mapping.suggestedUse ? row[mapping.suggestedUse]?.trim() || undefined : undefined,
@@ -499,6 +551,7 @@ export async function applyImportPlan(
                     .insert({
                         catalog_id: catalogId,
                         name: row.fields.name,
+                        item_type: row.fields.itemType ?? CATALOG_ITEM_TYPES.PRODUCTO,
                         category: row.fields.category ?? null,
                         active_components: row.fields.activeComponents ?? null,
                         suggested_use: row.fields.suggestedUse ?? null,
@@ -525,13 +578,18 @@ export async function applyImportPlan(
             }
 
             const existingVariant = existingVariantsBySkuUpper.get(row.skuUpper);
+            const effectiveItemType = row.fields.itemType ?? CATALOG_ITEM_TYPES.PRODUCTO;
+            const defaultStockStatus =
+                effectiveItemType === CATALOG_ITEM_TYPES.PRODUCTO ? STOCK_STATUSES.SIN_DATO : STOCK_STATUSES.NO_APLICA;
             const variantPayload: Record<string, unknown> = {
                 product_id: productId,
                 catalog_id: catalogId,
                 sku: row.sku,
                 presentation: row.fields.presentation ?? null,
                 price: row.fields.price ?? null,
-                stock_status: row.fields.stockStatus ?? STOCK_STATUSES.SIN_DATO,
+                billing_period: row.fields.billingPeriod ?? BILLING_PERIODS.UNICO,
+                sat_unit_key: row.fields.satUnitKey ?? null,
+                stock_status: row.fields.stockStatus ?? defaultStockStatus,
                 stock_note: row.fields.stockNote ?? null,
                 custom_fields: row.fields.variantCustomFields || {},
             };

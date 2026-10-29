@@ -34,6 +34,11 @@ import { listadoCorreosEnviadosIntent } from './listado-correos-enviados.js';
 import { correosConErrorIntent } from './correos-con-error.js';
 import { resumenCorreosRecibidosIntent } from './resumen-correos-recibidos.js';
 
+// Cotizaciones (3)
+import { conteoCotizacionesIntent } from './conteo-cotizaciones.js';
+import { tasaAceptacionCotizacionesIntent } from './tasa-aceptacion-cotizaciones.js';
+import { productosMasCotizadosIntent } from './productos-mas-cotizados.js';
+
 // Array heterogéneo con todas las definiciones de intenciones ejecutables
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const ALL_INTENTS: readonly NlIntentDefinition<any, any>[] = [
@@ -70,6 +75,11 @@ export const ALL_INTENTS: readonly NlIntentDefinition<any, any>[] = [
     listadoCorreosEnviadosIntent,
     correosConErrorIntent,
     resumenCorreosRecibidosIntent,
+
+    // Cotizaciones
+    conteoCotizacionesIntent,
+    tasaAceptacionCotizacionesIntent,
+    productosMasCotizadosIntent,
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -120,4 +130,7 @@ export {
     listadoCorreosEnviadosIntent,
     correosConErrorIntent,
     resumenCorreosRecibidosIntent,
+    conteoCotizacionesIntent,
+    tasaAceptacionCotizacionesIntent,
+    productosMasCotizadosIntent,
 };

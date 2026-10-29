@@ -45,7 +45,12 @@
     "src/services/jev/jev-decisions-client.ts",
     "src/services/jev-decision-service.ts",
     "src/services/reports/nl-jev-translation.ts",
-    "src/services/elevenlabs-group-org-resolution.ts"
+    "src/services/elevenlabs-group-org-resolution.ts",
+    "src/services/quotations/quotation-math.ts",
+    "src/services/quotations/quotation-folio.ts",
+    "src/services/quotations/quotation-cart-summary.ts",
+    "src/services/quotations/quotation-validity.ts",
+    "src/lib/number-to-spanish-words.ts"
   ],
   "thresholds": {
     "high": 90,

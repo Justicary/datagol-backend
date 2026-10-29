@@ -116,7 +116,7 @@ describe('src/jobs/sync-catalog-kb.ts', () => {
 
         const { data: owner, error: ownerErr } = await supabaseAdmin
             .from('organizations')
-            .insert({ name: 'Owner (sync-catalog-kb.test.ts)', email: `owner-sync-kb-test-${Date.now()}@example.invalid`, credential_group_id: groupId })
+            .insert({ name: 'Owner (sync-catalog-kb.test.ts)', email: `owner-sync-kb-test-${Date.now()}@example.invalid`, credential_group_id: groupId, plan_key: 'elite' })
             .select('id')
             .single();
         if (ownerErr || !owner) throw new Error(`No se pudo crear owner: ${ownerErr?.message}`);

@@ -298,6 +298,7 @@ Personal de Datagol con acceso transversal. Nivel support es de solo lectura.
 | `show_retainer` | `bool` |  |
 | `max_users` | `int4` |  |
 | `max_mailboxes` | `int4` |  Nullable |
+| `annual_retainer_discount_pct` | `numeric` |  |
 
 ## Table `plan_features`
 
@@ -595,6 +596,8 @@ Bitácora de preguntas que el módulo de reportes en lenguaje natural no pudo re
 
 ## Table `permission_audit_log`
 
+Append-only (sin `UPDATE`/`DELETE`), salvo el `SET NULL` de `organization_id` (migración 47) y de `target_user_id`/`actor_user_id` al borrar un usuario (migración 81).
+
 ### Columns
 
 | Name | Type | Constraints |
@@ -737,6 +740,7 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
 | `kb_folder_id` | `text` |  Nullable |
+| `managed_source` | `text` |  Nullable, Unique (parcial) |
 
 ## Table `catalog_access`
 
@@ -775,6 +779,9 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `image_size_bytes` | `int8` |  Nullable |
 | `image_uploaded_at` | `timestamptz` |  Nullable |
 | `custom_fields` | `jsonb` |  |
+| `item_type` | `text` |  |
+| `is_inventoriable` | `bool` |  Generated (`item_type = 'producto'`) |
+| `bundle_parent_id` | `uuid` |  Nullable |
 
 ## Table `product_variants`
 
@@ -799,6 +806,8 @@ Reparto informativo del pozo del grupo. Al rebasarse se avisa; nunca se rechaza 
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
 | `custom_fields` | `jsonb` |  |
+| `billing_period` | `text` |  |
+| `sat_unit_key` | `text` |  Nullable |
 
 ## Table `variant_price_history`
 
@@ -1128,6 +1137,8 @@ Cola de espera de citas (docs/tasks/waitlist_confirmacion_masiva.md). Matchmakin
 
 ## Table `deployment_events`
 
+Append-only (sin `UPDATE`/`DELETE`), salvo la cascada del borrado del despliegue y el `SET NULL` de `actor_user_id` al borrar un usuario (migración 80).
+
 ### Columns
 
 | Name | Type | Constraints |
@@ -1256,6 +1267,170 @@ Bitácora de auditoría operativa del canal Telegram (metadatos de ejecución e 
 | `execution_time_ms` | `int4` |  Nullable |
 | `error` | `text` |  Nullable |
 | `created_at` | `timestamptz` |  |
+
+## Table `quotation_settings`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `organization_id` | `uuid` | Primary |
+| `folio_prefix` | `text` |  |
+| `validity_days` | `int4` |  |
+| `cart_ttl_hours` | `int4` |  |
+| `max_items` | `int4` |  |
+| `terms_text` | `text` |  Nullable |
+| `notes_default` | `text` |  Nullable |
+| `email_sender` | `text` |  |
+| `email_account_id` | `uuid` |  Nullable |
+| `whatsapp_template_name` | `text` |  Nullable |
+| `updated_at` | `timestamptz` |  |
+| `updated_by` | `uuid` |  Nullable |
+
+## Table `quotation_folio_counters`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `organization_id` | `uuid` | Primary |
+| `year` | `int4` | Primary |
+| `last_value` | `int8` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `quotations`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `status` | `text` |  |
+| `origin` | `text` |  |
+| `contact_id` | `uuid` |  Nullable (NOT NULL si `status = 'borrador'`) |
+| `first_conversation_id` | `text` |  Nullable |
+| `last_conversation_id` | `text` |  Nullable |
+| `last_channel` | `text` |  Nullable |
+| `customer_name` | `text` |  Nullable |
+| `customer_email` | `text` |  Nullable |
+| `customer_phone_e164` | `text` |  Nullable |
+| `customer_business_name` | `text` |  Nullable |
+| `folio` | `text` |  Nullable, Unique (`organization_id`, `folio`) |
+| `folio_year` | `int4` |  Nullable |
+| `folio_number` | `int8` |  Nullable |
+| `revision_of_id` | `uuid` |  Nullable |
+| `revision_number` | `int4` |  |
+| `currency` | `text` |  |
+| `subtotal` | `numeric` |  |
+| `tax_total` | `numeric` |  |
+| `discount_total` | `numeric` |  |
+| `total` | `numeric` |  |
+| `totals_by_billing` | `jsonb` |  |
+| `tax_breakdown` | `jsonb` |  |
+| `notes` | `text` |  Nullable |
+| `terms_text` | `text` |  Nullable |
+| `issued_at` | `timestamptz` |  Nullable |
+| `valid_until` | `date` |  Nullable |
+| `pdf_storage_path` | `text` |  Nullable |
+| `pdf_sha256` | `text` |  Nullable |
+| `pdf_generated_at` | `timestamptz` |  Nullable |
+| `last_activity_at` | `timestamptz` |  |
+| `accepted_at` | `timestamptz` |  Nullable |
+| `rejected_at` | `timestamptz` |  Nullable |
+| `cancelled_at` | `timestamptz` |  Nullable |
+| `status_reason` | `text` |  Nullable |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+| `created_by` | `uuid` |  Nullable |
+
+Índice único parcial `ux_quotations_open_cart_per_contact (organization_id, contact_id) WHERE status = 'borrador'`: un solo carrito abierto por contacto.
+
+## Table `quotation_items`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `quotation_id` | `uuid` |  |
+| `organization_id` | `uuid` |  |
+| `line_number` | `int4` |  Unique (`quotation_id`, `line_number`) |
+| `variant_id` | `uuid` |  Unique (`quotation_id`, `variant_id`); sin FK deliberadamente |
+| `product_id` | `uuid` |  Sin FK |
+| `catalog_id` | `uuid` |  Sin FK |
+| `sku` | `text` |  |
+| `external_id` | `text` |  Nullable |
+| `sat_product_key` | `text` |  Nullable |
+| `sat_unit_key` | `text` |  Nullable |
+| `item_type` | `text` |  |
+| `billing_period` | `text` |  |
+| `product_name` | `text` |  |
+| `presentation` | `text` |  Nullable |
+| `description` | `text` |  Nullable |
+| `quantity` | `numeric` |  |
+| `unit_price` | `numeric` |  |
+| `price_includes_tax` | `bool` |  |
+| `tax_rate` | `numeric` |  |
+| `discount_amount` | `numeric` |  |
+| `line_subtotal` | `numeric` |  |
+| `line_tax` | `numeric` |  |
+| `line_total` | `numeric` |  |
+| `created_at` | `timestamptz` |  |
+| `updated_at` | `timestamptz` |  |
+
+## Table `quotation_deliveries`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `quotation_id` | `uuid` |  |
+| `channel` | `text` |  |
+| `recipient` | `text` |  Nullable |
+| `status` | `text` |  |
+| `skip_reason` | `text` |  Nullable |
+| `error` | `text` |  Nullable |
+| `provider_message_id` | `text` |  Nullable |
+| `idempotency_key` | `text` |  Unique (`organization_id`, `idempotency_key`) |
+| `attempts` | `int4` |  |
+| `sent_at` | `timestamptz` |  Nullable |
+| `created_at` | `timestamptz` |  |
+
+## Table `quotation_events`
+
+### Columns
+
+| Name | Type | Constraints |
+|------|------|-------------|
+| `id` | `uuid` | Primary |
+| `organization_id` | `uuid` |  |
+| `quotation_id` | `uuid` |  |
+| `event_type` | `text` |  |
+| `actor_user_id` | `uuid` |  Nullable |
+| `conversation_id` | `text` |  Nullable |
+| `payload` | `jsonb` |  |
+| `created_at` | `timestamptz` |  |
+
+Append-only (sin `UPDATE`/`DELETE`), salvo la cascada de `purge_abandoned_quotations()` y el `SET NULL` de `actor_user_id` al borrar un usuario (migración 79).
+
+## Functions (cotizaciones y catálogo, migraciones 76–77)
+
+| Función | Propósito |
+|---------|-----------|
+| `organization_has_catalog_feature(p_org_id)` | `product_rag` o `quotations` habilitada; guarda de escritura RLS del catálogo (H19). |
+| `resolve_variant_for_org(...)` | Resolución determinista (organización dueña primero) y devuelve `item_type`, `is_inventoriable`, `billing_period`. |
+| `sync_plan_to_catalog(p_plan_key)` | Proyecta `plans` al catálogo `managed_source = 'datagol_plans'`; disparada por trigger en `plans`. |
+| `guard_managed_catalog_rows()` | Trigger: rechaza ediciones de campos administrados fuera de `datagol.managed_sync = 'on'`. |
+| `enforce_variant_item_type()` | Trigger: no inventariables → `stock_status = 'no_aplica'`. |
+| `quotation_cart_apply(...)` | Carrito por contacto: `set` / `remove` / `view`. |
+| `quotation_emit(...)` | Emisión con folio sin huecos, re-resolución de precios y snapshots. |
+| `quotation_search_products(...)` | Búsqueda léxica `pg_trgm` restringida a `catalog_access`. |
+| `quotation_transition_allowed(from, to)` | Máquina de estados. |
+| `purge_abandoned_quotations()` | Purga diaria (`pg_cron`) solo de `abandonada` vencidas por `retention_days`. |
+| `admin_delete_organizations_cascade(ids)` | (Migración 78) Borra con `replica` solo filas append-only (`usage_events`, `contact_notes`, `feature_audit_log`) y luego un `DELETE` normal con cascada completa. Ejecutable solo por `service_role`. |
 
 ## RLS Policies
 
@@ -1503,7 +1678,7 @@ Bitácora de auditoría operativa del canal Telegram (metadatos de ejecución e 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `product_variants_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
-| `product_variants_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+| `product_variants_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text) AND organization_has_catalog_feature(ca.organization_id))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text) AND organization_has_catalog_feature(ca.organization_id))))` |
 
 ### `catalog_import_mappings`
 
@@ -1516,7 +1691,7 @@ Bitácora de auditoría operativa del canal Telegram (metadatos de ejecución e 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `products_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
-| `products_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+| `products_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text) AND organization_has_catalog_feature(ca.organization_id))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text) AND organization_has_catalog_feature(ca.organization_id))))` |
 
 ### `appointment_waitlist`
 
@@ -1530,7 +1705,7 @@ Bitácora de auditoría operativa del canal Telegram (metadatos de ejecución e 
 | Policy | Command | Roles | Action | USING | WITH CHECK |
 |--------|---------|-------|--------|-------|------------|
 | `catalog_custom_fields_read` | SELECT | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT auth_catalog_ids() AS auth_catalog_ids))` | — |
-| `catalog_custom_fields_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text))))` |
+| `catalog_custom_fields_write` | ALL | authenticated | PERMISSIVE | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text) AND organization_has_catalog_feature(ca.organization_id))))` | `(catalog_id IN ( SELECT ca.catalog_id    FROM catalog_access ca   WHERE ((ca.organization_id IN ( SELECT auth_active_organization_ids() AS auth_active_organization_ids)) AND ca.can_edit AND has_permission(ca.organization_id, 'manage_catalog'::text) AND organization_has_catalog_feature(ca.organization_id))))` |
 
 ### `license_client_state`
 
@@ -1631,3 +1806,38 @@ Bitácora de auditoría operativa del canal Telegram (metadatos de ejecución e 
 |--------|---------|-------|--------|-------|------------|
 | `telegram_messages_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'use_nl_reports'::text)` | — |
 
+### `quotation_settings`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quotation_settings_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_quotations'::text)` | — |
+
+### `quotation_folio_counters`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quotation_folio_counters_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_quotations'::text)` | — |
+
+### `quotations`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quotations_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_quotations'::text)` | — |
+
+### `quotation_items`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quotation_items_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_quotations'::text)` | — |
+
+### `quotation_deliveries`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quotation_deliveries_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_quotations'::text)` | — |
+
+### `quotation_events`
+
+| Policy | Command | Roles | Action | USING | WITH CHECK |
+|--------|---------|-------|--------|-------|------------|
+| `quotation_events_read` | SELECT | authenticated | PERMISSIVE | `has_permission(organization_id, 'view_quotations'::text)` | — |

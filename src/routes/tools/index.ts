@@ -8,6 +8,7 @@ import { appointmentToolRoute } from './appointment.js';
 import { emailToolRoute } from './email.js';
 import { productsToolRoute } from './products.js';
 import { waitlistToolRoute } from './waitlist.js';
+import { quotationToolRoutes } from './quotation.js';
 import { recordToolDuration } from '../../lib/tool-latency-tracker.js';
 
 /**
@@ -27,6 +28,15 @@ export async function toolRoutes(fastify: FastifyInstance) {
         const durationMs = started ? Number(process.hrtime.bigint() - started) / 1_000_000 : undefined;
         if (durationMs !== undefined) {
             recordToolDuration(durationMs);
+            const routeUrl = request.routeOptions?.url ?? request.url;
+            if (routeUrl.includes('/quotation/') && durationMs > 300) {
+                request.log.warn({
+                    route: routeUrl,
+                    durationMs,
+                    budgetMs: 300,
+                    msg: 'Alerta de latencia: tool de cotizaciones excedió el presupuesto p95 de 300 ms',
+                });
+            }
         }
         request.log.info({
             route: request.routeOptions?.url ?? request.url,
@@ -47,6 +57,8 @@ export async function toolRoutes(fastify: FastifyInstance) {
     await fastify.register(productsToolRoute);
     // Lista de espera (docs/tasks/waitlist_confirmacion_masiva.md, Tarea B2)
     await fastify.register(waitlistToolRoute);
+    // Carrito conversacional y emisión de cotizaciones (docs/tasks/procedimiento-cotizaciones.md, FASE D)
+    await fastify.register(quotationToolRoutes);
 }
 
 export default toolRoutes;

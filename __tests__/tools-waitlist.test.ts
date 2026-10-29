@@ -4,6 +4,8 @@ import { supabaseAdmin } from '../src/lib/supabase.js';
 import { setSecret, clearSecretCache } from '../src/services/secret-service.js';
 import { clearEntitlementsCache } from '../src/services/entitlements.js';
 import { SECRET_KEYS } from '../src/types/secret-keys.js';
+import { createTestPlan, deleteTestPlan } from './helpers/test-plan.js';
+import { deleteTestOrganizations } from './helpers/test-data-sweeper.js';
 import { waitlistToolRoute } from '../src/routes/tools/waitlist.js';
 import { WAITLIST_PRIORITIES, WAITLIST_STATUSES } from '../src/types/waitlist.js';
 
@@ -22,8 +24,14 @@ describe('POST /tools/:webhookToken/waitlist', () => {
     const createdWaitlistIds: string[] = [];
     const createdContactIds: string[] = [];
     let orgId: string;
+    // Planes inventados: no dependen de lo que el superadmin active en elite/starter.
+    let planWithWaitlist: string;
+    let planWithoutWaitlist: string;
 
     beforeAll(async () => {
+        planWithWaitlist = await createTestPlan(supabaseAdmin, { waitlist: true });
+        planWithoutWaitlist = await createTestPlan(supabaseAdmin);
+
         const { data: org, error: orgErr } = await supabaseAdmin
             .from('organizations')
             .insert({
@@ -31,7 +39,7 @@ describe('POST /tools/:webhookToken/waitlist', () => {
                 email: `org-tools-waitlist-test-${Date.now()}@example.invalid`,
                 webhook_token: TEST_WEBHOOK_TOKEN,
                 status: 'active',
-                plan_key: 'elite', // Plan con feature waitlist
+                plan_key: planWithWaitlist,
             })
             .select('id')
             .single();
@@ -52,7 +60,9 @@ describe('POST /tools/:webhookToken/waitlist', () => {
         }
         await supabaseAdmin.from('organization_secrets').delete().eq('organization_id', orgId);
         clearSecretCache(orgId);
-        await supabaseAdmin.from('organizations').delete().eq('id', orgId);
+        await deleteTestOrganizations(supabaseAdmin, [orgId]);
+        await deleteTestPlan(supabaseAdmin, planWithWaitlist);
+        await deleteTestPlan(supabaseAdmin, planWithoutWaitlist);
     });
 
     beforeEach(() => {
@@ -127,8 +137,8 @@ describe('POST /tools/:webhookToken/waitlist', () => {
     });
 
     it('responde amablemente sin error si la organización no tiene la feature waitlist', async () => {
-        // Cambiamos temporalmente a starter
-        await supabaseAdmin.from('organizations').update({ plan_key: 'starter' }).eq('id', orgId);
+        // Cambiamos temporalmente a un plan sin la feature
+        await supabaseAdmin.from('organizations').update({ plan_key: planWithoutWaitlist }).eq('id', orgId);
         clearEntitlementsCache(orgId);
 
         const app = await buildTestApp();
@@ -150,7 +160,7 @@ describe('POST /tools/:webhookToken/waitlist', () => {
             expect(body.waitlisted).toBe(false);
             expect(body.message).toContain('no contamos con lista de espera');
         } finally {
-            await supabaseAdmin.from('organizations').update({ plan_key: 'elite' }).eq('id', orgId);
+            await supabaseAdmin.from('organizations').update({ plan_key: planWithWaitlist }).eq('id', orgId);
             clearEntitlementsCache(orgId);
             await app.close();
         }

@@ -45,6 +45,10 @@ export const PERMISSION_KEYS = {
     // credenciales ni datos de facturación.
     VIEW_WAITLIST: 'view_waitlist',
     MANAGE_WAITLIST: 'manage_waitlist',
+    // Cotizaciones y carrito conversacional (docs/tasks/procedimiento-cotizaciones.md,
+    // db/migrations/77_quotations.sql).
+    VIEW_QUOTATIONS: 'view_quotations',
+    MANAGE_QUOTATIONS: 'manage_quotations',
 } as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[keyof typeof PERMISSION_KEYS];

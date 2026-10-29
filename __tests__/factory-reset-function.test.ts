@@ -34,6 +34,16 @@ const RESET_TABLES = [
     'organization_usage_alerts',
     'concurrency_quota_alerts',
     'catalog_imports',
+    // Canal de Telegram (migración 75).
+    'telegram_conversations',
+    'telegram_link_tokens',
+    'telegram_messages',
+    // Cotizaciones (migración 77): el reset reinicia también los folios.
+    'quotation_deliveries',
+    'quotation_events',
+    'quotation_items',
+    'quotations',
+    'quotation_folio_counters',
 ] as const;
 
 // Configuración, infraestructura y facturación: el conteo no debe cambiar.

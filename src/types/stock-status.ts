@@ -15,6 +15,7 @@ export const STOCK_STATUSES = {
     AGOTADO: 'agotado',
     BAJO_PEDIDO: 'bajo_pedido',
     SIN_DATO: 'sin_dato',
+    NO_APLICA: 'no_aplica',
 } as const;
 
 export type StockStatus = (typeof STOCK_STATUSES)[keyof typeof STOCK_STATUSES];
@@ -32,6 +33,9 @@ export function isStockStatus(value: string): value is StockStatus {
  * piezas"): siempre la matiza y ofrece confirmarla. Este es el único lugar
  * del backend que redacta esa matización; el system prompt (FASE G) la
  * refuerza, no la reemplaza.
+ *
+ * Para `no_aplica` (servicios y planes, migración 76) devuelve cadena vacía:
+ * no se mencionan existencias.
  */
 export const STOCK_STATUS_SPEECH: Record<StockStatus, string> = {
     disponible: 'Según mi información hay disponible, aunque conviene confirmarlo',
@@ -39,6 +43,7 @@ export const STOCK_STATUS_SPEECH: Record<StockStatus, string> = {
     agotado: 'Me aparece agotado',
     bajo_pedido: 'Es sobre pedido',
     sin_dato: 'No tengo la disponibilidad a la mano',
+    no_aplica: '',
 };
 
 export function stockStatusToSpeech(value: string): string {

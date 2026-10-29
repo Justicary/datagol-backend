@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../../src/lib/supabase.js';
+import { deleteTestCustomers, deleteTestDeployments } from './test-data-sweeper.js';
 
 /**
  * Fixtures reales (no mockeados) de `customers`/`deployments` para las
@@ -44,22 +45,11 @@ export async function createTestDeployment(customerId: string, overrides: Record
     return data;
 }
 
+/** Falla si no logra borrarlo: un `afterAll` que ignora el error deja basura en silencio. */
 export async function cleanupDeployment(deploymentId: string): Promise<void> {
-    await supabaseAdmin.from('license_heartbeats').delete().eq('deployment_id', deploymentId);
-    await supabaseAdmin.from('licenses').delete().eq('deployment_id', deploymentId);
-    await supabaseAdmin.from('deployment_events').delete().eq('deployment_id', deploymentId);
-    await supabaseAdmin.from('provisioning_tasks').delete().eq('deployment_id', deploymentId);
-    const { data: contracts } = await supabaseAdmin.from('contracts').select('id').eq('deployment_id', deploymentId);
-    if (contracts?.length) {
-        await supabaseAdmin
-            .from('contract_otp_codes')
-            .delete()
-            .in('contract_id', contracts.map((c) => c.id));
-        await supabaseAdmin.from('contracts').delete().eq('deployment_id', deploymentId);
-    }
-    await supabaseAdmin.from('deployments').delete().eq('id', deploymentId);
+    await deleteTestDeployments(supabaseAdmin, [deploymentId]);
 }
 
 export async function cleanupCustomer(customerId: string): Promise<void> {
-    await supabaseAdmin.from('customers').delete().eq('id', customerId);
+    await deleteTestCustomers(supabaseAdmin, [customerId]);
 }

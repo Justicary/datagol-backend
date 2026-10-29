@@ -67,6 +67,9 @@ export type ShareCatalogBody = z.infer<typeof shareCatalogBodySchema>;
 export const columnMappingSchema = z.object({
     sku: z.string().min(1),
     name: z.string().min(1).optional(),
+    itemType: z.string().min(1).optional(),
+    billingPeriod: z.string().min(1).optional(),
+    satUnitKey: z.string().min(1).optional(),
     category: z.string().min(1).optional(),
     activeComponents: z.string().min(1).optional(),
     suggestedUse: z.string().min(1).optional(),

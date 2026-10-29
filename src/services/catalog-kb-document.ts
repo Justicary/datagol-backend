@@ -9,6 +9,7 @@ import crypto from 'crypto';
  */
 export interface CatalogProductForKb {
     name: string;
+    itemType?: 'producto' | 'servicio' | 'plan' | string | null;
     category: string | null;
     activeComponents: string | null;
     suggestedUse: string | null;
@@ -21,7 +22,20 @@ export interface CatalogVariantForKb {
     sku: string;
     presentation: string | null;
     isActive: boolean;
+    billingPeriod?: 'unico' | 'mensual' | 'anual' | string | null;
 }
+
+const ITEM_TYPE_LABELS: Record<string, string> = {
+    producto: 'Producto',
+    servicio: 'Servicio',
+    plan: 'Plan',
+};
+
+const BILLING_PERIOD_LABELS: Record<string, string> = {
+    unico: 'pago único',
+    mensual: 'pago mensual',
+    anual: 'pago anual',
+};
 
 export class NoActiveVariantsError extends Error {
     constructor(productName: string) {
@@ -62,6 +76,22 @@ export function generateProductKbDocument(product: CatalogProductForKb, variants
     );
 
     const bodyLines: string[] = [product.name];
+    const normalizedItemType = (product.itemType ?? 'producto').toLowerCase();
+    const billingPeriods = Array.from(
+        new Set(
+            activeVariants
+                .map((v) => v.billingPeriod?.trim().toLowerCase())
+                .filter((bp): bp is string => Boolean(bp))
+        )
+    );
+    const hasRecurringBilling = billingPeriods.some((bp) => bp !== 'unico');
+    if (normalizedItemType !== 'producto' || hasRecurringBilling) {
+        const typeLabel = ITEM_TYPE_LABELS[normalizedItemType] ?? normalizedItemType;
+        const periodLabels = (billingPeriods.length > 0 ? billingPeriods : ['unico']).map(
+            (bp) => BILLING_PERIOD_LABELS[bp] ?? bp
+        );
+        bodyLines.push(`Tipo: ${typeLabel} (${periodLabels.join(', ')})`);
+    }
     if (product.category) bodyLines.push(`Categoría: ${product.category}`);
     if (product.activeComponents) bodyLines.push(`Componentes activos: ${product.activeComponents}`);
     if (product.suggestedUse) bodyLines.push(`Uso sugerido: ${product.suggestedUse}`);

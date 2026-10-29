@@ -17,7 +17,12 @@ interface PlanUpdateBody {
     retainerIncludes?: string[];
     ctaText?: string;
     showRetainer?: boolean;
+    annualRetainerDiscountPct?: number;
     features?: string[];
+}
+
+interface CatalogBindingBody {
+    organizationId?: string;
 }
 
 interface ExchangeRateBody {
@@ -126,8 +131,160 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
                 retainerIncludes: plan.retainer_includes ?? [],
                 ctaText: plan.cta_text,
                 showRetainer: plan.show_retainer,
+                annualRetainerDiscountPct: Number(plan.annual_retainer_discount_pct ?? 0.2),
                 features: planFeaturesMap.get(plan.key) ?? [],
             })),
+        });
+    });
+
+    /**
+     * GET /api/admin/plans/catalog-binding
+     * Estado de vinculación del catálogo administrado `datagol_plans` (Fase B2.3).
+     */
+    fastify.get('/api/admin/plans/catalog-binding', async (_request, reply) => {
+        const { data: catalog, error } = await supabaseAdmin
+            .from('catalogs')
+            .select('id, owner_organization_id, updated_at')
+            .eq('managed_source', 'datagol_plans')
+            .maybeSingle();
+
+        if (error) {
+            return reply.status(500).send({ success: false, error: 'InternalServerError', message: error.message });
+        }
+
+        if (!catalog) {
+            return reply.send({
+                success: true,
+                data: {
+                    bound: false,
+                    catalogId: null,
+                    ownerOrganizationId: null,
+                    projectedProductsCount: 0,
+                    lastSyncedAt: null,
+                },
+            });
+        }
+
+        const { data: products, error: prodErr } = await supabaseAdmin
+            .from('products')
+            .select('id, updated_at')
+            .eq('catalog_id', catalog.id);
+
+        if (prodErr) {
+            return reply.status(500).send({ success: false, error: 'InternalServerError', message: prodErr.message });
+        }
+
+        const lastSyncedAt =
+            (products ?? []).reduce<string | null>((latest, row) => {
+                const ts = row.updated_at as string | null;
+                if (!ts) return latest;
+                return !latest || ts > latest ? ts : latest;
+            }, null) ?? (catalog.updated_at as string | null);
+
+        return reply.send({
+            success: true,
+            data: {
+                bound: true,
+                catalogId: catalog.id,
+                ownerOrganizationId: catalog.owner_organization_id,
+                projectedProductsCount: (products ?? []).length,
+                lastSyncedAt,
+            },
+        });
+    });
+
+    /**
+     * POST /api/admin/plans/catalog-binding
+     * Crea o reutiliza el catálogo `"Planes Datagol"` con `managed_source = 'datagol_plans'`
+     * (`is_shared = false`, D9) en la organización indicada y proyecta todos los planes.
+     */
+    fastify.post<{ Body: CatalogBindingBody }>('/api/admin/plans/catalog-binding', async (request, reply) => {
+        const rawOrgId = request.body?.organizationId;
+        if (typeof rawOrgId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawOrgId.trim())) {
+            return reply.status(400).send({ success: false, error: 'BadRequest', message: 'El campo "organizationId" debe ser un UUID válido.' });
+        }
+        const organizationId = rawOrgId.trim();
+
+        const { data: org, error: orgErr } = await supabaseAdmin
+            .from('organizations')
+            .select('id')
+            .eq('id', organizationId)
+            .maybeSingle();
+
+        if (orgErr || !org) {
+            return reply.status(404).send({ success: false, error: 'NotFound', message: 'La organización indicada no existe.' });
+        }
+
+        const { data: existingCatalog, error: catErr } = await supabaseAdmin
+            .from('catalogs')
+            .select('id, owner_organization_id')
+            .eq('managed_source', 'datagol_plans')
+            .maybeSingle();
+        let catalog = existingCatalog;
+
+        if (catErr) {
+            return reply.status(500).send({ success: false, error: 'InternalServerError', message: catErr.message });
+        }
+
+        if (!catalog) {
+            const { data: created, error: createErr } = await supabaseAdmin
+                .from('catalogs')
+                .insert({
+                    owner_organization_id: organizationId,
+                    name: 'Planes Datagol',
+                    description: 'Catálogo administrado proyectado automáticamente desde la tabla plans.',
+                    is_shared: false,
+                    managed_source: 'datagol_plans',
+                })
+                .select('id, owner_organization_id')
+                .single();
+
+            if (createErr || !created) {
+                return reply.status(500).send({
+                    success: false,
+                    error: 'InternalServerError',
+                    message: createErr?.message ?? 'No se pudo crear el catálogo administrado.',
+                });
+            }
+            catalog = created;
+        }
+
+        const { data: plans, error: plansErr } = await supabaseAdmin.from('plans').select('key').order('sort_order', { ascending: true });
+        if (plansErr) {
+            return reply.status(500).send({ success: false, error: 'InternalServerError', message: plansErr.message });
+        }
+
+        for (const plan of plans ?? []) {
+            const { error: syncErr } = await supabaseAdmin.rpc('sync_plan_to_catalog', { p_plan_key: plan.key });
+            if (syncErr) {
+                return reply.status(500).send({
+                    success: false,
+                    error: 'InternalServerError',
+                    message: `Error proyectando el plan '${plan.key}': ${syncErr.message}`,
+                });
+            }
+        }
+
+        const { data: projectedProducts } = await supabaseAdmin
+            .from('products')
+            .select('id, updated_at')
+            .eq('catalog_id', catalog.id);
+
+        const lastSyncedAt = (projectedProducts ?? []).reduce<string | null>((latest, row) => {
+            const ts = row.updated_at as string | null;
+            if (!ts) return latest;
+            return !latest || ts > latest ? ts : latest;
+        }, null);
+
+        return reply.status(200).send({
+            success: true,
+            data: {
+                bound: true,
+                catalogId: catalog.id,
+                ownerOrganizationId: catalog.owner_organization_id,
+                projectedProductsCount: (projectedProducts ?? []).length,
+                lastSyncedAt,
+            },
         });
     });
 
@@ -193,6 +350,21 @@ export const adminPlansRoutes: FastifyPluginAsync = async (fastify) => {
                     return reply.status(400).send({ error: 'BadRequest', message: 'El campo "maxConcurrentCalls" debe ser un entero mayor o igual a 0.' });
                 }
                 updatePayload.max_concurrent_calls = body.maxConcurrentCalls;
+            }
+
+            if (body.annualRetainerDiscountPct !== undefined) {
+                if (
+                    typeof body.annualRetainerDiscountPct !== 'number' ||
+                    !Number.isFinite(body.annualRetainerDiscountPct) ||
+                    body.annualRetainerDiscountPct < 0 ||
+                    body.annualRetainerDiscountPct > 0.9
+                ) {
+                    return reply.status(400).send({
+                        error: 'BadRequest',
+                        message: 'El campo "annualRetainerDiscountPct" debe ser un número entre 0 y 0.9.',
+                    });
+                }
+                updatePayload.annual_retainer_discount_pct = body.annualRetainerDiscountPct;
             }
 
             for (const [bodyKey, column] of [

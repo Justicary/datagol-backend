@@ -21,7 +21,8 @@
     "reanudarAPI:dev": "./scripts/resume-service-dev.sh",
     "reanudarAPI:prod": "./scripts/resume-service.sh",
     "test:endpoints": "./scripts/test-endpoints.sh",
-    "probarEndpoints": "./scripts/test-endpoints.sh"
+    "probarEndpoints": "./scripts/test-endpoints.sh",
+    "vincularPlanes": "tsx scripts/bind-plans-catalog.ts"
   },
   "keywords": [],
   "author": "",

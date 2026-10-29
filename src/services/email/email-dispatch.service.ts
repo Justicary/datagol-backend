@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
 import { getAccountCredentials } from './email-account-vault.js';
-import { sendEmail } from './smtp-client.js';
+import { sendEmail, type SendEmailAttachment } from './smtp-client.js';
 
 /**
  * Orquesta el envío (o guardado de borrador) de correo saliente, con
@@ -18,6 +18,7 @@ export interface DispatchEmailPayload {
     bodyHtml?: string | null;
     contactId?: string | null;
     isDraft: boolean;
+    attachments?: SendEmailAttachment[];
 }
 
 export type DispatchOutcomeStatus = 'draft' | 'sent';
@@ -98,6 +99,7 @@ export async function dispatchOrSaveDraft(
                 subject: payload.subject,
                 text: payload.bodyText,
                 html: payload.bodyHtml ?? undefined,
+                attachments: payload.attachments,
             }
         );
         providerMessageId = result.providerMessageId;

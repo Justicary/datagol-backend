@@ -1,8 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { resolveToolOrganization } from '../../lib/tool-auth.js';
 import { withToolTimeout } from '../../lib/tool-timeout.js';
-import { isFeatureEnabled } from '../../services/entitlements.js';
-import { FEATURE_KEYS } from '../../types/feature-taxonomy.js';
+import { hasCatalogAccess } from '../../services/entitlements.js';
 import { stockStatusToSpeech } from '../../types/stock-status.js';
 import { toolParamsSchema } from '../../schemas/tool-routes.js';
 import { getProductImageSignedUrl } from '../../services/product-image-service.js';
@@ -27,6 +26,9 @@ interface ResolveVariantRow {
     stock_note: string | null;
     is_available: boolean | null;
     image_path: string | null;
+    item_type?: string | null;
+    is_inventoriable?: boolean | null;
+    billing_period?: string | null;
 }
 
 /**
@@ -63,9 +65,9 @@ export async function productsToolRoute(fastify: FastifyInstance) {
             return reply.status(400).send({ error: 'BadRequest', message: 'Cuerpo de la petición inválido: se requiere "skus" (arreglo no vacío)' });
         }
 
-        const featureEnabled = await isFeatureEnabled(auth.organizationId, FEATURE_KEYS.PRODUCT_RAG);
+        const featureEnabled = await hasCatalogAccess(auth.organizationId);
         if (!featureEnabled) {
-            request.log.info({ organizationId: auth.organizationId, msg: 'Tool de productos llamado sin la feature product_rag habilitada' });
+            request.log.info({ organizationId: auth.organizationId, msg: 'Tool de productos llamado sin acceso a catálogo habilitado' });
             return reply.status(200).send(productsToolResponseSchema.parse({ results: [], message: FEATURE_DISABLED_MESSAGE }));
         }
 
@@ -119,7 +121,13 @@ async function resolveOneSku(fastify: FastifyInstance, organizationId: string, s
         }
 
         const isAvailable = row.is_available ?? false;
+        const isInventoriable = row.is_inventoriable !== false && row.stock_status !== 'no_aplica';
         const imageUrl = row.image_path ? await signImageWithBudget(fastify, row.image_path) : null;
+        const availabilitySpeech = isInventoriable
+            ? isAvailable
+                ? stockStatusToSpeech(row.stock_status ?? 'sin_dato')
+                : stockStatusToSpeech('agotado')
+            : '';
 
         return {
             sku: row.sku,
@@ -128,7 +136,7 @@ async function resolveOneSku(fastify: FastifyInstance, organizationId: string, s
             price: row.price,
             currency: row.currency,
             priceIncludesTax: row.price_includes_tax,
-            availabilityText: isAvailable ? stockStatusToSpeech(row.stock_status ?? 'sin_dato') : stockStatusToSpeech('agotado'),
+            ...(availabilitySpeech ? { availabilityText: availabilitySpeech } : {}),
             imageUrl,
         };
     } catch (err) {
